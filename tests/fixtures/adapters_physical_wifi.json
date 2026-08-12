@@ -1,0 +1,38 @@
+[
+  {
+    "name": "Wi-Fi",
+    "description": "Intel(R) Wi-Fi 6 AX201 160MHz",
+    "interface_index": 12,
+    "interface_guid": "{11111111-1111-1111-1111-111111111111}",
+    "adapter_type": "wifi",
+    "is_physical": true,
+    "is_virtual": false,
+    "is_active": true,
+    "is_connected": true,
+    "is_preferred": true,
+    "current_mac_address": "AA:BB:CC:DD:EE:FF",
+    "permanent_mac_address": "AA:BB:CC:DD:EE:FF",
+    "ipv4_addresses": ["192.168.1.25"],
+    "ipv6_addresses": [],
+    "subnet_mask": "255.255.255.0",
+    "default_gateway": "192.168.1.1",
+    "dns_servers": ["192.168.1.1"],
+    "ssid": "Office-WiFi",
+    "link_speed_mbps": 866
+  },
+  {
+    "name": "Loopback Pseudo-Interface 1",
+    "description": "Software Loopback Interface 1",
+    "interface_index": 1,
+    "adapter_type": "loopback",
+    "is_physical": false,
+    "is_virtual": true,
+    "is_active": true,
+    "is_connected": true,
+    "is_preferred": false,
+    "current_mac_address": null,
+    "permanent_mac_address": null,
+    "ipv4_addresses": ["127.0.0.1"],
+    "ipv6_addresses": ["::1"]
+  }
+]

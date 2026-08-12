@@ -1,0 +1,31 @@
+[
+  {
+    "name": "Ethernet",
+    "description": "Intel(R) Ethernet Connection",
+    "interface_index": 8,
+    "adapter_type": "ethernet",
+    "is_physical": true,
+    "is_virtual": false,
+    "is_active": false,
+    "is_connected": false,
+    "is_preferred": false,
+    "current_mac_address": "11:22:33:44:55:66",
+    "permanent_mac_address": "11:22:33:44:55:66",
+    "ipv4_addresses": []
+  },
+  {
+    "name": "vEthernet (WSL)",
+    "description": "Hyper-V Virtual Ethernet Adapter",
+    "interface_index": 40,
+    "adapter_type": "virtual",
+    "is_physical": false,
+    "is_virtual": true,
+    "is_active": true,
+    "is_connected": true,
+    "is_preferred": true,
+    "current_mac_address": "00:15:5D:01:02:03",
+    "permanent_mac_address": "00:15:5D:01:02:03",
+    "ipv4_addresses": ["172.20.80.1"],
+    "default_gateway": "172.20.80.1"
+  }
+]

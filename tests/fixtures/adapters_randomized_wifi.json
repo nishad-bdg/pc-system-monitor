@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Wi-Fi",
+    "description": "Intel(R) Wi-Fi 6 AX201 160MHz",
+    "interface_index": 12,
+    "adapter_type": "wifi",
+    "is_physical": true,
+    "is_virtual": false,
+    "is_active": true,
+    "is_connected": true,
+    "is_preferred": true,
+    "current_mac_address": "02:11:22:33:44:55",
+    "permanent_mac_address": "AA:BB:CC:DD:EE:FF",
+    "ipv4_addresses": ["192.168.1.25"],
+    "ssid": "Cafe-Guest"
+  }
+]
