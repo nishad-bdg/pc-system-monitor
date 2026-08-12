@@ -20,22 +20,27 @@ def _powershell_executable() -> str:
 
 def run_powershell_json(script: str, timeout_seconds: float = 15.0) -> Any:
     exe = _powershell_executable()
-    completed = subprocess.run(
-        [
-            exe,
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            script,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=timeout_seconds,
-        shell=False,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            [
+                exe,
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            shell=False,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise PowerShellError(
+            f"PowerShell command timed out after {timeout_seconds}s"
+        ) from exc
     if completed.returncode != 0:
         raise PowerShellError(completed.stderr.strip() or "PowerShell failed")
     try:
