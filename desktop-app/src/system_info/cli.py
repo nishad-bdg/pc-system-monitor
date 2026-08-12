@@ -13,6 +13,7 @@ from .resources import collect_resources
 from .disk import collect_disk_info
 from .printers import collect_printers
 from .network import collect_network_usage
+from .uptime import collect_uptime
 from .device import get_or_create_device_id, resolve_pc_name
 from .update import check_for_update, maybe_auto_update
 # Load packaged/installer config before reading defaults.
@@ -66,6 +67,22 @@ def _fmt_bytes(num: int) -> str:
         if size < 1024 or unit == "TiB":
             return f"{size:.2f} {unit}"
         size /= 1024
+
+
+def _fmt_duration(seconds: float) -> str:
+    total = max(0, int(seconds))
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, secs = divmod(rem, 60)
+    parts: list[str] = []
+    if days:
+        parts.append(f"{days}d")
+    if hours or days:
+        parts.append(f"{hours}h")
+    if minutes or hours or days:
+        parts.append(f"{minutes}m")
+    parts.append(f"{secs}s")
+    return " ".join(parts)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -133,6 +150,7 @@ def run(args: argparse.Namespace) -> int:
 
     if show_sys:
         data["resources"] = collect_resources().to_dict()
+        data["uptime"] = collect_uptime().to_dict()
 
     if show_disk:
         data["disk"] = collect_disk_info().to_dict()
@@ -242,6 +260,16 @@ def _print(
         print(f"  total:      {_fmt_bytes(res['swap_total'])}")
         print(f"  used:       {_fmt_bytes(res['swap_used'])}")
         print(f"  usage:      {res['swap_percent']:.1f}%")
+        uptime = data.get("uptime") or {}
+        print("== Uptime ==")
+        print(f"  session:    {_fmt_duration(float(uptime.get('uptime_seconds') or 0))}")
+        print(f"  day tz:     {uptime.get('day_timezone') or 'UTC'}")
+        by_day = uptime.get("by_day") or {}
+        if by_day:
+            for day, seconds in sorted(by_day.items())[-14:]:
+                print(f"  {day}: {_fmt_duration(float(seconds))}")
+        else:
+            print("  by_day:     (none yet)")
 
     if show_disk:
         disk = data["disk"]
@@ -276,6 +304,8 @@ def _print(
         print(f"  received total: {_fmt_bytes(int(net.get('bytes_recv') or 0))}")
         print(f"  send rate:      {_fmt_bytes(int(net.get('send_rate_bps') or 0))}/s")
         print(f"  recv rate:      {_fmt_bytes(int(net.get('recv_rate_bps') or 0))}/s")
+        dl = net.get("download_mbps")
+        print(f"  download:       {dl:.2f} Mbps" if dl is not None else "  download:       unknown")
 
     if show_printers:
         printers = data.get("printers") or {}

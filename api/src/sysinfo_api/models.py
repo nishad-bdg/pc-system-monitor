@@ -14,6 +14,7 @@ class Report(BaseModel):
     disk: dict | None = None
     printers: dict | None = None
     network: dict | None = None
+    uptime: dict | None = None
     created_at: float | None = Field(default=None, description="Unix timestamp")
 
 

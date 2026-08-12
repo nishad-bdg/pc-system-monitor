@@ -118,6 +118,20 @@ def test_create_report_with_api_key(monkeypatch):
             "public_ip": "8.8.8.8",
             "pc_name": "MacBook-Pro",
             "device_id": "dev-1",
+            "uptime": {
+                "boot_time": 1.0,
+                "uptime_seconds": 3600.0,
+                "by_day": {"2026-08-12": 3600.0},
+                "day_timezone": "UTC",
+            },
+            "network": {
+                "bytes_sent": 100,
+                "bytes_recv": 200,
+                "send_rate_bps": 10,
+                "recv_rate_bps": 20,
+                "download_mbps": 50.5,
+                "upload_mbps": None,
+            },
         },
         headers={"Authorization": f"Bearer {key}"},
     )
@@ -125,6 +139,8 @@ def test_create_report_with_api_key(monkeypatch):
     assert "id" in resp.json()
     assert saved["pc_name"] == "MacBook-Pro"
     assert saved["device_id"] == "dev-1"
+    assert saved["uptime"]["by_day"]["2026-08-12"] == 3600.0
+    assert saved["network"]["download_mbps"] == 50.5
 
 
 def test_list_reports_passes_filters(monkeypatch):

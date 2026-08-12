@@ -12,12 +12,16 @@ import {
 } from "recharts";
 import {
   fmtBytes,
+  fmtMbps,
   fmtPercent,
   fmtRate,
   fmtTime,
+  fmtUptime,
+  formatUtcDayBd,
   MachineSummary,
   Report,
 } from "@/lib/api";
+import { LiveSpeedTest } from "./live-speed-test";
 
 export function MachineDetail({ machine }: { machine: MachineSummary }) {
   const host = machine.latest;
@@ -26,6 +30,11 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
     cpu: r.resources?.cpu_percent ?? 0,
     ram: r.resources?.ram_percent ?? 0,
     swap: r.resources?.swap_percent ?? 0,
+  }));
+  const bandwidthSeries = machine.reports.map((r) => ({
+    time: fmtTime(r.created_at),
+    upload: (r.network?.send_rate_bps ?? 0) / 1000,
+    download: (r.network?.recv_rate_bps ?? 0) / 1000,
   }));
 
   return (
@@ -57,6 +66,8 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         </div>
       )}
 
+      {host.uptime && <UptimeSection uptime={host.uptime} />}
+
       <div className="grid gap-4 lg:grid-cols-2">
         {host.location && (
           <InfoBlock title="Location">
@@ -83,7 +94,7 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
           <StorageSection disk={host.disk} />
         )}
 
-      {host.network && <NetworkSection network={host.network} />}
+      <NetworkSection network={host.network ?? null} series={bandwidthSeries} />
 
       {host.printers && <PrintersSection printers={host.printers} />}
 
@@ -155,41 +166,144 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
   );
 }
 
+function UptimeSection({
+  uptime,
+}: {
+  uptime: NonNullable<Report["uptime"]>;
+}) {
+  const days = Object.entries(uptime.by_day ?? {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(-14);
+  const maxSec = Math.max(1, ...days.map(([, s]) => s));
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-medium text-slate-700">Uptime</h2>
+        <p className="text-xs text-slate-500">
+          Days in UTC · labels also show Asia/Dhaka (BD)
+        </p>
+      </div>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <StatCard
+          label="Current session"
+          value={fmtUptime(uptime.uptime_seconds)}
+          sub={`Since boot · ${fmtTime(uptime.boot_time)}`}
+          accent
+        />
+        <StatCard
+          label="Days tracked"
+          value={String(Object.keys(uptime.by_day ?? {}).length)}
+          sub={`${uptime.day_timezone ?? "UTC"} buckets`}
+        />
+      </div>
+      {days.length > 0 && (
+        <ul className="mt-5 space-y-3">
+          {days.map(([day, seconds]) => {
+            const pct = Math.min(100, (seconds / maxSec) * 100);
+            return (
+              <li key={day}>
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="text-sm text-slate-800">{formatUtcDayBd(day)}</p>
+                  <p className="text-xs font-medium text-slate-600">
+                    {fmtUptime(seconds)}
+                  </p>
+                </div>
+                <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full rounded-full bg-blue-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function NetworkSection({
   network,
+  series,
 }: {
-  network: NonNullable<Report["network"]>;
+  network: Report["network"] | null;
+  series: { time: string; upload: number; download: number }[];
 }) {
+  const hasRates = series.some((p) => p.upload > 0 || p.download > 0);
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
       <h2 className="text-sm font-medium text-slate-700">Network bandwidth</h2>
       <p className="mt-1 text-xs text-slate-500">
-        Totals since boot · rates sampled at report time
+        Totals since boot · NIC rates at report time · internet probe approx
       </p>
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard
           label="Sent total"
-          value={fmtBytes(network.bytes_sent)}
+          value={fmtBytes(network?.bytes_sent)}
           sub="Since boot"
         />
         <StatCard
           label="Received total"
-          value={fmtBytes(network.bytes_recv)}
+          value={fmtBytes(network?.bytes_recv)}
           sub="Since boot"
         />
         <StatCard
           label="Upload rate"
-          value={fmtRate(network.send_rate_bps)}
+          value={fmtRate(network?.send_rate_bps)}
           sub="Current sample"
           accent
         />
         <StatCard
           label="Download rate"
-          value={fmtRate(network.recv_rate_bps)}
+          value={fmtRate(network?.recv_rate_bps)}
           sub="Current sample"
           accent
         />
+        <StatCard
+          label="Internet speed"
+          value={fmtMbps(network?.download_mbps)}
+          sub="Approx download probe"
+          accent
+        />
       </div>
+
+      <LiveSpeedTest />
+
+      {hasRates && (
+        <div className="mt-6">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+            Bandwidth usage over time
+          </h3>
+          <ResponsiveContainer width="100%" height={260}>
+            <LineChart data={series}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey="time" fontSize={11} stroke="#94a3b8" />
+              <YAxis fontSize={11} stroke="#94a3b8" unit=" KB/s" />
+              <Tooltip />
+              <Legend />
+              <Line
+                type="monotone"
+                dataKey="upload"
+                stroke="#2563eb"
+                name="Upload KB/s"
+                strokeWidth={2}
+                dot={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="download"
+                stroke="#0f766e"
+                name="Download KB/s"
+                strokeWidth={2}
+                dot={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   );
 }

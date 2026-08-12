@@ -40,6 +40,12 @@ export interface Report {
     swap_used?: number;
     swap_percent?: number;
   } | null;
+  uptime?: {
+    boot_time?: number;
+    uptime_seconds?: number;
+    by_day?: Record<string, number>;
+    day_timezone?: string;
+  } | null;
   disk?: {
     devices?: {
       device: string;
@@ -69,6 +75,8 @@ export interface Report {
     bytes_recv?: number;
     send_rate_bps?: number;
     recv_rate_bps?: number;
+    download_mbps?: number | null;
+    upload_mbps?: number | null;
   } | null;
   created_at?: number;
 }
@@ -366,4 +374,38 @@ export function fmtRelative(ts?: number): string {
 export function fmtRate(bps?: number): string {
   if (bps === undefined || bps === null) return "—";
   return `${fmtBytes(bps)}/s`;
+}
+
+export function fmtMbps(mbps?: number | null): string {
+  if (mbps === undefined || mbps === null) return "—";
+  return `${mbps.toFixed(1)} Mbps`;
+}
+
+export function fmtUptime(seconds?: number | null): string {
+  if (seconds === undefined || seconds === null) return "—";
+  const total = Math.max(0, Math.floor(seconds));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+/** Label a UTC YYYY-MM-DD day for BD operators (Asia/Dhaka). */
+export function formatUtcDayBd(utcDay: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(utcDay);
+  if (!match) return utcDay;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  const d = Number(match[3]);
+  const noonUtc = Date.UTC(y, m - 1, d, 12, 0, 0);
+  const bd = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Dhaka",
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(noonUtc));
+  return `${utcDay} UTC · ${bd} BD`;
 }

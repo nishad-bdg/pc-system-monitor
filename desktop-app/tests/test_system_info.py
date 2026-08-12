@@ -207,11 +207,93 @@ def test_collect_network_usage(monkeypatch):
     values = iter([Counters(1000, 2000), Counters(1500, 2600)])
     monkeypatch.setattr(network.psutil, "net_io_counters", lambda: next(values))
     monkeypatch.setattr(network.time, "sleep", lambda s: None)
+    monkeypatch.setattr(network, "measure_download_mbps", lambda: 42.5)
     usage = network.collect_network_usage(interval=0.5)
     assert usage.bytes_sent == 1500
     assert usage.bytes_recv == 2600
     assert usage.send_rate_bps == 1000.0  # 500 bytes / 0.5s
     assert usage.recv_rate_bps == 1200.0
+    assert usage.download_mbps == 42.5
+    assert usage.upload_mbps is None
+    d = usage.to_dict()
+    assert d["download_mbps"] == 42.5
+    assert d["upload_mbps"] is None
+
+
+def test_measure_download_mbps(monkeypatch):
+    from system_info import network
+
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, chunk_size=65536):
+            yield b"x" * 1_000_000
+
+    times = iter([100.0, 100.5])  # 0.5s for 1_000_000 bytes → 16 Mbps
+    monkeypatch.setattr(network.time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(
+        network.requests,
+        "get",
+        lambda *a, **k: FakeResp(),
+    )
+    mbps = network.measure_download_mbps()
+    assert mbps is not None
+    assert abs(mbps - 16.0) < 0.01
+
+
+def test_split_seconds_by_utc_day():
+    from system_info.uptime import split_seconds_by_utc_day
+
+    # 2026-08-11 23:00 UTC → 2026-08-12 01:00 UTC = 2 hours
+    start = 1786492800.0  # will compute from known midnights
+    # Use datetime-derived stamps for clarity
+    from datetime import datetime, timezone
+
+    start = datetime(2026, 8, 11, 23, 0, tzinfo=timezone.utc).timestamp()
+    end = datetime(2026, 8, 12, 1, 0, tzinfo=timezone.utc).timestamp()
+    buckets = split_seconds_by_utc_day(start, end)
+    assert buckets["2026-08-11"] == 3600.0
+    assert buckets["2026-08-12"] == 3600.0
+
+
+def test_uptime_reboot_skips_offline(tmp_path):
+    from system_info.uptime import collect_uptime, save_state
+    from datetime import datetime, timezone
+
+    path = tmp_path / "uptime.json"
+    t0 = datetime(2026, 8, 12, 10, 0, tzinfo=timezone.utc).timestamp()
+    boot1 = t0 - 3600
+    # First session ends at t0
+    save_state(path, boot_time=boot1, seen_at=t0, by_day={"2026-08-12": 3600.0})
+
+    # Offline 2h, reboot at t0+7200, run at t0+7800 (1h after boot)
+    boot2 = t0 + 7200
+    now = boot2 + 3600
+    info = collect_uptime(now=now, boot_time=boot2, state_path=path)
+    # Should add only 3600 for new session, not the offline gap
+    assert info.by_day["2026-08-12"] == 7200.0
+    assert info.uptime_seconds == 3600.0
+    assert info.day_timezone == "UTC"
+
+
+def test_uptime_same_boot_credits_gap(tmp_path):
+    from system_info.uptime import collect_uptime, save_state
+    from datetime import datetime, timezone
+
+    path = tmp_path / "uptime.json"
+    boot = datetime(2026, 8, 12, 8, 0, tzinfo=timezone.utc).timestamp()
+    seen = datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc).timestamp()
+    save_state(path, boot_time=boot, seen_at=seen, by_day={"2026-08-12": 3600.0})
+    now = datetime(2026, 8, 12, 10, 0, tzinfo=timezone.utc).timestamp()
+    info = collect_uptime(now=now, boot_time=boot, state_path=path)
+    assert info.by_day["2026-08-12"] == 7200.0
 
 
 def test_collect_printers_macos(monkeypatch):
@@ -295,6 +377,16 @@ def test_run_show_sys_only(monkeypatch):
         cpu_count=8, cpu_count_physical=4, cpu_percent=10.0, cpu_freq_mhz=1000.0,
         ram_total=1024, ram_used=512, ram_available=512, ram_free=256, ram_percent=50.0,
         swap_total=2048, swap_used=0, swap_percent=0.0))
+    monkeypatch.setattr(
+        cli,
+        "collect_uptime",
+        lambda: type("U", (), {"to_dict": lambda self: {
+            "boot_time": 1.0,
+            "uptime_seconds": 120.0,
+            "by_day": {"2026-08-12": 120.0},
+            "day_timezone": "UTC",
+        }})(),
+    )
     monkeypatch.setattr(cli, "resolve_pc_name", lambda explicit=None: "MacBook-Pro")
     monkeypatch.setattr(cli, "get_or_create_device_id", lambda pc_name=None: "device-1")
     monkeypatch.setattr(cli, "save_report", lambda data, url, api_key="": None)
@@ -302,6 +394,7 @@ def test_run_show_sys_only(monkeypatch):
     args = cli.build_parser().parse_args(["--sys", "--json"])
     data = _capture_json(monkeypatch, args)
     assert "resources" in data
+    assert data["uptime"]["uptime_seconds"] == 120.0
     assert "os" not in data
     assert "private_ip" not in data
     assert data["location"] is None

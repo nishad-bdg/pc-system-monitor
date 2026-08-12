@@ -76,6 +76,9 @@ Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`.
 | `private_ip`, `public_ip`, `mac_address`, `mac_addresses` | `ip.py` | |
 | `location` | `geo.py` | ip-api.com |
 | `resources` | `resources.py` | CPU/RAM/swap |
+| `uptime` | `uptime.py` | Session + UTC day-wise on-seconds (`by_day`) |
+| `network` | `network.py` | NIC totals/rates + approx `download_mbps` |
+
 | `disk` | `disk.py` | Physical devices + partitions (mac + Win) |
 | `printers` | `printers.py` | See below |
 | `network` | `network.py` | Bandwidth totals + rates |
@@ -92,7 +95,13 @@ Each printer: `{ name, port, ip, print_count }`.
 
 ### Network bandwidth
 
-`network: { bytes_sent, bytes_recv, send_rate_bps, recv_rate_bps }` — totals since boot + ~0.5s sample rates (`psutil`).
+`network: { bytes_sent, bytes_recv, send_rate_bps, recv_rate_bps, download_mbps, upload_mbps }` —
+totals since boot + ~0.5s NIC sample rates (`psutil`) + optional HTTPS download probe Mbps.
+
+### Uptime (day-wise)
+
+`uptime: { boot_time, uptime_seconds, by_day: { "YYYY-MM-DD": seconds }, day_timezone: "UTC" }` —
+agent accumulates on-seconds per UTC day in `uptime.json`; admin labels days in Asia/Dhaka (BD).
 
 ---
 
@@ -100,7 +109,7 @@ Each printer: `{ name, port, ip, print_count }`.
 
 ### Report model extras
 
-Optional on `Report`: `pc_name`, `device_id`, `disk`, `printers`, `network` (plus original OS/IP/geo/resources).
+Optional on `Report`: `pc_name`, `device_id`, `disk`, `printers`, `network`, `uptime` (plus original OS/IP/geo/resources).
 
 ### `GET /reports` query params
 
@@ -141,7 +150,7 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 ### Fleet (`/dashboard`)
 
 - Sidebar: filter by name, select PC, Refresh, link to Reports.
-- Detail: CPU/RAM/swap tiles, location/machine, **Storage** (device count + partition bars: blue &lt;50%, amber 50–80%, red &gt;80%), **Network bandwidth**, **Printers** (USB/Network/Other with IP + print count), charts, report history.
+- Detail: CPU/RAM/swap tiles, **Uptime** (session + UTC day bars with BD labels), location/machine, **Storage** (device count + partition bars: blue &lt;50%, amber 50–80%, red &gt;80%), **Network bandwidth** (incl. internet Mbps + usage chart), **Printers** (USB/Network/Other with IP + print count), charts, report history.
 - Shared detail UI: `src/components/dashboard/machine-detail.tsx`.
 
 ### Reports (`/reports`)
@@ -199,4 +208,6 @@ After pulling API changes: restart `uv run sysinfo-api`, then run desktop with a
 - `docs/superpowers/specs/2026-08-12-multi-pc-monitoring-design.md`
 - `docs/superpowers/specs/2026-08-12-printers-design.md`
 - `docs/superpowers/specs/2026-08-12-network-printers-metrics-design.md`
+- `docs/superpowers/specs/2026-08-12-uptime-bandwidth-design.md`
 - `docs/superpowers/plans/2026-08-12-multi-pc-monitoring.md`
+- `docs/superpowers/plans/2026-08-12-uptime-bandwidth.md`
