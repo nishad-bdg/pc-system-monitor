@@ -92,8 +92,11 @@ def _map_powershell_adapter(
     name = raw.get("Name") or ""
     description = raw.get("InterfaceDescription")
     adapter_type = infer_adapter_type(name, description, raw.get("MediaType"))
-    virtual = is_virtual_adapter(name, description, adapter_type)
     loopback = is_loopback(name, description)
+    hardware_interface = raw.get("HardwareInterface")
+    virtual = is_virtual_adapter(name, description, adapter_type) or (
+        hardware_interface is False and not loopback
+    )
     connected = (raw.get("Status") or "").lower() == "up"
     interface_index = raw.get("ifIndex")
 
@@ -105,7 +108,9 @@ def _map_powershell_adapter(
             str(raw["InterfaceGuid"]) if raw.get("InterfaceGuid") else None
         ),
         adapter_type=adapter_type,
-        is_physical=not virtual and not loopback,
+        is_physical=(
+            hardware_interface is not False and not virtual and not loopback
+        ),
         is_virtual=virtual,
         is_active=connected,
         is_connected=connected,
@@ -160,6 +165,10 @@ def collect_network() -> dict[str, Any]:
 
     try:
         preferred_index = powershell.fetch_default_route_interface_index()
+    except Exception:
+        preferred_index = None
+
+    try:
         raw_adapters = powershell.fetch_net_adapters()
     except Exception:
         return build_network_payload([])

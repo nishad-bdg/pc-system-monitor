@@ -4,6 +4,7 @@ from pathlib import Path
 from desktop_monitoring.network.collector import (
     _map_powershell_adapter,
     build_network_payload,
+    collect_network,
 )
 from desktop_monitoring.network.mac import is_randomized_or_locally_administered
 from desktop_monitoring.network.models import Adapter
@@ -122,3 +123,56 @@ def test_missing_permanent_mac_is_not_fabricated_from_current_mac():
 
     assert adapter.current_mac_address == "AA:BB:CC:DD:EE:FF"
     assert adapter.permanent_mac_address is None
+
+
+def test_map_powershell_adapter_treats_non_hardware_interface_as_virtual():
+    adapter = _map_powershell_adapter(
+        {
+            "Name": "WAN Miniport (IKEv2)",
+            "InterfaceDescription": "WAN Miniport (IKEv2)",
+            "ifIndex": 31,
+            "Status": "Up",
+            "HardwareInterface": False,
+            "MacAddress": "02-11-22-33-44-55",
+        },
+        preferred_index=31,
+    )
+
+    assert adapter.is_virtual is True
+    assert adapter.is_physical is False
+
+
+def test_collect_network_keeps_adapters_when_route_lookup_fails(monkeypatch):
+    from desktop_monitoring.network import powershell
+
+    def fail_route_lookup():
+        raise powershell.PowerShellError("route lookup failed")
+
+    monkeypatch.setattr(
+        powershell,
+        "fetch_default_route_interface_index",
+        fail_route_lookup,
+    )
+    monkeypatch.setattr(
+        powershell,
+        "fetch_net_adapters",
+        lambda: [
+            {
+                "Name": "Ethernet",
+                "InterfaceDescription": "Intel Ethernet",
+                "ifIndex": 7,
+                "Status": "Up",
+                "HardwareInterface": True,
+                "MacAddress": "AA-BB-CC-DD-EE-FF",
+                "PermanentAddress": "AA-BB-CC-DD-EE-FF",
+            }
+        ],
+    )
+    monkeypatch.setattr(powershell, "fetch_net_ip_configuration", lambda: [])
+
+    network = collect_network()
+
+    assert len(network["all_adapters"]) == 1
+    assert network["all_adapters"][0]["name"] == "Ethernet"
+    assert network["all_adapters"][0]["is_preferred"] is False
+    assert network["primary_mac_address"] == "AA:BB:CC:DD:EE:FF"
