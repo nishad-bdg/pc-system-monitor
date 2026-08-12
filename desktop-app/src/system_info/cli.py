@@ -9,10 +9,11 @@ from .ip import get_private_ip, get_public_ip, get_mac_address, get_mac_addresse
 from .os_info import collect_os_info
 from .resources import collect_resources
 from .disk import collect_disk_info
-from .device import get_device_name, get_or_create_device_id
+from .device import get_or_create_device_id, resolve_pc_name
 
 DEFAULT_API_URL = os.getenv("SYSTEM_INFO_API_URL", "http://127.0.0.1:8000")
 DEFAULT_API_KEY = os.getenv("SYSTEM_INFO_API_KEY", "")
+DEFAULT_PC_NAME = os.getenv("SYSTEM_INFO_PC_NAME", "")
 SAVE_TIMEOUT = 5
 
 
@@ -30,6 +31,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-save", action="store_true", help="Do not save report to the API")
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="API base URL to save reports to")
     parser.add_argument("--api-key", default=DEFAULT_API_KEY, help="API key for authenticated save")
+    parser.add_argument(
+        "--pc-name",
+        default=DEFAULT_PC_NAME,
+        help="Custom PC name (Windows only; macOS always uses hostname). "
+        "Falls back to hostname when empty. Env: SYSTEM_INFO_PC_NAME",
+    )
     return parser
 
 
@@ -49,6 +56,11 @@ def run(args: argparse.Namespace) -> int:
     show_geo = not (args.os or args.ip or args.sys or args.disk) or args.geo
     show_sys = not (args.os or args.ip or args.geo or args.disk) or args.sys
     show_disk = not (args.os or args.ip or args.geo or args.sys) or args.disk
+
+    pc_name = resolve_pc_name(args.pc_name)
+    device_id = get_or_create_device_id(pc_name)
+    data["pc_name"] = pc_name
+    data["device_id"] = device_id
 
     if show_os:
         data["os"] = collect_os_info().to_dict()
@@ -103,6 +115,10 @@ def _print(data: dict, show_os: bool, show_ip: bool, show_geo: bool, show_sys: b
     if args.json:
         print(json.dumps(data, indent=2, sort_keys=True))
         return
+
+    print("== Device ==")
+    print(f"  pc_name:   {data.get('pc_name') or 'unknown'}")
+    print(f"  device_id: {data.get('device_id') or 'unknown'}")
 
     if show_os:
         print("== OS Info ==")

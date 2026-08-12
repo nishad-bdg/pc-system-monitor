@@ -38,7 +38,12 @@ cd desktop-app
 uv sync
 uv run system-info --api-key sk-...   # collect + post report to API
 uv run system-info --no-save          # just print, don't save
+# Windows custom name (falls back to hostname if omitted):
+uv run system-info --pc-name Office-PC-3 --api-key sk-...
+# macOS always uses the OS hostname for pc_name
 ```
+
+Reports include `pc_name` + stable `device_id` so the admin dashboard can list and filter machines.
 
 ### 3. Dashboard
 
@@ -49,8 +54,8 @@ pnpm install
 pnpm dev                              # serves on http://localhost:3000
 ```
 
-Login with the admin user, then the dashboard plots CPU / RAM / swap usage and
-machines over time, plus a report table.
+Login with the admin user, then the dashboard shows a filterable PC sidebar
+(slate + blue) with per-machine CPU / RAM / swap charts and report history.
 
 ## Auth model
 

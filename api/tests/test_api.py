@@ -19,7 +19,7 @@ def _patch_db(monkeypatch, user=None):
 
     monkeypatch.setattr(db, "find_user_by_username", fake_find_user)
     monkeypatch.setattr(db, "get_user_by_id", lambda uid: dict(user) if uid == user["_id"] else None)
-    monkeypatch.setattr(db, "list_reports", lambda limit=20: [])
+    monkeypatch.setattr(db, "list_reports", lambda limit=20, device_id=None, pc_name=None: [])
     monkeypatch.setattr(db, "get_report", lambda rid: None)
     monkeypatch.setattr(db, "list_users", lambda: [dict(user)])
     monkeypatch.setattr(db, "list_api_keys", lambda: [])
@@ -100,13 +100,55 @@ def test_create_report_with_api_key(monkeypatch):
     _patch_db(monkeypatch)
     key = security.generate_api_key()
     monkeypatch.setattr(db, "find_api_key_by_hash", lambda h: {"_id": "x", "prefix": key[:20], "active": True})
+    saved = {}
+
+    def capture(doc):
+        saved.update(doc)
+        return "64b00000000000000000000a"
+
+    monkeypatch.setattr(db, "save_report", capture)
     resp = client.post(
         "/reports",
-        json={"os": {"system": "Darwin"}, "public_ip": "8.8.8.8"},
+        json={
+            "os": {"system": "Darwin"},
+            "public_ip": "8.8.8.8",
+            "pc_name": "MacBook-Pro",
+            "device_id": "dev-1",
+        },
         headers={"Authorization": f"Bearer {key}"},
     )
     assert resp.status_code == 201
     assert "id" in resp.json()
+    assert saved["pc_name"] == "MacBook-Pro"
+    assert saved["device_id"] == "dev-1"
+
+
+def test_list_reports_passes_filters(monkeypatch):
+    _patch_db(monkeypatch)
+    seen = {}
+
+    def fake_list(limit=20, device_id=None, pc_name=None):
+        seen["limit"] = limit
+        seen["device_id"] = device_id
+        seen["pc_name"] = pc_name
+        return [
+            {
+                "_id": "1",
+                "pc_name": "Office-PC-3",
+                "device_id": "dev-2",
+                "created_at": 1.0,
+            }
+        ]
+
+    monkeypatch.setattr(db, "list_reports", fake_list)
+    resp = client.get(
+        "/reports?device_id=dev-2&pc_name=Office&limit=50",
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 200
+    assert seen == {"limit": 50, "device_id": "dev-2", "pc_name": "Office"}
+    assert resp.json()["total"] == 1
+    assert resp.json()["reports"][0]["pc_name"] == "Office-PC-3"
 
 
 def test_create_report_invalid_api_key(monkeypatch):

@@ -39,10 +39,19 @@ def save_report(document: dict) -> ObjectId | None:
         return None
 
 
-def list_reports(limit: int = 20) -> list[dict]:
+def list_reports(
+    limit: int = 20,
+    device_id: str | None = None,
+    pc_name: str | None = None,
+) -> list[dict]:
     records: list[dict] = []
+    query: dict = {}
+    if device_id:
+        query["device_id"] = device_id
+    if pc_name:
+        query["pc_name"] = {"$regex": pc_name, "$options": "i"}
     try:
-        cursor = _reports().find().sort("created_at", ASCENDING).limit(limit)
+        cursor = _reports().find(query).sort("created_at", ASCENDING).limit(limit)
         for doc in cursor:
             doc["_id"] = str(doc["_id"])
             records.append(doc)

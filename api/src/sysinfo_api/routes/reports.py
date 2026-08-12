@@ -22,8 +22,17 @@ def create_report(report: Report, api_key: ApiKey) -> JSONResponse:
 
 
 @router.get("")
-def get_reports(limit: int = 20, user: CurrentUser = None) -> dict:
-    records = db.list_reports(min(max(limit, 1), 500))
+def get_reports(
+    limit: int = 20,
+    device_id: str | None = None,
+    pc_name: str | None = None,
+    user: CurrentUser = None,
+) -> dict:
+    records = db.list_reports(
+        min(max(limit, 1), 500),
+        device_id=device_id or None,
+        pc_name=pc_name or None,
+    )
     return {"total": len(records), "reports": records}
 
 

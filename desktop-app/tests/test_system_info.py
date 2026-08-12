@@ -147,6 +147,27 @@ def test_fmt_bytes():
     assert cli._fmt_bytes(1536) == "1.50 KiB"
 
 
+def test_resolve_pc_name_macos_ignores_explicit(monkeypatch):
+    from system_info import device
+
+    monkeypatch.setattr(device.os, "name", "posix")
+    monkeypatch.setattr(device, "get_device_name", lambda: "MacBook-Pro")
+    assert device.resolve_pc_name("Office-PC-3") == "MacBook-Pro"
+    assert device.resolve_pc_name("") == "MacBook-Pro"
+    assert device.resolve_pc_name(None) == "MacBook-Pro"
+
+
+def test_resolve_pc_name_windows_prefers_explicit(monkeypatch):
+    from system_info import device
+
+    monkeypatch.setattr(device.os, "name", "nt")
+    monkeypatch.setattr(device, "get_device_name", lambda: "DESKTOP-ABC")
+    assert device.resolve_pc_name("Office-PC-3") == "Office-PC-3"
+    assert device.resolve_pc_name("  Lab-Win-01  ") == "Lab-Win-01"
+    assert device.resolve_pc_name("") == "DESKTOP-ABC"
+    assert device.resolve_pc_name(None) == "DESKTOP-ABC"
+
+
 def test_run_show_sys_only(monkeypatch):
     monkeypatch.setattr(cli, "geo_locate", lambda ip: None)
     monkeypatch.setattr(cli, "collect_os_info", lambda: OSInfo(
@@ -159,6 +180,8 @@ def test_run_show_sys_only(monkeypatch):
         cpu_count=8, cpu_count_physical=4, cpu_percent=10.0, cpu_freq_mhz=1000.0,
         ram_total=1024, ram_used=512, ram_available=512, ram_free=256, ram_percent=50.0,
         swap_total=2048, swap_used=0, swap_percent=0.0))
+    monkeypatch.setattr(cli, "resolve_pc_name", lambda explicit=None: "MacBook-Pro")
+    monkeypatch.setattr(cli, "get_or_create_device_id", lambda pc_name=None: "device-1")
     monkeypatch.setattr(cli, "save_report", lambda data, url, api_key="": None)
 
     args = cli.build_parser().parse_args(["--sys", "--json"])
@@ -167,6 +190,8 @@ def test_run_show_sys_only(monkeypatch):
     assert "os" not in data
     assert "private_ip" not in data
     assert data["location"] is None
+    assert data["pc_name"] == "MacBook-Pro"
+    assert data["device_id"] == "device-1"
 
 
 def _capture_json(monkeypatch, args):
