@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import {
   LineChart,
   Line,
@@ -12,7 +13,6 @@ import {
 } from "recharts";
 import {
   fmtBytes,
-  fmtMbps,
   fmtPercent,
   fmtRate,
   fmtTime,
@@ -134,33 +134,133 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         </ResponsiveContainer>
       </ChartCard>
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-200/60">
-        <div className="border-b border-slate-100 px-4 py-3">
+      <ReportHistorySection reports={machine.reports} />
+    </div>
+  );
+}
+
+const HISTORY_PAGE_SIZE = 10;
+
+function reportMatchesQuery(r: Report, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const haystack = [
+    fmtTime(r.created_at),
+    r.pc_name,
+    r.os?.hostname,
+    r.private_ip,
+    r.public_ip,
+    r.location?.country,
+    r.location?.city,
+    r.location?.region,
+    fmtPercent(r.resources?.cpu_percent),
+    fmtPercent(r.resources?.ram_percent),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(q);
+}
+
+function ReportHistorySection({ reports }: { reports: Report[] }) {
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+
+  const newestFirst = useMemo(
+    () => reports.slice().reverse(),
+    [reports],
+  );
+
+  const filtered = useMemo(
+    () => newestFirst.filter((r) => reportMatchesQuery(r, query)),
+    [newestFirst, query],
+  );
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / HISTORY_PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const start = (safePage - 1) * HISTORY_PAGE_SIZE;
+  const pageRows = filtered.slice(start, start + HISTORY_PAGE_SIZE);
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-200/60">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+        <div>
           <h3 className="text-sm font-medium text-slate-700">Report history</h3>
+          <p className="mt-0.5 text-xs text-slate-500">
+            {filtered.length} of {reports.length} reports
+          </p>
         </div>
-        <table className="w-full text-left text-sm">
-          <thead className="border-b bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+        <label className="relative block min-w-[12rem] flex-1 sm:max-w-xs">
+          <span className="sr-only">Search reports</span>
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Search time, PC, IP, country…"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          />
+        </label>
+      </div>
+      <table className="w-full text-left text-sm">
+        <thead className="border-b bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <tr>
+            <th className="px-4 py-3">Time</th>
+            <th className="px-4 py-3">PC</th>
+            <th className="px-4 py-3">IP</th>
+            <th className="px-4 py-3">Country</th>
+            <th className="px-4 py-3">CPU</th>
+            <th className="px-4 py-3">RAM</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {pageRows.length === 0 ? (
             <tr>
-              <th className="px-4 py-3">Time</th>
-              <th className="px-4 py-3">PC</th>
-              <th className="px-4 py-3">IP</th>
-              <th className="px-4 py-3">Country</th>
-              <th className="px-4 py-3">CPU</th>
-              <th className="px-4 py-3">RAM</th>
+              <td
+                colSpan={6}
+                className="px-4 py-8 text-center text-sm text-slate-500"
+              >
+                {query.trim()
+                  ? "No reports match your search."
+                  : "No reports yet."}
+              </td>
             </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {machine.reports
-              .slice()
-              .reverse()
-              .map((r) => (
-                <ReportRow
-                  key={r._id ?? `${r.created_at}-${r.public_ip}`}
-                  r={r}
-                />
-              ))}
-          </tbody>
-        </table>
+          ) : (
+            pageRows.map((r) => (
+              <ReportRow
+                key={r._id ?? `${r.created_at}-${r.public_ip}`}
+                r={r}
+              />
+            ))
+          )}
+        </tbody>
+      </table>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3">
+        <p className="text-xs text-slate-500">
+          {filtered.length === 0
+            ? "Page 0 of 0"
+            : `Showing ${start + 1}–${Math.min(start + HISTORY_PAGE_SIZE, filtered.length)} · Page ${safePage} of ${totalPages}`}
+        </p>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={safePage <= 1}
+            onClick={() => setPage(Math.max(1, safePage - 1))}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+          >
+            Previous
+          </button>
+          <button
+            type="button"
+            disabled={safePage >= totalPages}
+            onClick={() => setPage(Math.min(totalPages, safePage + 1))}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+          >
+            Next
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -237,9 +337,9 @@ function NetworkSection({
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
       <h2 className="text-sm font-medium text-slate-700">Network bandwidth</h2>
       <p className="mt-1 text-xs text-slate-500">
-        Totals since boot · NIC rates at report time · internet probe approx
+        Totals since boot · NIC rates at report time · use Live speed test for Mbps
       </p>
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="Sent total"
           value={fmtBytes(network?.bytes_sent)}
@@ -260,12 +360,6 @@ function NetworkSection({
           label="Download rate"
           value={fmtRate(network?.recv_rate_bps)}
           sub="Current sample"
-          accent
-        />
-        <StatCard
-          label="Internet speed"
-          value={fmtMbps(network?.download_mbps)}
-          sub="Approx download probe"
           accent
         />
       </div>

@@ -207,17 +207,22 @@ def test_collect_network_usage(monkeypatch):
     values = iter([Counters(1000, 2000), Counters(1500, 2600)])
     monkeypatch.setattr(network.psutil, "net_io_counters", lambda: next(values))
     monkeypatch.setattr(network.time, "sleep", lambda s: None)
-    monkeypatch.setattr(network, "measure_download_mbps", lambda: 42.5)
     usage = network.collect_network_usage(interval=0.5)
     assert usage.bytes_sent == 1500
     assert usage.bytes_recv == 2600
     assert usage.send_rate_bps == 1000.0  # 500 bytes / 0.5s
     assert usage.recv_rate_bps == 1200.0
-    assert usage.download_mbps == 42.5
+    assert usage.download_mbps is None
     assert usage.upload_mbps is None
     d = usage.to_dict()
-    assert d["download_mbps"] == 42.5
+    assert d["download_mbps"] is None
     assert d["upload_mbps"] is None
+
+    values2 = iter([Counters(1000, 2000), Counters(1500, 2600)])
+    monkeypatch.setattr(network.psutil, "net_io_counters", lambda: next(values2))
+    monkeypatch.setattr(network, "measure_download_mbps", lambda: 42.5)
+    probed = network.collect_network_usage(interval=0.5, probe_download=True)
+    assert probed.download_mbps == 42.5
 
 
 def test_measure_download_mbps(monkeypatch):

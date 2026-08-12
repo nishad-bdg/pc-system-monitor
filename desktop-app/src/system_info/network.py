@@ -58,9 +58,13 @@ def measure_download_mbps(
 def collect_network_usage(
     interval: float = _RATE_INTERVAL,
     *,
-    probe_download: bool = True,
+    probe_download: bool = False,
 ) -> NetworkUsage:
-    """Totals since boot, short-interval NIC rates, optional download Mbps."""
+    """Totals since boot + short-interval NIC rates.
+
+    Download Mbps is off by default (live test is admin button-only).
+    Pass probe_download=True for an optional one-shot probe.
+    """
     first = psutil.net_io_counters()
     time.sleep(max(0.1, interval))
     second = psutil.net_io_counters()

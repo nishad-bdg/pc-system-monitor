@@ -95,8 +95,8 @@ Each printer: `{ name, port, ip, print_count }`.
 
 ### Network bandwidth
 
-`network: { bytes_sent, bytes_recv, send_rate_bps, recv_rate_bps, download_mbps, upload_mbps }` —
-totals since boot + ~0.5s NIC sample rates (`psutil`) + optional HTTPS download probe Mbps.
+`network: { bytes_sent, bytes_recv, send_rate_bps, recv_rate_bps, download_mbps?, upload_mbps? }` —
+totals since boot + ~0.5s NIC sample rates (`psutil`). Internet Mbps is **not** probed on each report; use the admin **Live speed test** button.
 
 ### Uptime (day-wise)
 
