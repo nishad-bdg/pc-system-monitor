@@ -17,7 +17,7 @@ _VIRTUAL_TOKENS = (
     "pseudo",
 )
 
-_LOOPBACK_TOKENS = ("loopback", "lo")
+_LOOPBACK_TOKENS = ("loopback",)
 
 
 def _haystack(name: str, description: str | None) -> str:

@@ -25,3 +25,10 @@ def test_physical_wifi_and_ethernet():
     assert not is_virtual_adapter("Ethernet", "Intel(R) Ethernet Connection")
     assert infer_adapter_type("Wi-Fi", "Intel Wi-Fi", "802.11") == "wifi"
     assert infer_adapter_type("Ethernet", "Intel Ethernet", "802.3") == "ethernet"
+
+
+def test_lo_substring_not_treated_as_loopback():
+    assert not is_loopback("Local Area Connection", None)
+    assert not is_virtual_adapter("Local Area Connection", "Intel Ethernet")
+    assert is_loopback("lo", None)
+    assert is_loopback("Loopback Pseudo-Interface 1", "Software Loopback")
