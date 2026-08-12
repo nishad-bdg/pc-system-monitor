@@ -138,6 +138,50 @@ export function machineName(r: Report): string {
   return r.pc_name || r.os?.hostname || r.public_ip || "Unknown PC";
 }
 
+/** Highest physical-device disk usage % on a report (0 if unknown). */
+export function maxDiskPercent(r: Report): number {
+  const devices = r.disk?.devices ?? [];
+  if (!devices.length) return 0;
+  return Math.max(0, ...devices.map((d) => d.percent ?? 0));
+}
+
+/** Total bytes transferred since boot (sent + recv). */
+export function networkTotalBytes(r: Report): number {
+  return (r.network?.bytes_sent ?? 0) + (r.network?.bytes_recv ?? 0);
+}
+
+export type MachineSortKey =
+  | "last_seen"
+  | "cpu"
+  | "ram"
+  | "disk"
+  | "network";
+
+export function sortMachines(
+  machines: MachineSummary[],
+  sort: MachineSortKey,
+): MachineSummary[] {
+  const copy = machines.slice();
+  const metric = (m: MachineSummary): number => {
+    const r = m.latest;
+    switch (sort) {
+      case "cpu":
+        return r.resources?.cpu_percent ?? 0;
+      case "ram":
+        return r.resources?.ram_percent ?? 0;
+      case "disk":
+        return maxDiskPercent(r);
+      case "network":
+        return networkTotalBytes(r);
+      case "last_seen":
+      default:
+        return r.created_at ?? 0;
+    }
+  };
+  copy.sort((a, b) => metric(b) - metric(a));
+  return copy;
+}
+
 function normalizeMac(mac?: string | null): string | null {
   if (!mac) return null;
   const cleaned = mac.toLowerCase().replace(/[^0-9a-f]/g, "");

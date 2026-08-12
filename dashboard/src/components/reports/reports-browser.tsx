@@ -1,19 +1,28 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {
   encodeMachineKey,
   fetchReports,
+  fmtBytes,
   fmtPercent,
   fmtRelative,
   groupMachines,
+  MachineSortKey,
+  maxDiskPercent,
+  networkTotalBytes,
+  sortMachines,
 } from "@/lib/api";
 import { SignOutButton } from "@/components/dashboard/sign-out-button";
+import { MachineDetail } from "@/components/dashboard/machine-detail";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+
+const inputClass =
+  "mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2";
 
 function dateInputToTs(value: string, endOfDay: boolean): number | undefined {
   if (!value) return undefined;
@@ -21,6 +30,30 @@ function dateInputToTs(value: string, endOfDay: boolean): number | undefined {
   const ts = d.getTime() / 1000;
   return Number.isFinite(ts) ? ts : undefined;
 }
+
+type AppliedFilters = {
+  pcName: string;
+  country: string;
+  os: string;
+  fromTs?: number;
+  toTs?: number;
+  sort: MachineSortKey;
+  minCpu: number;
+  minRam: number;
+  minDisk: number;
+};
+
+const defaultApplied: AppliedFilters = {
+  pcName: "",
+  country: "",
+  os: "",
+  fromTs: undefined,
+  toTs: undefined,
+  sort: "cpu",
+  minCpu: 0,
+  minRam: 0,
+  minDisk: 0,
+};
 
 export function ReportsBrowser() {
   const { data: session } = useSession();
@@ -31,13 +64,12 @@ export function ReportsBrowser() {
   const [os, setOs] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
-  const [applied, setApplied] = useState({
-    pcName: "",
-    country: "",
-    os: "",
-    fromTs: undefined as number | undefined,
-    toTs: undefined as number | undefined,
-  });
+  const [sort, setSort] = useState<MachineSortKey>("cpu");
+  const [minCpu, setMinCpu] = useState("0");
+  const [minRam, setMinRam] = useState("0");
+  const [minDisk, setMinDisk] = useState("0");
+  const [applied, setApplied] = useState<AppliedFilters>(defaultApplied);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["reports-browse", applied],
@@ -52,10 +84,33 @@ export function ReportsBrowser() {
     enabled: !!apiToken,
   });
 
-  const machines = useMemo(
-    () => groupMachines(data?.reports ?? []),
-    [data?.reports],
-  );
+  const machines = useMemo(() => {
+    let list = groupMachines(data?.reports ?? []);
+    list = list.filter((m) => {
+      const r = m.latest;
+      const cpu = r.resources?.cpu_percent ?? 0;
+      const ram = r.resources?.ram_percent ?? 0;
+      const disk = maxDiskPercent(r);
+      if (cpu < applied.minCpu) return false;
+      if (ram < applied.minRam) return false;
+      if (disk < applied.minDisk) return false;
+      return true;
+    });
+    return sortMachines(list, applied.sort);
+  }, [data?.reports, applied]);
+
+  useEffect(() => {
+    if (machines.length === 0) {
+      setSelectedKey(null);
+      return;
+    }
+    if (!selectedKey || !machines.some((m) => m.key === selectedKey)) {
+      setSelectedKey(machines[0].key);
+    }
+  }, [machines, selectedKey]);
+
+  const selected =
+    machines.find((m) => m.key === selectedKey) ?? machines[0] ?? null;
 
   function onApply(e: FormEvent) {
     e.preventDefault();
@@ -65,6 +120,10 @@ export function ReportsBrowser() {
       os: os.trim(),
       fromTs: dateInputToTs(fromDate, false),
       toTs: dateInputToTs(toDate, true),
+      sort,
+      minCpu: Number(minCpu) || 0,
+      minRam: Number(minRam) || 0,
+      minDisk: Number(minDisk) || 0,
     });
   }
 
@@ -74,195 +133,296 @@ export function ReportsBrowser() {
     setOs("");
     setFromDate("");
     setToDate("");
-    setApplied({
-      pcName: "",
-      country: "",
-      os: "",
-      fromTs: undefined,
-      toTs: undefined,
-    });
+    setSort("cpu");
+    setMinCpu("0");
+    setMinRam("0");
+    setMinDisk("0");
+    setApplied(defaultApplied);
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
-      <header className="border-b border-slate-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-6 py-4">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-600">
-              System Info
-            </p>
-            <h1 className="text-xl font-semibold tracking-tight text-slate-900">
-              Reports
-            </h1>
-            <p className="mt-0.5 text-sm text-slate-500">
-              Filter by date and machine · one row per PC
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
+    <div className="flex min-h-screen bg-[var(--bg)] text-[var(--ink)]">
+      <aside className="flex w-80 shrink-0 flex-col border-r border-slate-800 bg-slate-950 text-slate-100">
+        <div className="border-b border-slate-800 px-4 py-5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+            System Info
+          </p>
+          <h1 className="mt-1 text-lg font-semibold tracking-tight text-white">
+            Reports
+          </h1>
+          <p className="mt-1 text-xs text-slate-400">
+            {machines.length} PC{machines.length === 1 ? "" : "s"} · sorted by{" "}
+            {applied.sort.replace("_", " ")}
+          </p>
+          <div className="mt-3 flex gap-2 text-xs">
             <Link
               href="/dashboard"
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="rounded-md px-2 py-1 font-medium text-slate-300 hover:bg-slate-900 hover:text-white"
             >
               Fleet
             </Link>
-            <button
-              type="button"
-              onClick={() => refetch()}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              disabled={isFetching}
-            >
-              {isFetching ? "Refreshing…" : "Refresh"}
-            </button>
-            <SignOutButton variant="light" />
+            <span className="rounded-md bg-blue-600 px-2 py-1 font-medium text-white">
+              Reports
+            </span>
           </div>
         </div>
-      </header>
 
-      <div className="mx-auto max-w-7xl space-y-6 px-6 py-6">
         <form
           onSubmit={onApply}
-          className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/50"
+          className="space-y-3 overflow-y-auto border-b border-slate-800 px-3 py-3"
         >
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <label className="block text-xs font-medium text-slate-600">
-              From
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+            Filters
+          </p>
+          <label className="block text-xs text-slate-400">
+            From
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className={inputClass}
+            />
+          </label>
+          <label className="block text-xs text-slate-400">
+            To
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className={inputClass}
+            />
+          </label>
+          <label className="block text-xs text-slate-400">
+            PC name
+            <input
+              value={pcName}
+              onChange={(e) => setPcName(e.target.value)}
+              placeholder="Contains…"
+              className={inputClass}
+            />
+          </label>
+          <label className="block text-xs text-slate-400">
+            Country
+            <input
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+              placeholder="Name or code"
+              className={inputClass}
+            />
+          </label>
+          <label className="block text-xs text-slate-400">
+            OS
+            <input
+              value={os}
+              onChange={(e) => setOs(e.target.value)}
+              placeholder="Darwin, Windows…"
+              className={inputClass}
+            />
+          </label>
+
+          <p className="pt-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+            Usage
+          </p>
+          <label className="block text-xs text-slate-400">
+            Sort by (highest first)
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as MachineSortKey)}
+              className={inputClass}
+            >
+              <option value="cpu">Most CPU</option>
+              <option value="ram">Most RAM</option>
+              <option value="disk">Most disk space used</option>
+              <option value="network">Most network usage</option>
+              <option value="last_seen">Last seen</option>
+            </select>
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            <label className="block text-xs text-slate-400">
+              Min CPU %
               <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+                type="number"
+                min={0}
+                max={100}
+                value={minCpu}
+                onChange={(e) => setMinCpu(e.target.value)}
+                className={inputClass}
               />
             </label>
-            <label className="block text-xs font-medium text-slate-600">
-              To
+            <label className="block text-xs text-slate-400">
+              Min RAM %
               <input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+                type="number"
+                min={0}
+                max={100}
+                value={minRam}
+                onChange={(e) => setMinRam(e.target.value)}
+                className={inputClass}
               />
             </label>
-            <label className="block text-xs font-medium text-slate-600">
-              PC name
+            <label className="block text-xs text-slate-400">
+              Min disk %
               <input
-                value={pcName}
-                onChange={(e) => setPcName(e.target.value)}
-                placeholder="Contains…"
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-              />
-            </label>
-            <label className="block text-xs font-medium text-slate-600">
-              Country
-              <input
-                value={country}
-                onChange={(e) => setCountry(e.target.value)}
-                placeholder="Name or code"
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-              />
-            </label>
-            <label className="block text-xs font-medium text-slate-600">
-              OS
-              <input
-                value={os}
-                onChange={(e) => setOs(e.target.value)}
-                placeholder="Darwin, Windows…"
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+                type="number"
+                min={0}
+                max={100}
+                value={minDisk}
+                onChange={(e) => setMinDisk(e.target.value)}
+                className={inputClass}
               />
             </label>
           </div>
-          <div className="mt-4 flex flex-wrap gap-2">
+
+          <div className="flex gap-2 pt-1">
             <button
               type="submit"
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              className="flex-1 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500"
             >
-              Apply filters
+              Apply
             </button>
             <button
               type="button"
               onClick={onClear}
-              className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800"
             >
               Clear
             </button>
-            <p className="self-center text-xs text-slate-500">
-              {machines.length} PC{machines.length === 1 ? "" : "s"} ·{" "}
-              {data?.total ?? 0} report{(data?.total ?? 0) === 1 ? "" : "s"}
-            </p>
           </div>
         </form>
 
-        {isError && (
-          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            Failed to load reports from {API_URL}.
-          </div>
-        )}
-
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-200/60">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-4 py-3">PC</th>
-                <th className="px-4 py-3">Last seen</th>
-                <th className="px-4 py-3">OS</th>
-                <th className="px-4 py-3">Country</th>
-                <th className="px-4 py-3">IP</th>
-                <th className="px-4 py-3">CPU</th>
-                <th className="px-4 py-3">RAM</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {isLoading && (
-                <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-slate-500">
-                    Loading…
-                  </td>
-                </tr>
-              )}
-              {!isLoading && machines.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-slate-500">
-                    No PCs match these filters.
-                  </td>
-                </tr>
-              )}
-              {machines.map((m) => {
-                const r = m.latest;
-                return (
-                  <tr key={m.key} className="hover:bg-slate-50/80">
-                    <td className="px-4 py-3">
-                      <Link
-                        href={`/reports/${encodeMachineKey(m.key)}`}
-                        className="font-medium text-blue-700 hover:underline"
-                      >
+        <nav className="flex-1 overflow-y-auto px-2 py-3">
+          {isLoading && (
+            <p className="px-2 py-6 text-center text-sm text-slate-400">
+              Loading…
+            </p>
+          )}
+          {!isLoading && machines.length === 0 && (
+            <p className="px-2 py-6 text-center text-sm text-slate-400">
+              No PCs match.
+            </p>
+          )}
+          <ul className="space-y-1">
+            {machines.map((m) => {
+              const active = m.key === selected?.key;
+              const r = m.latest;
+              const disk = maxDiskPercent(r);
+              const net = networkTotalBytes(r);
+              return (
+                <li key={m.key}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedKey(m.key)}
+                    className={`w-full rounded-lg px-3 py-2.5 text-left transition ${
+                      active
+                        ? "bg-blue-600 text-white shadow-sm shadow-blue-900/40"
+                        : "text-slate-200 hover:bg-slate-900"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="truncate text-sm font-medium">
                         {m.name}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {fmtRelative(r.created_at)}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {r.os?.system ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {r.location?.country ?? r.location?.country_code ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {r.private_ip ?? "—"}
-                      {r.public_ip ? ` / ${r.public_ip}` : ""}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {fmtPercent(r.resources?.cpu_percent)}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {fmtPercent(r.resources?.ram_percent)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </span>
+                      <span
+                        className={`shrink-0 text-[11px] ${
+                          active ? "text-blue-100" : "text-slate-500"
+                        }`}
+                      >
+                        {fmtRelative(r.created_at)}
+                      </span>
+                    </div>
+                    <div
+                      className={`mt-1 grid grid-cols-2 gap-x-2 text-[11px] ${
+                        active ? "text-blue-100/90" : "text-slate-400"
+                      }`}
+                    >
+                      <span>CPU {fmtPercent(r.resources?.cpu_percent)}</span>
+                      <span>RAM {fmtPercent(r.resources?.ram_percent)}</span>
+                      <span>Disk {fmtPercent(disk)}</span>
+                      <span>Net {fmtBytes(net)}</span>
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+
+        <div className="border-t border-slate-800 p-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => refetch()}
+              className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+              disabled={isFetching}
+            >
+              {isFetching ? "Refreshing…" : "Refresh"}
+            </button>
+            <SignOutButton />
+          </div>
         </div>
-      </div>
+      </aside>
+
+      <main className="flex min-w-0 flex-1 flex-col">
+        <div className="border-b border-slate-200 bg-white/80 px-6 py-4 backdrop-blur">
+          {selected ? (
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold tracking-tight text-slate-900">
+                  {selected.name}
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {selected.latest.os?.system ?? "—"}{" "}
+                  {selected.latest.os?.release ?? ""}
+                  <span className="mx-1.5 text-slate-300">·</span>
+                  Last seen {fmtRelative(selected.latest.created_at)}
+                  <span className="mx-1.5 text-slate-300">·</span>
+                  <Link
+                    href={`/reports/${encodeMachineKey(selected.key)}`}
+                    className="text-blue-600 hover:underline"
+                  >
+                    Open permalink
+                  </Link>
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-3 text-xs text-slate-500">
+                <span>
+                  CPU {fmtPercent(selected.latest.resources?.cpu_percent)}
+                </span>
+                <span>
+                  RAM {fmtPercent(selected.latest.resources?.ram_percent)}
+                </span>
+                <span>Disk {fmtPercent(maxDiskPercent(selected.latest))}</span>
+                <span>
+                  Net {fmtBytes(networkTotalBytes(selected.latest))}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <h2 className="text-xl font-semibold text-slate-900">
+                No machine selected
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Adjust filters or wait for reports.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-6">
+          {isError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              Failed to load reports from {API_URL}.
+            </div>
+          )}
+          {selected && <MachineDetail machine={selected} />}
+          {!isLoading && !isError && !selected && (
+            <div className="flex h-64 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/60 text-sm text-slate-500">
+              No PCs match these filters.
+            </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 }

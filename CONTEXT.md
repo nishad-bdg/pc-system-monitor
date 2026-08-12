@@ -146,9 +146,12 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 
 ### Reports (`/reports`)
 
-- Filters: date from/to, PC name, country, OS → Apply / Clear.
-- Table: one row per PC via `groupMachines` (latest in result set).
-- Click PC name → `/reports/[key]` with full `MachineDetail`.
+- Same slate+blue **sidebar + detail** layout as Fleet.
+- Sidebar filters: date from/to, PC name, country, OS.
+- **Usage sort** (highest first): Most CPU, Most RAM, Most disk space used, Most network usage (bytes sent+recv), or Last seen.
+- **Min thresholds**: Min CPU %, Min RAM %, Min disk % (filters out PCs below threshold).
+- Sidebar lists matching PCs with CPU/RAM/Disk/Net; main pane shows `MachineDetail`.
+- Permalink: `/reports/[key]`.
 
 ### Machine grouping (`groupMachines` in `src/lib/api.ts`)
 
