@@ -12,6 +12,7 @@ class Report(BaseModel):
     location: dict | None = None
     resources: dict | None = None
     disk: dict | None = None
+    printers: dict | None = None
     created_at: float | None = Field(default=None, description="Unix timestamp")
 
 

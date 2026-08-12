@@ -286,6 +286,8 @@ function MachineDetail({ machine }: { machine: MachineSummary }) {
           <StorageSection disk={host.disk} />
         )}
 
+      {host.printers && <PrintersSection printers={host.printers} />}
+
       <ChartCard title="CPU / RAM / Swap over time">
         <ResponsiveContainer width="100%" height={280}>
           <LineChart data={timeSeries}>
@@ -350,6 +352,72 @@ function MachineDetail({ machine }: { machine: MachineSummary }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function PrintersSection({
+  printers,
+}: {
+  printers: NonNullable<Report["printers"]>;
+}) {
+  const groups: { key: "usb" | "network" | "other"; label: string }[] = [
+    { key: "usb", label: "USB" },
+    { key: "network", label: "Network" },
+    { key: "other", label: "Other" },
+  ];
+  const count = printers.count ?? 0;
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-medium text-slate-700">Printers</h2>
+        <p className="text-xs text-slate-500">
+          Connected:{" "}
+          <span className="font-semibold text-slate-800">{count}</span>
+        </p>
+      </div>
+
+      {count === 0 ? (
+        <p className="mt-3 text-sm text-slate-500">No printers detected.</p>
+      ) : (
+        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+          {groups.map(({ key, label }) => {
+            const items = printers[key] ?? [];
+            return (
+              <div
+                key={key}
+                className="rounded-xl border border-slate-100 bg-slate-50/80 p-4"
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    {label}
+                  </h3>
+                  <span className="text-xs font-medium text-slate-700">
+                    {items.length}
+                  </span>
+                </div>
+                {items.length === 0 ? (
+                  <p className="mt-3 text-sm text-slate-400">None</p>
+                ) : (
+                  <ul className="mt-3 space-y-2">
+                    {items.map((p) => (
+                      <li key={`${p.name}-${p.port}`} className="min-w-0">
+                        <p className="truncate text-sm font-medium text-slate-900">
+                          {p.name}
+                        </p>
+                        <p className="truncate font-mono text-[11px] text-slate-500">
+                          {p.port || "—"}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

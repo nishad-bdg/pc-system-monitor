@@ -23,6 +23,7 @@ uv run system-info --ip                 # IP + MAC only
 uv run system-info --geo                # geolocation only
 uv run system-info --sys                # CPU/RAM/swap only
 uv run system-info --disk               # storage only
+uv run system-info --printers           # printers only (USB / network / other)
 uv run system-info --no-save            # do not send report to API
 uv run system-info --api-url http://localhost:8000    # custom API URL
 uv run system-info --pc-name Office-PC-3              # Windows custom name
@@ -30,7 +31,8 @@ uv run system-info --pc-name Office-PC-3              # Windows custom name
 
 Each report includes `pc_name` and a stable `device_id`. On macOS, `pc_name` is
 always the OS hostname. On Windows, `--pc-name` / `SYSTEM_INFO_PC_NAME` is used
-when set; otherwise it falls back to the hostname.
+when set; otherwise it falls back to the hostname. Printers are classified as
+USB, network, or other.
 
 The API key can also be set once via the `SYSTEM_INFO_API_KEY` environment
 variable (and URL via `SYSTEM_INFO_API_URL`).

@@ -9,6 +9,7 @@ from .ip import get_private_ip, get_public_ip, get_mac_address, get_mac_addresse
 from .os_info import collect_os_info
 from .resources import collect_resources
 from .disk import collect_disk_info
+from .printers import collect_printers
 from .device import get_or_create_device_id, resolve_pc_name
 
 DEFAULT_API_URL = os.getenv("SYSTEM_INFO_API_URL", "http://127.0.0.1:8000")
@@ -27,6 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--geo", action="store_true", help="Only show geolocation")
     parser.add_argument("--sys", action="store_true", help="Only show CPU/RAM usage")
     parser.add_argument("--disk", action="store_true", help="Only show storage/disk info")
+    parser.add_argument("--printers", action="store_true", help="Only show printers")
     parser.add_argument("--json", action="store_true", help="Print output as JSON")
     parser.add_argument("--no-save", action="store_true", help="Do not save report to the API")
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="API base URL to save reports to")
@@ -51,11 +53,13 @@ def _fmt_bytes(num: int) -> str:
 def run(args: argparse.Namespace) -> int:
     data: dict = {}
 
-    show_os = not (args.ip or args.geo or args.sys or args.disk) or args.os
-    show_ip = not (args.os or args.geo or args.sys or args.disk) or args.ip
-    show_geo = not (args.os or args.ip or args.sys or args.disk) or args.geo
-    show_sys = not (args.os or args.ip or args.geo or args.disk) or args.sys
-    show_disk = not (args.os or args.ip or args.geo or args.sys) or args.disk
+    specific = args.ip or args.geo or args.sys or args.disk or args.printers or args.os
+    show_os = not specific or args.os
+    show_ip = not specific or args.ip
+    show_geo = not specific or args.geo
+    show_sys = not specific or args.sys
+    show_disk = not specific or args.disk
+    show_printers = not specific or args.printers
 
     pc_name = resolve_pc_name(args.pc_name)
     device_id = get_or_create_device_id(pc_name)
@@ -81,7 +85,10 @@ def run(args: argparse.Namespace) -> int:
     if show_disk:
         data["disk"] = collect_disk_info().to_dict()
 
-    _print(data, show_os, show_ip, show_geo, show_sys, show_disk, args)
+    if show_printers:
+        data["printers"] = collect_printers().to_dict()
+
+    _print(data, show_os, show_ip, show_geo, show_sys, show_disk, show_printers, args)
 
     if not args.no_save:
         saved_id = save_report(data, args.api_url, args.api_key)
@@ -111,7 +118,16 @@ def save_report(data: dict, api_url: str, api_key: str = "") -> str | None:
         return None
 
 
-def _print(data: dict, show_os: bool, show_ip: bool, show_geo: bool, show_sys: bool, show_disk: bool, args: argparse.Namespace) -> None:
+def _print(
+    data: dict,
+    show_os: bool,
+    show_ip: bool,
+    show_geo: bool,
+    show_sys: bool,
+    show_disk: bool,
+    show_printers: bool,
+    args: argparse.Namespace,
+) -> None:
     if args.json:
         print(json.dumps(data, indent=2, sort_keys=True))
         return
@@ -186,6 +202,16 @@ def _print(data: dict, show_os: bool, show_ip: bool, show_geo: bool, show_sys: b
                 f"{_fmt_bytes(p['free']):>12}"
                 f"  {p['percent']:>5.1f}%"
             )
+
+    if show_printers:
+        printers = data.get("printers") or {}
+        print("== Printers ==")
+        print(f"  count: {printers.get('count', 0)}")
+        for label in ("usb", "network", "other"):
+            items = printers.get(label) or []
+            print(f"  {label}: {len(items)}")
+            for item in items:
+                print(f"    - {item.get('name')} ({item.get('port') or 'unknown'})")
 
 
 def main() -> int:

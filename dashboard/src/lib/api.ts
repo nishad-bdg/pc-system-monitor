@@ -58,6 +58,12 @@ export interface Report {
       percent: number;
     }[];
   } | null;
+  printers?: {
+    count?: number;
+    usb?: { name: string; port: string }[];
+    network?: { name: string; port: string }[];
+    other?: { name: string; port: string }[];
+  } | null;
   created_at?: number;
 }
 

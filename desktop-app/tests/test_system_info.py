@@ -1,4 +1,5 @@
 import argparse
+import json
 
 import pytest
 
@@ -145,6 +146,61 @@ def test_fmt_bytes():
     assert cli._fmt_bytes(1024) == "1.00 KiB"
     assert cli._fmt_bytes(1024 * 1024) == "1.00 MiB"
     assert cli._fmt_bytes(1536) == "1.50 KiB"
+
+
+def test_classify_connection():
+    from system_info.printers import classify_connection
+
+    assert classify_connection("usb://HP/DeskJet") == "usb"
+    assert classify_connection("USB001") == "usb"
+    assert classify_connection("ipp://192.168.1.20/ipp/print") == "network"
+    assert classify_connection("IP_192.168.1.50") == "network"
+    assert classify_connection("WSD-abc") == "network"
+    assert classify_connection("192.168.0.10:9100") == "network"
+    assert classify_connection("Fax") == "other"
+    assert classify_connection("") == "other"
+
+
+def test_collect_printers_macos(monkeypatch):
+    from system_info import printers
+
+    monkeypatch.setattr(printers.os, "name", "posix")
+    monkeypatch.setattr(
+        printers,
+        "_run",
+        lambda cmd, timeout=8.0: (
+            "device for Office_Laser: ipp://192.168.1.20/ipp/print\n"
+            "device for DeskJet: usb://HP/DeskJet%20Ink\n"
+            "device for OneNote: nul:\n"
+        ),
+    )
+    info = printers.collect_printers()
+    assert info.count == 3
+    assert [p.name for p in info.usb] == ["DeskJet"]
+    assert [p.name for p in info.network] == ["Office_Laser"]
+    assert [p.name for p in info.other] == ["OneNote"]
+    payload = info.to_dict()
+    assert payload["count"] == 3
+    assert payload["usb"][0]["port"].startswith("usb://")
+
+
+def test_collect_printers_windows(monkeypatch):
+    from system_info import printers
+
+    monkeypatch.setattr(printers.os, "name", "nt")
+    payload = json.dumps(
+        [
+            {"Name": "HP USB", "PortName": "USB001"},
+            {"Name": "Floor Printer", "PortName": "IP_10.0.0.5"},
+            {"Name": "Microsoft Print to PDF", "PortName": "PORTPROMPT:"},
+        ]
+    )
+    monkeypatch.setattr(printers, "_run", lambda cmd, timeout=8.0: payload)
+    info = printers.collect_printers()
+    assert info.count == 3
+    assert [p.name for p in info.usb] == ["HP USB"]
+    assert [p.name for p in info.network] == ["Floor Printer"]
+    assert [p.name for p in info.other] == ["Microsoft Print to PDF"]
 
 
 def test_resolve_pc_name_macos_ignores_explicit(monkeypatch):
