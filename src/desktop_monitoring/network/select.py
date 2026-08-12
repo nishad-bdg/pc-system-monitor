@@ -31,24 +31,11 @@ def _active_connected_physical(adapters: list[Adapter]) -> list[Adapter]:
 
 
 def select_preferred_adapter(adapters: list[Adapter]) -> Adapter | None:
-    """Select the best route-owning adapter that has a usable MAC address."""
+    """Select the preferred-route owner, prioritizing physical adapters."""
     preferred_physical = [
         adapter
         for adapter in adapters
-        if adapter.is_preferred
-        and _is_physical(adapter)
-        and adapter.is_connected
-        and _mac_of(adapter) is not None
-    ]
-    if preferred_physical:
-        return preferred_physical[0]
-
-    preferred_physical = [
-        adapter
-        for adapter in adapters
-        if adapter.is_preferred
-        and _is_physical(adapter)
-        and _mac_of(adapter) is not None
+        if adapter.is_preferred and _is_physical(adapter)
     ]
     if preferred_physical:
         return preferred_physical[0]
@@ -58,7 +45,6 @@ def select_preferred_adapter(adapters: list[Adapter]) -> Adapter | None:
         for adapter in adapters
         if adapter.is_preferred
         and adapter.adapter_type != "loopback"
-        and _mac_of(adapter) is not None
     ]
     if preferred:
         return preferred[0]

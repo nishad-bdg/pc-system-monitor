@@ -74,6 +74,34 @@ def test_physical_preferred_beats_virtual_preferred():
     assert select_primary_mac(adapters) == "AA:BB:CC:DD:EE:FF"
 
 
+def test_physical_preferred_without_mac_blocks_virtual_preferred_mac():
+    adapters = [
+        Adapter(
+            name="Wi-Fi",
+            adapter_type="wifi",
+            is_physical=True,
+            is_active=True,
+            is_connected=True,
+            is_preferred=True,
+        ),
+        Adapter(
+            name="vEthernet (Default Switch)",
+            adapter_type="virtual",
+            is_virtual=True,
+            is_active=True,
+            is_connected=True,
+            is_preferred=True,
+            current_mac_address="00:15:5D:AA:BB:CC",
+        ),
+    ]
+
+    preferred = select_preferred_adapter(adapters)
+
+    assert preferred is not None
+    assert preferred.name == "Wi-Fi"
+    assert select_primary_mac(adapters) is None
+
+
 def test_connected_physical_mac_prevents_virtual_primary_selection():
     adapters = [
         Adapter(
@@ -166,5 +194,8 @@ def test_missing_mac_returns_none():
         )
     ]
 
-    assert select_preferred_adapter(adapters) is None
+    preferred = select_preferred_adapter(adapters)
+
+    assert preferred is not None
+    assert preferred.name == "Wi-Fi"
     assert select_primary_mac(adapters) is None
