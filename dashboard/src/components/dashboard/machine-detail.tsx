@@ -21,7 +21,6 @@ import {
   MachineSummary,
   Report,
 } from "@/lib/api";
-import { RemoteSpeedTest } from "./remote-speed-test";
 
 export function MachineDetail({ machine }: { machine: MachineSummary }) {
   const host = machine.latest;
@@ -94,11 +93,7 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
           <StorageSection disk={host.disk} />
         )}
 
-      <NetworkSection
-        network={host.network ?? null}
-        series={bandwidthSeries}
-        deviceId={machine.deviceId}
-      />
+      <NetworkSection network={host.network ?? null} series={bandwidthSeries} />
 
       {host.printers && <PrintersSection printers={host.printers} />}
 
@@ -331,11 +326,9 @@ function UptimeSection({
 function NetworkSection({
   network,
   series,
-  deviceId,
 }: {
   network: Report["network"] | null;
   series: { time: string; upload: number; download: number }[];
-  deviceId: string | null;
 }) {
   const hasRates = series.some((p) => p.upload > 0 || p.download > 0);
 
@@ -343,7 +336,7 @@ function NetworkSection({
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
       <h2 className="text-sm font-medium text-slate-700">Network bandwidth</h2>
       <p className="mt-1 text-xs text-slate-500">
-        Totals since boot · NIC rates at report time · remote speed test on demand
+        Totals since boot · NIC rates sampled at report time
       </p>
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
@@ -369,8 +362,6 @@ function NetworkSection({
           accent
         />
       </div>
-
-      <RemoteSpeedTest deviceId={deviceId} />
 
       {hasRates && (
         <div className="mt-6">

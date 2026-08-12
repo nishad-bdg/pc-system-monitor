@@ -75,8 +75,6 @@ export interface Report {
     bytes_recv?: number;
     send_rate_bps?: number;
     recv_rate_bps?: number;
-    download_mbps?: number | null;
-    upload_mbps?: number | null;
   } | null;
   created_at?: number;
 }
@@ -115,52 +113,6 @@ export async function fetchReports(
   if (filters?.country) params.set("country", filters.country);
   if (filters?.os) params.set("os", filters.os);
   const res = await fetch(`${apiUrl}/reports?${params}`, {
-    headers: { Authorization: `Bearer ${apiToken}` },
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`API error ${res.status}`);
-  return res.json();
-}
-
-export interface DeviceCommand {
-  _id: string;
-  device_id: string;
-  type: string;
-  status: "pending" | "running" | "done" | "failed" | string;
-  created_at?: number;
-  updated_at?: number;
-  completed_at?: number;
-  result?: {
-    download_mbps?: number | null;
-    upload_mbps?: number | null;
-  } | null;
-  error?: string | null;
-}
-
-export async function createSpeedTestCommand(
-  apiUrl: string,
-  apiToken: string,
-  deviceId: string,
-): Promise<DeviceCommand> {
-  const res = await fetch(`${apiUrl}/commands`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ device_id: deviceId, type: "speed_test" }),
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`API error ${res.status}`);
-  return res.json();
-}
-
-export async function fetchCommand(
-  apiUrl: string,
-  apiToken: string,
-  commandId: string,
-): Promise<DeviceCommand> {
-  const res = await fetch(`${apiUrl}/commands/${commandId}`, {
     headers: { Authorization: `Bearer ${apiToken}` },
     cache: "no-store",
   });
@@ -420,11 +372,6 @@ export function fmtRelative(ts?: number): string {
 export function fmtRate(bps?: number): string {
   if (bps === undefined || bps === null) return "—";
   return `${fmtBytes(bps)}/s`;
-}
-
-export function fmtMbps(mbps?: number | null): string {
-  if (mbps === undefined || mbps === null) return "—";
-  return `${mbps.toFixed(1)} Mbps`;
 }
 
 export function fmtUptime(seconds?: number | null): string {

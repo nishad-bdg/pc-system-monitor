@@ -1,8 +1,7 @@
 from functools import lru_cache
-import time
 
 from bson import ObjectId
-from pymongo import MongoClient, ReturnDocument
+from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, DuplicateKeyError, PyMongoError
 
 from . import config
@@ -205,121 +204,6 @@ def delete_api_key(key_id: str) -> bool:
         return result.deleted_count == 1
     except Exception:
         return False
-
-
-def _commands():
-    return _db()[config.MONGO_COMMANDS]
-
-
-def _serialize_command(doc: dict) -> dict:
-    out = dict(doc)
-    out["_id"] = str(out["_id"])
-    return out
-
-
-def create_command(
-    *,
-    device_id: str,
-    command_type: str,
-    created_by: str | None = None,
-) -> dict | None:
-    now = time.time()
-    document = {
-        "device_id": device_id,
-        "type": command_type,
-        "status": "pending",
-        "created_at": now,
-        "updated_at": now,
-        "created_by": created_by,
-        "result": None,
-        "error": None,
-    }
-    try:
-        result = _commands().insert_one(document)
-        document["_id"] = result.inserted_id
-        return _serialize_command(document)
-    except (ConnectionFailure, PyMongoError):
-        return None
-
-
-def claim_pending_command(device_id: str) -> dict | None:
-    now = time.time()
-    try:
-        doc = _commands().find_one_and_update(
-            {"device_id": device_id, "status": "pending"},
-            {"$set": {"status": "running", "updated_at": now}},
-            sort=[("created_at", 1)],
-            return_document=ReturnDocument.AFTER,
-        )
-    except (ConnectionFailure, PyMongoError):
-        return None
-    if not doc:
-        return None
-    return _serialize_command(doc)
-
-
-def complete_command(
-    command_id: str,
-    *,
-    status: str,
-    result: dict | None = None,
-    error: str | None = None,
-) -> dict | None:
-    try:
-        obj = ObjectId(command_id)
-    except Exception:
-        return None
-    now = time.time()
-    try:
-        doc = _commands().find_one_and_update(
-            {"_id": obj, "status": {"$in": ["pending", "running"]}},
-            {
-                "$set": {
-                    "status": status,
-                    "result": result,
-                    "error": error,
-                    "updated_at": now,
-                    "completed_at": now,
-                }
-            },
-            return_document=ReturnDocument.AFTER,
-        )
-    except (ConnectionFailure, PyMongoError):
-        return None
-    if not doc:
-        return None
-    return _serialize_command(doc)
-
-
-def get_command(command_id: str) -> dict | None:
-    try:
-        obj = ObjectId(command_id)
-    except Exception:
-        return None
-    try:
-        doc = _commands().find_one({"_id": obj})
-    except (ConnectionFailure, PyMongoError):
-        return None
-    if not doc:
-        return None
-    return _serialize_command(doc)
-
-
-def list_commands(device_id: str, limit: int = 20) -> list[dict]:
-    records: list[dict] = []
-    try:
-        cursor = (
-            _commands()
-            .find({"device_id": device_id})
-            .sort("created_at", -1)
-            .limit(limit)
-        )
-        for doc in cursor:
-            records.append(_serialize_command(doc))
-    except (ConnectionFailure, PyMongoError):
-        return records
-    return records
-
 
 def ping() -> bool:
     """True if MongoDB is reachable."""

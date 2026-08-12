@@ -212,46 +212,6 @@ def test_collect_network_usage(monkeypatch):
     assert usage.bytes_recv == 2600
     assert usage.send_rate_bps == 1000.0  # 500 bytes / 0.5s
     assert usage.recv_rate_bps == 1200.0
-    assert usage.download_mbps is None
-    assert usage.upload_mbps is None
-    d = usage.to_dict()
-    assert d["download_mbps"] is None
-    assert d["upload_mbps"] is None
-
-    values2 = iter([Counters(1000, 2000), Counters(1500, 2600)])
-    monkeypatch.setattr(network.psutil, "net_io_counters", lambda: next(values2))
-    monkeypatch.setattr(network, "measure_download_mbps", lambda: 42.5)
-    probed = network.collect_network_usage(interval=0.5, probe_download=True)
-    assert probed.download_mbps == 42.5
-
-
-def test_measure_download_mbps(monkeypatch):
-    from system_info import network
-
-    class FakeResp:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-        def raise_for_status(self):
-            return None
-
-        def iter_content(self, chunk_size=65536):
-            yield b"x" * 1_000_000
-
-    times = iter([100.0, 100.5])  # 0.5s for 1_000_000 bytes → 16 Mbps
-    monkeypatch.setattr(network.time, "monotonic", lambda: next(times))
-    monkeypatch.setattr(
-        network.requests,
-        "get",
-        lambda *a, **k: FakeResp(),
-    )
-    mbps = network.measure_download_mbps()
-    assert mbps is not None
-    assert abs(mbps - 16.0) < 0.01
-
 
 def test_split_seconds_by_utc_day():
     from system_info.uptime import split_seconds_by_utc_day
@@ -286,61 +246,6 @@ def test_uptime_reboot_skips_offline(tmp_path):
     assert info.by_day["2026-08-12"] == 7200.0
     assert info.uptime_seconds == 3600.0
     assert info.day_timezone == "UTC"
-
-
-def test_poll_commands_runs_speed_test(monkeypatch):
-    from system_info import commands
-
-    calls = {"complete": []}
-
-    class FakeResp:
-        def __init__(self, payload):
-            self._payload = payload
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return self._payload
-
-    pending = {"n": 0}
-
-    def fake_get(url, params=None, headers=None, timeout=None):
-        pending["n"] += 1
-        if pending["n"] == 1:
-            return FakeResp(
-                {
-                    "command": {
-                        "_id": "cmd1",
-                        "type": "speed_test",
-                        "device_id": "dev-1",
-                    }
-                }
-            )
-        return FakeResp({"command": None})
-
-    def fake_post(url, json=None, headers=None, timeout=None):
-        calls["complete"].append(json)
-        return FakeResp({})
-
-    monkeypatch.setattr(commands, "resolve_pc_name", lambda n: "PC")
-    monkeypatch.setattr(commands, "get_or_create_device_id", lambda n: "dev-1")
-    monkeypatch.setattr(
-        commands,
-        "run_full_speed_test",
-        lambda: {"download_mbps": 12.0, "upload_mbps": 3.0},
-    )
-    monkeypatch.setattr(commands.requests, "get", fake_get)
-    monkeypatch.setattr(commands.requests, "post", fake_post)
-
-    n = commands.poll_and_run_commands(
-        api_url="http://example",
-        api_key="sk-test",
-        quiet=True,
-    )
-    assert n == 1
-    assert calls["complete"][0]["status"] == "done"
-    assert calls["complete"][0]["result"]["download_mbps"] == 12.0
 
 
 def test_uptime_same_boot_credits_gap(tmp_path):

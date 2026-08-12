@@ -16,7 +16,6 @@ from .network import collect_network_usage
 from .uptime import collect_uptime
 from .device import get_or_create_device_id, resolve_pc_name
 from .update import check_for_update, maybe_auto_update
-from .commands import poll_and_run_commands
 # Load packaged/installer config before reading defaults.
 load_install_config()
 
@@ -58,11 +57,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="If a newer Windows release exists, download and stage it (frozen builds)",
     )
-    parser.add_argument(
-        "--poll-commands",
-        action="store_true",
-        help="Claim and run pending remote commands (e.g. speed_test), then exit",
-    )
     parser.add_argument("--version", action="store_true", help="Print version and exit")
     return parser
 
@@ -96,19 +90,6 @@ def run(args: argparse.Namespace) -> int:
         print(__version__)
         return 0
 
-    if args.poll_commands:
-        count = poll_and_run_commands(
-            api_url=args.api_url,
-            api_key=args.api_key,
-            pc_name=args.pc_name,
-            quiet=bool(args.json),
-        )
-        if args.json:
-            print(json.dumps({"handled": count}))
-        elif not args.json:
-            print(f"commands handled: {count}")
-        return 0
-
     if args.check_update or args.auto_update:
         manifest = check_for_update()
         if not manifest:
@@ -129,15 +110,6 @@ def run(args: argparse.Namespace) -> int:
     # Quiet release check on normal scheduled runs (Windows frozen builds).
     if os.getenv("SYSTEM_INFO_UPDATE_URL") and not args.no_save:
         maybe_auto_update(quiet=True)
-
-    # Pick up remote admin commands (speed_test, etc.) before collecting a report.
-    if args.api_key and not args.no_save:
-        poll_and_run_commands(
-            api_url=args.api_url,
-            api_key=args.api_key,
-            pc_name=args.pc_name,
-            quiet=True,
-        )
 
     data: dict = {}
 
@@ -332,8 +304,6 @@ def _print(
         print(f"  received total: {_fmt_bytes(int(net.get('bytes_recv') or 0))}")
         print(f"  send rate:      {_fmt_bytes(int(net.get('send_rate_bps') or 0))}/s")
         print(f"  recv rate:      {_fmt_bytes(int(net.get('recv_rate_bps') or 0))}/s")
-        dl = net.get("download_mbps")
-        print(f"  download:       {dl:.2f} Mbps" if dl is not None else "  download:       unknown")
 
     if show_printers:
         printers = data.get("printers") or {}

@@ -77,7 +77,7 @@ Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`.
 | `location` | `geo.py` | ip-api.com |
 | `resources` | `resources.py` | CPU/RAM/swap |
 | `uptime` | `uptime.py` | Session + UTC day-wise on-seconds (`by_day`) |
-| `network` | `network.py` | NIC totals/rates + approx `download_mbps` |
+| `network` | `network.py` | NIC totals/rates |
 
 | `disk` | `disk.py` | Physical devices + partitions (mac + Win) |
 | `printers` | `printers.py` | See below |
@@ -95,8 +95,8 @@ Each printer: `{ name, port, ip, print_count }`.
 
 ### Network bandwidth
 
-`network: { bytes_sent, bytes_recv, send_rate_bps, recv_rate_bps, download_mbps?, upload_mbps? }` —
-totals since boot + ~0.5s NIC sample rates (`psutil`). Internet Mbps is **not** probed on each report; use the admin **Live speed test** button.
+`network: { bytes_sent, bytes_recv, send_rate_bps, recv_rate_bps }` —
+totals since boot + ~0.5s NIC sample rates (`psutil`).
 
 ### Uptime (day-wise)
 
@@ -150,7 +150,7 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 ### Fleet (`/dashboard`)
 
 - Sidebar: filter by name, select PC, Refresh, link to Reports.
-- Detail: CPU/RAM/swap tiles, **Uptime** (session + UTC day bars with BD labels), location/machine, **Storage** (device count + partition bars: blue &lt;50%, amber 50–80%, red &gt;80%), **Network bandwidth** (incl. internet Mbps + usage chart), **Printers** (USB/Network/Other with IP + print count), charts, report history.
+- Detail: CPU/RAM/swap tiles, **Uptime** (session + UTC day bars with BD labels), location/machine, **Storage** (device count + partition bars: blue &lt;50%, amber 50–80%, red &gt;80%), **Network bandwidth** (usage chart), **Printers** (USB/Network/Other with IP + print count), charts, report history.
 - Shared detail UI: `src/components/dashboard/machine-detail.tsx`.
 
 ### Reports (`/reports`)
@@ -175,13 +175,8 @@ Keys look like `id:…`, `mac:…`, `name:…` (URL-encoded for `/reports/[key]`
 
 ### Important ops note
 
-Dashboard **Refresh** only reloads API data. It does **not** push collect commands to desktops except via the **commands** queue (e.g. remote speed test). Re-run `system-info` / wait for the poller for new snapshots.
+Dashboard **Refresh** only reloads API data. It does **not** push collect commands to desktops. Re-run `system-info` on each PC for new snapshots.
 
-### Remote speed test
-
-- Admin button queues `POST /commands` (`type: speed_test`) for a `device_id`.
-- Agent: `system-info --poll-commands` (Windows task **SystemInfoPoll** every 2 min) claims and runs download+upload on the PC, then `POST /commands/{id}/complete`.
-- Also checked at the start of a normal report run.
 
 ---
 

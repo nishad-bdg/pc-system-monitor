@@ -8,9 +8,7 @@
 ;   - Copies system-info.exe
 ;   - Asks for API URL, API key, optional PC name + update manifest URL
 ;   - Writes %APPDATA%\system-info\config.env
-;   - Creates Task Scheduler jobs:
-    - **SystemInfoReport** every 30 minutes (full report)
-    - **SystemInfoPoll** every 2 minutes (`--poll-commands` for remote speed tests)
+;   - Creates Task Scheduler job SystemInfoReport every 30 minutes
 
 #define MyAppName "System Info Reporter"
 #define MyAppVersion "0.1.0"
@@ -104,7 +102,7 @@ end;
 procedure CreateScheduledTask;
 var
   ResultCode: Integer;
-  ExePath, PollArgs, ReportArgs: string;
+  ExePath, ReportArgs: string;
 begin
   ExePath := ExpandConstant('{app}\{#MyAppExeName}');
   { Full report every 30 minutes }
@@ -113,12 +111,6 @@ begin
     '/TR "\"' + ExePath + '\"" ' +
     '/RL LIMITED';
   Exec('schtasks.exe', ReportArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  { Lightweight command poll every 2 minutes (remote speed tests, etc.) }
-  PollArgs :=
-    '/Create /F /TN "SystemInfoPoll" /SC MINUTE /MO 2 ' +
-    '/TR "\"' + ExePath + '\" --poll-commands" ' +
-    '/RL LIMITED';
-  Exec('schtasks.exe', PollArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -137,6 +129,7 @@ begin
   if CurUninstallStep = usUninstall then
   begin
     Exec('schtasks.exe', '/Delete /F /TN "SystemInfoReport"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec('schtasks.exe', '/Delete /F /TN "SystemInfoWatch"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec('schtasks.exe', '/Delete /F /TN "SystemInfoPoll"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 end;
