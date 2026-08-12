@@ -1,7 +1,7 @@
 from functools import lru_cache
 
 from bson import ObjectId
-from pymongo import ASCENDING, MongoClient
+from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, DuplicateKeyError, PyMongoError
 
 from . import config
@@ -43,15 +43,47 @@ def list_reports(
     limit: int = 20,
     device_id: str | None = None,
     pc_name: str | None = None,
+    from_ts: float | None = None,
+    to_ts: float | None = None,
+    country: str | None = None,
+    os_name: str | None = None,
 ) -> list[dict]:
     records: list[dict] = []
-    query: dict = {}
+    clauses: list[dict] = []
     if device_id:
-        query["device_id"] = device_id
+        clauses.append({"device_id": device_id})
     if pc_name:
-        query["pc_name"] = {"$regex": pc_name, "$options": "i"}
+        pattern = {"$regex": pc_name, "$options": "i"}
+        clauses.append({"$or": [{"pc_name": pattern}, {"os.hostname": pattern}]})
+    if from_ts is not None or to_ts is not None:
+        created: dict = {}
+        if from_ts is not None:
+            created["$gte"] = from_ts
+        if to_ts is not None:
+            created["$lte"] = to_ts
+        clauses.append({"created_at": created})
+    if country:
+        country_pattern = {"$regex": country, "$options": "i"}
+        clauses.append(
+            {
+                "$or": [
+                    {"location.country": country_pattern},
+                    {"location.country_code": country_pattern},
+                ]
+            }
+        )
+    if os_name:
+        clauses.append({"os.system": {"$regex": os_name, "$options": "i"}})
+
+    if not clauses:
+        query: dict = {}
+    elif len(clauses) == 1:
+        query = clauses[0]
+    else:
+        query = {"$and": clauses}
+
     try:
-        cursor = _reports().find(query).sort("created_at", ASCENDING).limit(limit)
+        cursor = _reports().find(query).sort("created_at", -1).limit(limit)
         for doc in cursor:
             doc["_id"] = str(doc["_id"])
             records.append(doc)

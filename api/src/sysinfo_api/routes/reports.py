@@ -1,6 +1,6 @@
 import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
 from .. import db
@@ -26,12 +26,20 @@ def get_reports(
     limit: int = 20,
     device_id: str | None = None,
     pc_name: str | None = None,
+    from_ts: float | None = None,
+    to_ts: float | None = None,
+    country: str | None = None,
+    os: str | None = None,
     user: CurrentUser = None,
 ) -> dict:
     records = db.list_reports(
         min(max(limit, 1), 500),
         device_id=device_id or None,
         pc_name=pc_name or None,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        country=country or None,
+        os_name=os or None,
     )
     return {"total": len(records), "reports": records}
 

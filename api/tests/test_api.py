@@ -19,7 +19,11 @@ def _patch_db(monkeypatch, user=None):
 
     monkeypatch.setattr(db, "find_user_by_username", fake_find_user)
     monkeypatch.setattr(db, "get_user_by_id", lambda uid: dict(user) if uid == user["_id"] else None)
-    monkeypatch.setattr(db, "list_reports", lambda limit=20, device_id=None, pc_name=None: [])
+    monkeypatch.setattr(
+        db,
+        "list_reports",
+        lambda limit=20, device_id=None, pc_name=None, from_ts=None, to_ts=None, country=None, os_name=None: [],
+    )
     monkeypatch.setattr(db, "get_report", lambda rid: None)
     monkeypatch.setattr(db, "list_users", lambda: [dict(user)])
     monkeypatch.setattr(db, "list_api_keys", lambda: [])
@@ -127,10 +131,22 @@ def test_list_reports_passes_filters(monkeypatch):
     _patch_db(monkeypatch)
     seen = {}
 
-    def fake_list(limit=20, device_id=None, pc_name=None):
+    def fake_list(
+        limit=20,
+        device_id=None,
+        pc_name=None,
+        from_ts=None,
+        to_ts=None,
+        country=None,
+        os_name=None,
+    ):
         seen["limit"] = limit
         seen["device_id"] = device_id
         seen["pc_name"] = pc_name
+        seen["from_ts"] = from_ts
+        seen["to_ts"] = to_ts
+        seen["country"] = country
+        seen["os_name"] = os_name
         return [
             {
                 "_id": "1",
@@ -142,11 +158,20 @@ def test_list_reports_passes_filters(monkeypatch):
 
     monkeypatch.setattr(db, "list_reports", fake_list)
     resp = client.get(
-        "/reports?device_id=dev-2&pc_name=Office&limit=50",
+        "/reports?device_id=dev-2&pc_name=Office&limit=50"
+        "&from_ts=100&to_ts=200&country=BD&os=Darwin",
         headers=_auth_header(),
     )
     assert resp.status_code == 200
-    assert seen == {"limit": 50, "device_id": "dev-2", "pc_name": "Office"}
+    assert seen == {
+        "limit": 50,
+        "device_id": "dev-2",
+        "pc_name": "Office",
+        "from_ts": 100.0,
+        "to_ts": 200.0,
+        "country": "BD",
+        "os_name": "Darwin",
+    }
     assert resp.json()["total"] == 1
     assert resp.json()["reports"][0]["pc_name"] == "Office-PC-3"
 

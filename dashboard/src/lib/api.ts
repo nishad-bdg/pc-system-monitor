@@ -90,17 +90,48 @@ export async function fetchReports(
   apiUrl: string,
   apiToken: string,
   limit = 100,
-  filters?: { deviceId?: string; pcName?: string },
+  filters?: {
+    deviceId?: string;
+    pcName?: string;
+    fromTs?: number;
+    toTs?: number;
+    country?: string;
+    os?: string;
+  },
 ): Promise<ReportsResponse> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (filters?.deviceId) params.set("device_id", filters.deviceId);
   if (filters?.pcName) params.set("pc_name", filters.pcName);
+  if (filters?.fromTs != null) params.set("from_ts", String(filters.fromTs));
+  if (filters?.toTs != null) params.set("to_ts", String(filters.toTs));
+  if (filters?.country) params.set("country", filters.country);
+  if (filters?.os) params.set("os", filters.os);
   const res = await fetch(`${apiUrl}/reports?${params}`, {
     headers: { Authorization: `Bearer ${apiToken}` },
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`API error ${res.status}`);
   return res.json();
+}
+
+/** Encode machine key for URL path segment. */
+export function encodeMachineKey(key: string): string {
+  return encodeURIComponent(key);
+}
+
+export function decodeMachineKey(encoded: string): string {
+  return decodeURIComponent(encoded);
+}
+
+/** Build API filters to load reports for one machine key. */
+export function filtersForMachineKey(key: string): {
+  deviceId?: string;
+  pcName?: string;
+} {
+  if (key.startsWith("id:")) return { deviceId: key.slice(3) };
+  if (key.startsWith("name:")) return { pcName: key.slice(5) };
+  if (key.startsWith("mac:")) return {};
+  return { pcName: key };
 }
 
 export function machineName(r: Report): string {

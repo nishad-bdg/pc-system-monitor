@@ -1,7 +1,11 @@
 # Desktop Monitoring App
 
-Monitors machine info (OS, IPs, MAC, geolocation, CPU/RAM, disk) and stores
-reports via a FastAPI + MongoDB backend, with an admin web dashboard.
+Monitors machine info (OS, IPs, MAC, geolocation, CPU/RAM, disk, printers,
+network bandwidth) and stores reports via a FastAPI + MongoDB backend, with an
+admin web dashboard (Fleet + filterable Reports).
+
+For a full feature map and recent behavior, see **[CONTEXT.md](CONTEXT.md)**.
+
 
 ## Layout
 
