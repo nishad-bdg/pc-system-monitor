@@ -170,6 +170,32 @@ def test_extract_printer_ip():
     assert extract_printer_ip("usb://HP/DeskJet", "usb") is None
 
 
+def test_parse_env_file(tmp_path):
+    from system_info.config import parse_env_file
+
+    path = tmp_path / "config.env"
+    path.write_text(
+        "SYSTEM_INFO_API_URL=https://api.example\n"
+        "SYSTEM_INFO_API_KEY=sk-test\n"
+        "# comment\n"
+        "SYSTEM_INFO_PC_NAME=Office-1\n",
+        encoding="utf-8",
+    )
+    values = parse_env_file(path)
+    assert values["SYSTEM_INFO_API_URL"] == "https://api.example"
+    assert values["SYSTEM_INFO_API_KEY"] == "sk-test"
+    assert values["SYSTEM_INFO_PC_NAME"] == "Office-1"
+
+
+def test_is_newer_version():
+    from system_info.update import is_newer
+
+    assert is_newer("0.2.0", "0.1.0")
+    assert not is_newer("0.1.0", "0.1.0")
+    assert not is_newer("0.1.0", "0.2.0")
+    assert is_newer("v1.0.0", "0.9.9")
+
+
 def test_collect_network_usage(monkeypatch):
     from system_info import network
 

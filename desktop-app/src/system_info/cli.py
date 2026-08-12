@@ -4,6 +4,8 @@ import os
 
 import requests
 
+from .version import __version__
+from .config import load_install_config
 from .geo import geo_locate
 from .ip import get_private_ip, get_public_ip, get_mac_address, get_mac_addresses
 from .os_info import collect_os_info
@@ -12,6 +14,9 @@ from .disk import collect_disk_info
 from .printers import collect_printers
 from .network import collect_network_usage
 from .device import get_or_create_device_id, resolve_pc_name
+from .update import check_for_update, maybe_auto_update
+# Load packaged/installer config before reading defaults.
+load_install_config()
 
 DEFAULT_API_URL = os.getenv("SYSTEM_INFO_API_URL", "http://127.0.0.1:8000")
 DEFAULT_API_KEY = os.getenv("SYSTEM_INFO_API_KEY", "")
@@ -41,6 +46,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Custom PC name (Windows only; macOS always uses hostname). "
         "Falls back to hostname when empty. Env: SYSTEM_INFO_PC_NAME",
     )
+    parser.add_argument(
+        "--check-update",
+        action="store_true",
+        help="Check SYSTEM_INFO_UPDATE_URL for a newer Windows release and exit",
+    )
+    parser.add_argument(
+        "--auto-update",
+        action="store_true",
+        help="If a newer Windows release exists, download and stage it (frozen builds)",
+    )
+    parser.add_argument("--version", action="store_true", help="Print version and exit")
     return parser
 
 
@@ -53,6 +69,31 @@ def _fmt_bytes(num: int) -> str:
 
 
 def run(args: argparse.Namespace) -> int:
+    if args.version:
+        print(__version__)
+        return 0
+
+    if args.check_update or args.auto_update:
+        manifest = check_for_update()
+        if not manifest:
+            if not args.json:
+                print(f"up to date ({__version__})")
+            else:
+                print(json.dumps({"version": __version__, "update": None}))
+            return 0
+        if args.json:
+            print(json.dumps({"version": __version__, "update": manifest}, indent=2))
+        else:
+            print(f"update available: {manifest.get('version')} (local {__version__})")
+        if args.auto_update:
+            started = maybe_auto_update(quiet=bool(args.json))
+            return 0 if started else 1
+        return 0
+
+    # Quiet release check on normal scheduled runs (Windows frozen builds).
+    if os.getenv("SYSTEM_INFO_UPDATE_URL") and not args.no_save:
+        maybe_auto_update(quiet=True)
+
     data: dict = {}
 
     specific = (

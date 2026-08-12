@@ -1,0 +1,8 @@
+{
+  "version": "0.1.0",
+  "notes": "Host this JSON at a stable HTTPS URL. Set SYSTEM_INFO_UPDATE_URL to that URL.",
+  "windows": {
+    "url": "https://github.com/OWNER/REPO/releases/download/v0.1.0/system-info.exe",
+    "sha256": "REPLACE_WITH_SHA256_OF_EXE"
+  }
+}

@@ -170,11 +170,15 @@ Dashboard **Refresh** only reloads API data. It does **not** push collect comman
 
 ---
 
-## Not implemented (discussed / deferred)
+## Windows packaging (release updates)
 
-- Long-running desktop **`--agent`** polling `POST /commands/collect` for admin Refresh → remote collect.
-- Admin **Settings / API keys** UI page (API exists: `GET/POST/DELETE /api-keys`).
-- Dedicated `machines` Mongo collection (reports remain source of truth).
+See `desktop-app/packaging/windows/README.md`.
+
+- **Installer (Inno Setup):** installs exe under `%LOCALAPPDATA%\SystemInfo`, writes
+  `%APPDATA%\system-info\config.env` (API URL/key/PC name/update URL), creates
+  Task Scheduler job **SystemInfoReport** every 30 minutes.
+- **Updates:** host a JSON release manifest (`SYSTEM_INFO_UPDATE_URL`); app checks
+  on each run and stages a new exe (not live `git pull`).
 
 ---
 

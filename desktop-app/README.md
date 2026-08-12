@@ -35,7 +35,13 @@ when set; otherwise it falls back to the hostname. Printers are classified as
 USB, network, or other.
 
 The API key can also be set once via the `SYSTEM_INFO_API_KEY` environment
-variable (and URL via `SYSTEM_INFO_API_URL`).
+variable (and URL via `SYSTEM_INFO_API_URL`). Packaged Windows installs use
+`%APPDATA%\system-info\config.env` (written by the installer).
+
+## Windows installer
+
+See [packaging/windows/README.md](packaging/windows/README.md): PyInstaller +
+Inno Setup, Task Scheduler every 30 minutes, release-manifest auto-update.
 
 ## Tests
 
