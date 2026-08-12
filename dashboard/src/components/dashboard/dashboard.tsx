@@ -17,6 +17,7 @@ import {
   fetchReports,
   fmtBytes,
   fmtPercent,
+  fmtRate,
   fmtRelative,
   fmtTime,
   groupMachines,
@@ -286,6 +287,8 @@ function MachineDetail({ machine }: { machine: MachineSummary }) {
           <StorageSection disk={host.disk} />
         )}
 
+      {host.network && <NetworkSection network={host.network} />}
+
       {host.printers && <PrintersSection printers={host.printers} />}
 
       <ChartCard title="CPU / RAM / Swap over time">
@@ -356,6 +359,45 @@ function MachineDetail({ machine }: { machine: MachineSummary }) {
   );
 }
 
+function NetworkSection({
+  network,
+}: {
+  network: NonNullable<Report["network"]>;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+      <h2 className="text-sm font-medium text-slate-700">Network bandwidth</h2>
+      <p className="mt-1 text-xs text-slate-500">
+        Totals since boot · rates sampled at report time
+      </p>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label="Sent total"
+          value={fmtBytes(network.bytes_sent)}
+          sub="Since boot"
+        />
+        <StatCard
+          label="Received total"
+          value={fmtBytes(network.bytes_recv)}
+          sub="Since boot"
+        />
+        <StatCard
+          label="Upload rate"
+          value={fmtRate(network.send_rate_bps)}
+          sub="Current sample"
+          accent
+        />
+        <StatCard
+          label="Download rate"
+          value={fmtRate(network.recv_rate_bps)}
+          sub="Current sample"
+          accent
+        />
+      </div>
+    </div>
+  );
+}
+
 function PrintersSection({
   printers,
 }: {
@@ -400,7 +442,7 @@ function PrintersSection({
                 {items.length === 0 ? (
                   <p className="mt-3 text-sm text-slate-400">None</p>
                 ) : (
-                  <ul className="mt-3 space-y-2">
+                  <ul className="mt-3 space-y-3">
                     {items.map((p) => (
                       <li key={`${p.name}-${p.port}`} className="min-w-0">
                         <p className="truncate text-sm font-medium text-slate-900">
@@ -408,6 +450,23 @@ function PrintersSection({
                         </p>
                         <p className="truncate font-mono text-[11px] text-slate-500">
                           {p.port || "—"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-600">
+                          {key === "network" ? (
+                            <>
+                              IP:{" "}
+                              <span className="font-medium text-slate-800">
+                                {p.ip || "—"}
+                              </span>
+                              <span className="mx-1.5 text-slate-300">·</span>
+                            </>
+                          ) : null}
+                          Prints:{" "}
+                          <span className="font-medium text-slate-800">
+                            {p.print_count == null
+                              ? "—"
+                              : p.print_count.toLocaleString()}
+                          </span>
                         </p>
                       </li>
                     ))}

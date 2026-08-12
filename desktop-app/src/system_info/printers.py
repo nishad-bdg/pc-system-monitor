@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass, field
+from urllib.parse import quote
 
 
 _NETWORK_HINTS = (
@@ -28,15 +29,25 @@ _NETWORK_HINTS = (
     "network",
 )
 
+_IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+_IP_PREFIX_RE = re.compile(r"IP_((?:\d{1,3}\.){3}\d{1,3})", re.IGNORECASE)
+
 
 @dataclass
 class Printer:
     name: str
     port: str
     connection: str  # usb | network | other
+    ip: str | None = None
+    print_count: int | None = None
 
     def to_dict(self) -> dict:
-        return {"name": self.name, "port": self.port}
+        return {
+            "name": self.name,
+            "port": self.port,
+            "ip": self.ip,
+            "print_count": self.print_count,
+        }
 
 
 @dataclass
@@ -67,12 +78,23 @@ def classify_connection(port: str) -> str:
         return "usb"
     if any(hint in value for hint in _NETWORK_HINTS):
         return "network"
-    # Windows often uses bare hostnames or host:port for TCP printers.
     if re.match(r"^\d{1,3}(\.\d{1,3}){3}(:\d+)?$", value):
         return "network"
     if re.match(r"^[a-z0-9._-]+.\w+:\d+$", value):
         return "network"
     return "other"
+
+
+def extract_printer_ip(port: str, connection: str) -> str | None:
+    """Pull an IPv4 address from a network printer port/URI when present."""
+    if connection != "network":
+        return None
+    value = port or ""
+    prefixed = _IP_PREFIX_RE.search(value)
+    if prefixed:
+        return prefixed.group(1)
+    match = _IPV4_RE.search(value)
+    return match.group(0) if match else None
 
 
 def _run(cmd: list[str], timeout: float = 8.0) -> str:
@@ -91,8 +113,106 @@ def _run(cmd: list[str], timeout: float = 8.0) -> str:
     return result.stdout or ""
 
 
+def _parse_int(value: object) -> int | None:
+    try:
+        number = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return number if number >= 0 else None
+
+
+def _macos_print_count(name: str) -> int | None:
+    """Best-effort page/impression count via IPP (ipptool), when available."""
+    uri = f"ipp://localhost/printers/{quote(name)}"
+    test = (
+        "{\n"
+        "  OPERATION Get-Printer-Attributes\n"
+        "  GROUP operation-attributes-tag\n"
+        "  ATTR charset attributes-charset utf-8\n"
+        "  ATTR language attributes-natural-language en\n"
+        f'  ATTR uri printer-uri "{uri}"\n'
+        "  DISPLAY printer-impressions-completed\n"
+        "  DISPLAY job-impressions-completed\n"
+        "  DISPLAY printer-pages-printed\n"
+        "  DISPLAY pages-completed\n"
+        "}\n"
+    )
+    try:
+        result = subprocess.run(
+            ["ipptool", "-t", uri, "-"],
+            input=test,
+            capture_output=True,
+            text=True,
+            timeout=6.0,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    text = (result.stdout or "") + "\n" + (result.stderr or "")
+    for attr in (
+        "printer-impressions-completed",
+        "job-impressions-completed",
+        "printer-pages-printed",
+        "pages-completed",
+    ):
+        match = re.search(rf"{re.escape(attr)}\s*[:=]\s*(\d+)", text, re.I)
+        if match:
+            return _parse_int(match.group(1))
+    return None
+
+
+def _windows_print_counts() -> dict[str, int]:
+    """Map printer name -> count from Get-PrinterProperty when exposed."""
+    script = r"""
+$out = @()
+Get-Printer -ErrorAction SilentlyContinue | ForEach-Object {
+  $name = $_.Name
+  $count = $null
+  try {
+    $props = Get-PrinterProperty -PrinterName $name -ErrorAction SilentlyContinue
+    foreach ($p in $props) {
+      if ($p.PropertyName -match 'PageCount|PrintCount|TotalPages|Impressions|Pages Printed') {
+        $n = 0
+        if ([int]::TryParse([string]$p.Value, [ref]$n)) { $count = $n; break }
+      }
+    }
+  } catch {}
+  $out += [pscustomobject]@{ Name = $name; PrintCount = $count }
+}
+$out | ConvertTo-Json -Compress
+"""
+    raw = _run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+        ],
+        timeout=20.0,
+    )
+    if not raw.strip():
+        return {}
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return {}
+    if isinstance(payload, dict):
+        payload = [payload]
+    if not isinstance(payload, list):
+        return {}
+    result: dict[str, int] = {}
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("Name") or "").strip()
+        count = _parse_int(item.get("PrintCount"))
+        if name and count is not None:
+            result[name] = count
+    return result
+
+
 def _collect_macos() -> list[Printer]:
-    # `lpstat -v` → "device for Name: uri"
     raw = _run(["lpstat", "-v"])
     printers: list[Printer] = []
     for line in raw.splitlines():
@@ -107,14 +227,20 @@ def _collect_macos() -> list[Printer]:
         port = port.strip()
         if not name:
             continue
+        connection = classify_connection(port)
         printers.append(
-            Printer(name=name, port=port, connection=classify_connection(port))
+            Printer(
+                name=name,
+                port=port,
+                connection=connection,
+                ip=extract_printer_ip(port, connection),
+                print_count=_macos_print_count(name),
+            )
         )
     return printers
 
 
 def _collect_windows() -> list[Printer]:
-    # Prefer PowerShell Get-Printer for Name + PortName.
     script = (
         "Get-Printer | Select-Object Name, PortName | "
         "ConvertTo-Json -Compress"
@@ -140,6 +266,7 @@ def _collect_windows() -> list[Printer]:
     if not isinstance(payload, list):
         return []
 
+    counts = _windows_print_counts()
     printers: list[Printer] = []
     for item in payload:
         if not isinstance(item, dict):
@@ -148,8 +275,15 @@ def _collect_windows() -> list[Printer]:
         port = str(item.get("PortName") or "").strip()
         if not name:
             continue
+        connection = classify_connection(port)
         printers.append(
-            Printer(name=name, port=port, connection=classify_connection(port))
+            Printer(
+                name=name,
+                port=port,
+                connection=connection,
+                ip=extract_printer_ip(port, connection),
+                print_count=counts.get(name),
+            )
         )
     return printers
 

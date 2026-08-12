@@ -10,6 +10,7 @@ from .os_info import collect_os_info
 from .resources import collect_resources
 from .disk import collect_disk_info
 from .printers import collect_printers
+from .network import collect_network_usage
 from .device import get_or_create_device_id, resolve_pc_name
 
 DEFAULT_API_URL = os.getenv("SYSTEM_INFO_API_URL", "http://127.0.0.1:8000")
@@ -29,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sys", action="store_true", help="Only show CPU/RAM usage")
     parser.add_argument("--disk", action="store_true", help="Only show storage/disk info")
     parser.add_argument("--printers", action="store_true", help="Only show printers")
+    parser.add_argument("--network", action="store_true", help="Only show network bandwidth")
     parser.add_argument("--json", action="store_true", help="Print output as JSON")
     parser.add_argument("--no-save", action="store_true", help="Do not save report to the API")
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="API base URL to save reports to")
@@ -53,13 +55,22 @@ def _fmt_bytes(num: int) -> str:
 def run(args: argparse.Namespace) -> int:
     data: dict = {}
 
-    specific = args.ip or args.geo or args.sys or args.disk or args.printers or args.os
+    specific = (
+        args.ip
+        or args.geo
+        or args.sys
+        or args.disk
+        or args.printers
+        or args.network
+        or args.os
+    )
     show_os = not specific or args.os
     show_ip = not specific or args.ip
     show_geo = not specific or args.geo
     show_sys = not specific or args.sys
     show_disk = not specific or args.disk
     show_printers = not specific or args.printers
+    show_network = not specific or args.network
 
     pc_name = resolve_pc_name(args.pc_name)
     device_id = get_or_create_device_id(pc_name)
@@ -88,7 +99,20 @@ def run(args: argparse.Namespace) -> int:
     if show_printers:
         data["printers"] = collect_printers().to_dict()
 
-    _print(data, show_os, show_ip, show_geo, show_sys, show_disk, show_printers, args)
+    if show_network:
+        data["network"] = collect_network_usage().to_dict()
+
+    _print(
+        data,
+        show_os,
+        show_ip,
+        show_geo,
+        show_sys,
+        show_disk,
+        show_printers,
+        show_network,
+        args,
+    )
 
     if not args.no_save:
         saved_id = save_report(data, args.api_url, args.api_key)
@@ -126,6 +150,7 @@ def _print(
     show_sys: bool,
     show_disk: bool,
     show_printers: bool,
+    show_network: bool,
     args: argparse.Namespace,
 ) -> None:
     if args.json:
@@ -203,6 +228,14 @@ def _print(
                 f"  {p['percent']:>5.1f}%"
             )
 
+    if show_network:
+        net = data.get("network") or {}
+        print("== Network Bandwidth ==")
+        print(f"  sent total:     {_fmt_bytes(int(net.get('bytes_sent') or 0))}")
+        print(f"  received total: {_fmt_bytes(int(net.get('bytes_recv') or 0))}")
+        print(f"  send rate:      {_fmt_bytes(int(net.get('send_rate_bps') or 0))}/s")
+        print(f"  recv rate:      {_fmt_bytes(int(net.get('recv_rate_bps') or 0))}/s")
+
     if show_printers:
         printers = data.get("printers") or {}
         print("== Printers ==")
@@ -211,7 +244,13 @@ def _print(
             items = printers.get(label) or []
             print(f"  {label}: {len(items)}")
             for item in items:
-                print(f"    - {item.get('name')} ({item.get('port') or 'unknown'})")
+                extra = []
+                if item.get("ip"):
+                    extra.append(f"ip={item['ip']}")
+                if item.get("print_count") is not None:
+                    extra.append(f"prints={item['print_count']}")
+                suffix = f" [{', '.join(extra)}]" if extra else ""
+                print(f"    - {item.get('name')} ({item.get('port') or 'unknown'}){suffix}")
 
 
 def main() -> int:

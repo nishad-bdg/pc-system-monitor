@@ -161,10 +161,38 @@ def test_classify_connection():
     assert classify_connection("") == "other"
 
 
+def test_extract_printer_ip():
+    from system_info.printers import extract_printer_ip
+
+    assert extract_printer_ip("ipp://192.168.1.20/ipp/print", "network") == "192.168.1.20"
+    assert extract_printer_ip("IP_10.0.0.5", "network") == "10.0.0.5"
+    assert extract_printer_ip("socket://printer.local:9100", "network") is None
+    assert extract_printer_ip("usb://HP/DeskJet", "usb") is None
+
+
+def test_collect_network_usage(monkeypatch):
+    from system_info import network
+
+    class Counters:
+        def __init__(self, sent, recv):
+            self.bytes_sent = sent
+            self.bytes_recv = recv
+
+    values = iter([Counters(1000, 2000), Counters(1500, 2600)])
+    monkeypatch.setattr(network.psutil, "net_io_counters", lambda: next(values))
+    monkeypatch.setattr(network.time, "sleep", lambda s: None)
+    usage = network.collect_network_usage(interval=0.5)
+    assert usage.bytes_sent == 1500
+    assert usage.bytes_recv == 2600
+    assert usage.send_rate_bps == 1000.0  # 500 bytes / 0.5s
+    assert usage.recv_rate_bps == 1200.0
+
+
 def test_collect_printers_macos(monkeypatch):
     from system_info import printers
 
     monkeypatch.setattr(printers.os, "name", "posix")
+    monkeypatch.setattr(printers, "_macos_print_count", lambda name: 42 if name == "Office_Laser" else None)
     monkeypatch.setattr(
         printers,
         "_run",
@@ -177,11 +205,15 @@ def test_collect_printers_macos(monkeypatch):
     info = printers.collect_printers()
     assert info.count == 3
     assert [p.name for p in info.usb] == ["DeskJet"]
-    assert [p.name for p in info.network] == ["Office_Laser"]
+    assert info.network[0].name == "Office_Laser"
+    assert info.network[0].ip == "192.168.1.20"
+    assert info.network[0].print_count == 42
     assert [p.name for p in info.other] == ["OneNote"]
     payload = info.to_dict()
     assert payload["count"] == 3
     assert payload["usb"][0]["port"].startswith("usb://")
+    assert "ip" in payload["network"][0]
+    assert "print_count" in payload["network"][0]
 
 
 def test_collect_printers_windows(monkeypatch):
@@ -196,12 +228,13 @@ def test_collect_printers_windows(monkeypatch):
         ]
     )
     monkeypatch.setattr(printers, "_run", lambda cmd, timeout=8.0: payload)
+    monkeypatch.setattr(printers, "_windows_print_counts", lambda: {"Floor Printer": 100})
     info = printers.collect_printers()
     assert info.count == 3
     assert [p.name for p in info.usb] == ["HP USB"]
-    assert [p.name for p in info.network] == ["Floor Printer"]
+    assert info.network[0].ip == "10.0.0.5"
+    assert info.network[0].print_count == 100
     assert [p.name for p in info.other] == ["Microsoft Print to PDF"]
-
 
 def test_resolve_pc_name_macos_ignores_explicit(monkeypatch):
     from system_info import device

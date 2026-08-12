@@ -60,9 +60,15 @@ export interface Report {
   } | null;
   printers?: {
     count?: number;
-    usb?: { name: string; port: string }[];
-    network?: { name: string; port: string }[];
-    other?: { name: string; port: string }[];
+    usb?: { name: string; port: string; ip?: string | null; print_count?: number | null }[];
+    network?: { name: string; port: string; ip?: string | null; print_count?: number | null }[];
+    other?: { name: string; port: string; ip?: string | null; print_count?: number | null }[];
+  } | null;
+  network?: {
+    bytes_sent?: number;
+    bytes_recv?: number;
+    send_rate_bps?: number;
+    recv_rate_bps?: number;
   } | null;
   created_at?: number;
 }
@@ -280,4 +286,9 @@ export function fmtRelative(ts?: number): string {
   if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
   if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
   return `${Math.floor(sec / 86400)}d ago`;
+}
+
+export function fmtRate(bps?: number): string {
+  if (bps === undefined || bps === null) return "—";
+  return `${fmtBytes(bps)}/s`;
 }
