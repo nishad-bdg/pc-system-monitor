@@ -8,6 +8,7 @@ MONGO_DB = os.getenv("SYSTEM_INFO_MONGO_DB", "system_info")
 MONGO_COLLECTION = "reports"
 MONGO_USERS = "users"
 MONGO_API_KEYS = "api_keys"
+MONGO_COMMANDS = "commands"
 
 JWT_SECRET = os.getenv("JWT_SECRET", "dev-only-secret-change-me-32bytes-min")
 JWT_ALGORITHM = "HS256"

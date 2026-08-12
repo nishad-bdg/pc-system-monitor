@@ -27,6 +27,11 @@ def _patch_db(monkeypatch, user=None):
     monkeypatch.setattr(db, "get_report", lambda rid: None)
     monkeypatch.setattr(db, "list_users", lambda: [dict(user)])
     monkeypatch.setattr(db, "list_api_keys", lambda: [])
+    monkeypatch.setattr(db, "create_command", lambda **kw: None)
+    monkeypatch.setattr(db, "claim_pending_command", lambda device_id: None)
+    monkeypatch.setattr(db, "complete_command", lambda *a, **k: None)
+    monkeypatch.setattr(db, "get_command", lambda cid: None)
+    monkeypatch.setattr(db, "list_commands", lambda device_id, limit=20: [])
 
 
 def _auth_header(sub="64b000000000000000000001", role="admin"):
@@ -259,3 +264,73 @@ def test_list_users(monkeypatch):
     resp = client.get("/users", headers=_auth_header())
     assert resp.status_code == 200
     assert resp.json()[0]["username"] == "admin"
+
+def test_create_speed_test_command(monkeypatch):
+    _patch_db(monkeypatch)
+    monkeypatch.setattr(
+        db,
+        "create_command",
+        lambda **kw: {
+            "_id": "64b0000000000000000000c1",
+            "device_id": kw["device_id"],
+            "type": kw["command_type"],
+            "status": "pending",
+        },
+    )
+    resp = client.post(
+        "/commands",
+        json={"device_id": "dev-1", "type": "speed_test"},
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 201
+    assert resp.json()["status"] == "pending"
+    assert resp.json()["device_id"] == "dev-1"
+
+
+def test_claim_and_complete_command(monkeypatch):
+    _patch_db(monkeypatch)
+    key = security.generate_api_key()
+    monkeypatch.setattr(
+        db,
+        "find_api_key_by_hash",
+        lambda h: {"_id": "x", "prefix": key[:20], "active": True},
+    )
+    monkeypatch.setattr(
+        db,
+        "claim_pending_command",
+        lambda device_id: {
+            "_id": "64b0000000000000000000c2",
+            "device_id": device_id,
+            "type": "speed_test",
+            "status": "running",
+        },
+    )
+    monkeypatch.setattr(
+        db,
+        "complete_command",
+        lambda cid, **kw: {
+            "_id": cid,
+            "device_id": "dev-1",
+            "type": "speed_test",
+            "status": kw["status"],
+            "result": kw.get("result"),
+        },
+    )
+    pending = client.get(
+        "/commands/pending",
+        params={"device_id": "dev-1"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert pending.status_code == 200
+    assert pending.json()["command"]["status"] == "running"
+
+    done = client.post(
+        "/commands/64b0000000000000000000c2/complete",
+        json={
+            "status": "done",
+            "result": {"download_mbps": 40.0, "upload_mbps": 10.0},
+        },
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert done.status_code == 200
+    assert done.json()["result"]["download_mbps"] == 40.0

@@ -38,7 +38,9 @@ Wizard asks for:
 | PC name | optional Windows display name |
 | Update manifest URL | optional HTTPS JSON (see below) |
 
-Writes `%APPDATA%\system-info\config.env` and creates task **SystemInfoReport** (every 30 minutes).
+Writes `%APPDATA%\system-info\config.env` and creates tasks:
+- **SystemInfoReport** — every 30 minutes (full report)
+- **SystemInfoPoll** — every 2 minutes (`--poll-commands`, remote speed tests)
 
 ## 4. Release updates (not git)
 

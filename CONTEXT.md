@@ -175,7 +175,13 @@ Keys look like `id:…`, `mac:…`, `name:…` (URL-encoded for `/reports/[key]`
 
 ### Important ops note
 
-Dashboard **Refresh** only reloads API data. It does **not** push collect commands to desktops (agent/poll design discussed, not implemented). Re-run `system-info` on each PC for new snapshots.
+Dashboard **Refresh** only reloads API data. It does **not** push collect commands to desktops except via the **commands** queue (e.g. remote speed test). Re-run `system-info` / wait for the poller for new snapshots.
+
+### Remote speed test
+
+- Admin button queues `POST /commands` (`type: speed_test`) for a `device_id`.
+- Agent: `system-info --poll-commands` (Windows task **SystemInfoPoll** every 2 min) claims and runs download+upload on the PC, then `POST /commands/{id}/complete`.
+- Also checked at the start of a normal report run.
 
 ---
 

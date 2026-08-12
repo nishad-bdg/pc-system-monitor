@@ -122,6 +122,52 @@ export async function fetchReports(
   return res.json();
 }
 
+export interface DeviceCommand {
+  _id: string;
+  device_id: string;
+  type: string;
+  status: "pending" | "running" | "done" | "failed" | string;
+  created_at?: number;
+  updated_at?: number;
+  completed_at?: number;
+  result?: {
+    download_mbps?: number | null;
+    upload_mbps?: number | null;
+  } | null;
+  error?: string | null;
+}
+
+export async function createSpeedTestCommand(
+  apiUrl: string,
+  apiToken: string,
+  deviceId: string,
+): Promise<DeviceCommand> {
+  const res = await fetch(`${apiUrl}/commands`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ device_id: deviceId, type: "speed_test" }),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json();
+}
+
+export async function fetchCommand(
+  apiUrl: string,
+  apiToken: string,
+  commandId: string,
+): Promise<DeviceCommand> {
+  const res = await fetch(`${apiUrl}/commands/${commandId}`, {
+    headers: { Authorization: `Bearer ${apiToken}` },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json();
+}
+
 /** Encode machine key for URL path segment. */
 export function encodeMachineKey(key: string): string {
   return encodeURIComponent(key);

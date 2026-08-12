@@ -288,6 +288,61 @@ def test_uptime_reboot_skips_offline(tmp_path):
     assert info.day_timezone == "UTC"
 
 
+def test_poll_commands_runs_speed_test(monkeypatch):
+    from system_info import commands
+
+    calls = {"complete": []}
+
+    class FakeResp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    pending = {"n": 0}
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        pending["n"] += 1
+        if pending["n"] == 1:
+            return FakeResp(
+                {
+                    "command": {
+                        "_id": "cmd1",
+                        "type": "speed_test",
+                        "device_id": "dev-1",
+                    }
+                }
+            )
+        return FakeResp({"command": None})
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        calls["complete"].append(json)
+        return FakeResp({})
+
+    monkeypatch.setattr(commands, "resolve_pc_name", lambda n: "PC")
+    monkeypatch.setattr(commands, "get_or_create_device_id", lambda n: "dev-1")
+    monkeypatch.setattr(
+        commands,
+        "run_full_speed_test",
+        lambda: {"download_mbps": 12.0, "upload_mbps": 3.0},
+    )
+    monkeypatch.setattr(commands.requests, "get", fake_get)
+    monkeypatch.setattr(commands.requests, "post", fake_post)
+
+    n = commands.poll_and_run_commands(
+        api_url="http://example",
+        api_key="sk-test",
+        quiet=True,
+    )
+    assert n == 1
+    assert calls["complete"][0]["status"] == "done"
+    assert calls["complete"][0]["result"]["download_mbps"] == 12.0
+
+
 def test_uptime_same_boot_credits_gap(tmp_path):
     from system_info.uptime import collect_uptime, save_state
     from datetime import datetime, timezone

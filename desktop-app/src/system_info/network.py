@@ -1,4 +1,4 @@
-"""Network bandwidth totals, rates, and approximate internet download speed."""
+"""Network bandwidth totals, rates, and on-demand internet speed tests."""
 
 from __future__ import annotations
 
@@ -10,8 +10,11 @@ import requests
 
 _RATE_INTERVAL = 0.5
 _DOWNLOAD_URL = "https://speed.cloudflare.com/__down?bytes=1000000"
+_UPLOAD_URL = "https://speed.cloudflare.com/__up"
 _DOWNLOAD_TIMEOUT = 8.0
-_DOWNLOAD_BYTES = 1_000_000
+_FULL_DOWNLOAD_BYTES = 10_000_000
+_FULL_UPLOAD_BYTES = 5_000_000
+_FULL_TIMEOUT = 45.0
 
 
 @dataclass
@@ -55,6 +58,58 @@ def measure_download_mbps(
         return None
 
 
+def measure_upload_mbps(
+    size_bytes: int = _FULL_UPLOAD_BYTES,
+    timeout: float = _FULL_TIMEOUT,
+) -> float | None:
+    """Timed HTTPS upload of random bytes → approximate Mbps. Fail soft."""
+    try:
+        chunk = b"x" * min(65536, size_bytes)
+        remaining = size_bytes
+
+        def body():
+            nonlocal remaining
+            while remaining > 0:
+                n = min(len(chunk), remaining)
+                remaining -= n
+                yield chunk[:n]
+
+        started = time.monotonic()
+        resp = requests.post(
+            f"{_UPLOAD_URL}?measId={int(started * 1000)}",
+            data=body(),
+            headers={"Content-Type": "application/octet-stream"},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        elapsed = time.monotonic() - started
+        if elapsed <= 0:
+            return None
+        return (size_bytes * 8) / (elapsed * 1_000_000)
+    except (requests.RequestException, OSError, ValueError):
+        return None
+
+
+def run_full_speed_test(
+    *,
+    download_bytes: int = _FULL_DOWNLOAD_BYTES,
+    upload_bytes: int = _FULL_UPLOAD_BYTES,
+    timeout: float = _FULL_TIMEOUT,
+) -> dict:
+    """Full download + upload probe for remote command execution."""
+    down_url = f"https://speed.cloudflare.com/__down?bytes={download_bytes}"
+    download_mbps = measure_download_mbps(url=down_url, timeout=timeout)
+    upload_mbps = measure_upload_mbps(size_bytes=upload_bytes, timeout=timeout)
+    if download_mbps is None and upload_mbps is None:
+        raise RuntimeError("speed test failed (download and upload)")
+    return {
+        "download_mbps": download_mbps,
+        "upload_mbps": upload_mbps,
+        "download_bytes": download_bytes,
+        "upload_bytes": upload_bytes,
+    }
+
+
 def collect_network_usage(
     interval: float = _RATE_INTERVAL,
     *,
@@ -62,8 +117,7 @@ def collect_network_usage(
 ) -> NetworkUsage:
     """Totals since boot + short-interval NIC rates.
 
-    Download Mbps is off by default (live test is admin button-only).
-    Pass probe_download=True for an optional one-shot probe.
+    Download Mbps is off by default (remote/admin button only).
     """
     first = psutil.net_io_counters()
     time.sleep(max(0.1, interval))
