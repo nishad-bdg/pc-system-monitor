@@ -97,40 +97,159 @@ export async function fetchReports(
   return res.json();
 }
 
-export function machineKey(r: Report): string {
-  return r.device_id || r.pc_name || r.os?.hostname || r._id || "unknown";
-}
-
 export function machineName(r: Report): string {
   return r.pc_name || r.os?.hostname || r.public_ip || "Unknown PC";
 }
 
-/** Group reports into machines; each machine keeps reports sorted ascending by time. */
+function normalizeMac(mac?: string | null): string | null {
+  if (!mac) return null;
+  const cleaned = mac.toLowerCase().replace(/[^0-9a-f]/g, "");
+  if (cleaned.length < 12) return null;
+  if (/^0+$/.test(cleaned) || /^f+$/.test(cleaned)) return null;
+  return cleaned;
+}
+
+function nameKey(r: Report): string | null {
+  const name = (r.pc_name || r.os?.hostname || "").trim().toLowerCase();
+  return name || null;
+}
+
+function reportMacs(r: Report): string[] {
+  const out = new Set<string>();
+  const primary = normalizeMac(r.mac_address);
+  if (primary) out.add(primary);
+  for (const iface of r.mac_addresses ?? []) {
+    const mac = normalizeMac(iface.mac);
+    if (mac) out.add(mac);
+  }
+  return [...out];
+}
+
+/** Provisional identity: device_id > MAC > name > report id. */
+export function machineKey(r: Report): string {
+  if (r.device_id) return `id:${r.device_id}`;
+  const mac = normalizeMac(r.mac_address) ?? reportMacs(r)[0];
+  if (mac) return `mac:${mac}`;
+  const name = nameKey(r);
+  if (name) return `name:${name}`;
+  return `anon:${r._id || "unknown"}`;
+}
+
+type GroupMeta = {
+  key: string;
+  reports: Report[];
+  deviceId: string | null;
+  macs: Set<string>;
+  names: Set<string>;
+};
+
+function groupScore(m: GroupMeta): number {
+  if (m.deviceId || m.key.startsWith("id:")) return 3;
+  if (m.key.startsWith("mac:") || m.macs.size > 0) return 2;
+  return 1;
+}
+
+function shouldMerge(a: GroupMeta, b: GroupMeta): boolean {
+  if (a.deviceId && b.deviceId && a.deviceId === b.deviceId) return true;
+  for (const mac of a.macs) {
+    if (b.macs.has(mac)) return true;
+  }
+  for (const name of a.names) {
+    if (b.names.has(name)) return true;
+  }
+  return false;
+}
+
+/**
+ * Group reports into one fleet row per physical PC.
+ * Prefers device_id, then MAC, then name; merges overlapping identities
+ * so old reports (no device_id) collapse into newer ones.
+ */
 export function groupMachines(reports: Report[]): MachineSummary[] {
-  const map = new Map<string, MachineSummary>();
+  const buckets = new Map<string, Report[]>();
   for (const r of reports) {
     const key = machineKey(r);
-    const existing = map.get(key);
+    const list = buckets.get(key);
+    if (list) list.push(r);
+    else buckets.set(key, [r]);
+  }
+
+  const metas: GroupMeta[] = [...buckets.entries()].map(([key, reps]) => {
+    const macs = new Set<string>();
+    const names = new Set<string>();
+    let deviceId: string | null = null;
+    for (const r of reps) {
+      if (r.device_id) deviceId = r.device_id;
+      for (const mac of reportMacs(r)) macs.add(mac);
+      const name = nameKey(r);
+      if (name) names.add(name);
+    }
+    return { key, reports: reps, deviceId, macs, names };
+  });
+
+  const parent = metas.map((_, i) => i);
+  const find = (i: number): number => {
+    if (parent[i] !== i) parent[i] = find(parent[i]);
+    return parent[i];
+  };
+  const union = (i: number, j: number) => {
+    const ri = find(i);
+    const rj = find(j);
+    if (ri === rj) return;
+    if (groupScore(metas[ri]) >= groupScore(metas[rj])) parent[rj] = ri;
+    else parent[ri] = rj;
+  };
+
+  for (let i = 0; i < metas.length; i++) {
+    for (let j = i + 1; j < metas.length; j++) {
+      if (shouldMerge(metas[i], metas[j])) union(i, j);
+    }
+  }
+
+  const merged = new Map<number, GroupMeta>();
+  for (let i = 0; i < metas.length; i++) {
+    const root = find(i);
+    const src = metas[i];
+    const existing = merged.get(root);
     if (!existing) {
-      map.set(key, {
-        key,
-        deviceId: r.device_id ?? null,
-        name: machineName(r),
-        latest: r,
-        reports: [r],
+      merged.set(root, {
+        key: src.key,
+        reports: [...src.reports],
+        deviceId: src.deviceId,
+        macs: new Set(src.macs),
+        names: new Set(src.names),
       });
       continue;
     }
-    existing.reports.push(r);
-    if ((r.created_at ?? 0) >= (existing.latest.created_at ?? 0)) {
-      existing.latest = r;
-      existing.name = machineName(r);
-      existing.deviceId = r.device_id ?? existing.deviceId;
+    existing.reports.push(...src.reports);
+    existing.deviceId = existing.deviceId || src.deviceId;
+    for (const mac of src.macs) existing.macs.add(mac);
+    for (const name of src.names) existing.names.add(name);
+    if (groupScore(src) > groupScore(existing)) existing.key = src.key;
+    if (src.deviceId) {
+      existing.deviceId = src.deviceId;
+      existing.key = `id:${src.deviceId}`;
     }
   }
-  return Array.from(map.values()).sort((a, b) =>
-    a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
-  );
+
+  return [...merged.values()]
+    .map((m) => {
+      const sorted = m.reports
+        .slice()
+        .sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0));
+      const latest = sorted[sorted.length - 1]!;
+      const deviceId = m.deviceId || latest.device_id || null;
+      return {
+        key: deviceId ? `id:${deviceId}` : m.key,
+        deviceId,
+        name: machineName(latest),
+        latest,
+        reports: sorted,
+      };
+    })
+    .sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+    );
 }
 
 export function fmtBytes(bytes?: number): string {
