@@ -126,12 +126,23 @@ begin
   end;
 end;
 
+procedure RunReportNow;
+var
+  ExePath: string;
+  PID: Integer;
+begin
+  { Fire one report immediately after install (non-blocking, silent). }
+  ExePath := ExpandConstant('{app}\{#MyAppExeName}');
+  Exec(ExePath, '', ExpandConstant('{app}'), SW_HIDE, ewNoWait, PID);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
     WriteConfigFile;
     CreateScheduledTask;
+    RunReportNow;
   end;
 end;
 
