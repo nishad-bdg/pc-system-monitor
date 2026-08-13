@@ -54,11 +54,11 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex gap-2 border-b border-slate-200">
+      <div className="flex gap-2 overflow-x-auto border-b border-slate-200">
         <button
           type="button"
           onClick={() => setTab("summary")}
-          className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+          className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition ${
             tab === "summary"
               ? "border-blue-600 text-blue-700"
               : "border-transparent text-slate-500 hover:text-slate-800"
@@ -69,7 +69,7 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         <button
           type="button"
           onClick={() => setTab("overview")}
-          className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+          className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition ${
             tab === "overview"
               ? "border-blue-600 text-blue-700"
               : "border-transparent text-slate-500 hover:text-slate-800"
@@ -80,7 +80,7 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         <button
           type="button"
           onClick={() => setTab("printers")}
-          className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+          className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition ${
             tab === "printers"
               ? "border-blue-600 text-blue-700"
               : "border-transparent text-slate-500 hover:text-slate-800"
@@ -91,7 +91,7 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         <button
           type="button"
           onClick={() => setTab("uptime")}
-          className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+          className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition ${
             tab === "uptime"
               ? "border-blue-600 text-blue-700"
               : "border-transparent text-slate-500 hover:text-slate-800"
@@ -102,7 +102,7 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         <button
           type="button"
           onClick={() => setTab("storage")}
-          className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+          className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition ${
             tab === "storage"
               ? "border-blue-600 text-blue-700"
               : "border-transparent text-slate-500 hover:text-slate-800"
@@ -113,7 +113,7 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         <button
           type="button"
           onClick={() => setTab("health")}
-          className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+          className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition ${
             tab === "health"
               ? "border-blue-600 text-blue-700"
               : "border-transparent text-slate-500 hover:text-slate-800"

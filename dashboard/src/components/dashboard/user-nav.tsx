@@ -104,7 +104,7 @@ export function UserNav({ apiUrl }: { apiUrl?: string }) {
             />
             <div
               role="menu"
-              className="absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-xl"
+              className="absolute right-0 top-full z-50 mt-2 w-64 max-h-[calc(100vh-5rem)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 shadow-xl"
             >
               <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">

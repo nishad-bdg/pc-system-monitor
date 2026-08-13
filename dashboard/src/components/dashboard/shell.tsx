@@ -73,7 +73,7 @@ export function DashboardShell({
       </aside>
 
       <main className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center gap-3 border-b border-slate-200 bg-white/80 px-4 py-3 backdrop-blur lg:px-6">
+        <div className="relative z-50 flex items-center gap-3 border-b border-slate-200 bg-white/80 px-4 py-3 backdrop-blur lg:px-6">
           <button
             type="button"
             onClick={() => setOpen(true)}
