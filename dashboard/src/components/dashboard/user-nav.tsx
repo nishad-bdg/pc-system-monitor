@@ -3,6 +3,9 @@
 import { signOut } from "next-auth/react";
 import { useState } from "react";
 import { useSession } from "next-auth/react";
+import { createPortal } from "react-dom";
+import { PasswordMeter } from "@/components/password-meter";
+import { passwordStrength } from "@/lib/password-strength";
 
 const ROLE_LABELS: Record<string, string> = {
   super_admin: "Super admin",
@@ -34,6 +37,10 @@ export function UserNav({ apiUrl }: { apiUrl?: string }) {
     setMessage(null);
     if (next !== confirm) {
       setError("New passwords do not match");
+      return;
+    }
+    if (next && passwordStrength(next) === "poor") {
+      setError("Password is too weak — pick a stronger one");
       return;
     }
     setSaving(true);
@@ -156,51 +163,74 @@ export function UserNav({ apiUrl }: { apiUrl?: string }) {
         )}
       </div>
 
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
-            <h3 className="text-lg font-semibold text-slate-900">
-              Change password
-            </h3>
-            <p className="mt-1 text-sm text-slate-500">
-              You&apos;ll need to sign in with the new password next time.
-            </p>
-            <form onSubmit={onSubmit} className="mt-5 space-y-4">
-              {error && (
-                <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {error}
-                </p>
-              )}
-              {message && (
-                <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                  {message}
-                </p>
-              )}
-              <div>
-                <label
-                  htmlFor="user-nav-current"
-                  className="block text-sm font-medium text-gray-700"
+      {open &&
+        createPortal(
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+            <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+              <div className="flex items-start justify-between">
+                <h3 className="text-lg font-semibold text-slate-900">
+                  Change password
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  aria-label="Close"
+                  className="-mt-1.5 -mr-1.5 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                 >
-                  Current password
-                </label>
-                <input
-                  id="user-nav-current"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  value={current}
-                  onChange={(e) => setCurrent(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-                />
+                  <svg
+                    className="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M6 18 18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
               </div>
-              <div>
-                <label
-                  htmlFor="user-nav-new"
-                  className="block text-sm font-medium text-gray-700"
-                >
-                  New password
-                </label>
-                <input
+              <p className="mt-1 text-sm text-slate-500">
+                You&apos;ll need to sign in with the new password next time.
+              </p>
+              <form onSubmit={onSubmit} className="mt-5 space-y-4">
+                {error && (
+                  <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {error}
+                  </p>
+                )}
+                {message && (
+                  <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                    {message}
+                  </p>
+                )}
+                <div>
+                  <label
+                    htmlFor="user-nav-current"
+                    className="block text-sm font-medium text-gray-700"
+                  >
+                    Current password
+                  </label>
+                  <input
+                    id="user-nav-current"
+                    type="password"
+                    autoComplete="current-password"
+                    required
+                    value={current}
+                    onChange={(e) => setCurrent(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="user-nav-new"
+                    className="block text-sm font-medium text-gray-700"
+                  >
+                    New password
+                  </label>
+<input
                   id="user-nav-new"
                   type="password"
                   autoComplete="new-password"
@@ -210,44 +240,46 @@ export function UserNav({ apiUrl }: { apiUrl?: string }) {
                   onChange={(e) => setNext(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
                 />
+                <PasswordMeter value={next} />
               </div>
-              <div>
-                <label
-                  htmlFor="user-nav-confirm"
-                  className="block text-sm font-medium text-gray-700"
-                >
-                  Confirm new password
-                </label>
-                <input
-                  id="user-nav-confirm"
-                  type="password"
-                  autoComplete="new-password"
-                  required
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-                />
-              </div>
-              <div className="flex gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-                <button
+                <div>
+                  <label
+                    htmlFor="user-nav-confirm"
+                    className="block text-sm font-medium text-gray-700"
+                  >
+                    Confirm new password
+                  </label>
+                  <input
+                    id="user-nav-confirm"
+                    type="password"
+                    autoComplete="new-password"
+                    required
+                    value={confirm}
+                    onChange={(e) => setConfirm(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                  />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+<button
                   type="submit"
-                  disabled={saving}
+                  disabled={saving || passwordStrength(next) === "poor"}
                   className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
                 >
                   {saving ? "Saving…" : "Save"}
                 </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body,
+        )}
     </>
   );
 }

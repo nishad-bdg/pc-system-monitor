@@ -13,6 +13,8 @@ import {
   User,
 } from "@/lib/api";
 import { DashboardShell } from "@/components/dashboard/shell";
+import { PasswordMeter } from "@/components/password-meter";
+import { passwordStrength } from "@/lib/password-strength";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -364,6 +366,7 @@ export function UsersPanel() {
                   placeholder="min 6 characters"
                   className={inputClass}
                 />
+                <PasswordMeter value={modal.password} />
               </label>
               <label className="block text-xs font-medium text-slate-600">
                 Role
@@ -431,7 +434,7 @@ export function UsersPanel() {
                 type="submit"
                 disabled={
                   !modal.username.trim() ||
-                  modal.password.length < 6 ||
+                  passwordStrength(modal.password) === "poor" ||
                   createMut.isPending
                 }
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
@@ -480,6 +483,9 @@ export function UsersPanel() {
                   placeholder="min 6 characters"
                   className={inputClass}
                 />
+                {modal.password.length > 0 && (
+                  <PasswordMeter value={modal.password} />
+                )}
               </label>
               <div>
                 <p className="text-xs font-medium text-slate-600">Groups</p>
@@ -533,7 +539,8 @@ export function UsersPanel() {
                 type="submit"
                 disabled={
                   updateMut.isPending ||
-                  (modal.password.length > 0 && modal.password.length < 6)
+                  (modal.password.length > 0 &&
+                    passwordStrength(modal.password) === "poor")
                 }
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
               >
