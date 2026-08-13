@@ -80,6 +80,26 @@ function dateInputToTs(value: string, endOfDay: boolean): number | undefined {
   return Number.isFinite(ts) ? ts : undefined;
 }
 
+function Spinner({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={`animate-spin ${className}`} fill="none" viewBox="0 0 24 24" aria-hidden>
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4z"
+      />
+    </svg>
+  );
+}
+
 export function ReportExportPanel() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
@@ -318,16 +338,6 @@ export function ReportExportPanel() {
           </div>
         </form>
       }
-      sidebarFooter={
-        <button
-          type="button"
-          onClick={onDownload}
-          disabled={!applied || exporting || isFetching}
-          className="w-full rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-        >
-          {exporting ? "Exporting…" : "Download CSV"}
-        </button>
-      }
       header={
         <div className="border-b border-slate-200 bg-white/80 px-6 py-4 backdrop-blur">
           {applied ? (
@@ -380,17 +390,44 @@ export function ReportExportPanel() {
               No report generated yet.
             </div>
           ) : isLoading ? (
-            <div className="flex h-64 items-center justify-center rounded-2xl border border-slate-200 bg-white text-sm text-slate-500">
-              Generating…
+            <div className="flex h-64 flex-col items-center justify-center gap-4 rounded-2xl border border-slate-200 bg-white">
+              <span className="text-emerald-500">
+                <Spinner className="h-9 w-9" />
+              </span>
+              <div className="text-center">
+                <p className="text-sm font-medium text-slate-700">
+                  Generating report…
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Fetching matching reports from the API
+                </p>
+              </div>
             </div>
           ) : (
             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-200/60">
-              <div className="border-b border-slate-100 px-4 py-3">
-                <h3 className="text-sm font-medium text-slate-700">Preview</h3>
-                <p className="mt-0.5 text-xs text-slate-500">
-                  {reports.length} report{reports.length === 1 ? "" : "s"} loaded
-                  (up to 500) · CSV includes every field from the full report set
-                </p>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                <div>
+                  <h3 className="text-sm font-medium text-slate-700">Preview</h3>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {reports.length} report{reports.length === 1 ? "" : "s"} loaded
+                    (up to 500) · CSV includes every field from the full report set
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onDownload}
+                  disabled={exporting || isFetching}
+                  className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60"
+                >
+                  {exporting ? (
+                    <>
+                      <Spinner className="h-4 w-4" />
+                      Exporting…
+                    </>
+                  ) : (
+                    "Download CSV"
+                  )}
+                </button>
               </div>
               {machines.length === 0 ? (
                 <p className="px-4 py-10 text-center text-sm text-slate-500">
