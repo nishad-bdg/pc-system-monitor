@@ -1,6 +1,6 @@
 # Project context — Desktop Monitoring App
 
-Last updated: 2026-08-12
+Last updated: 2026-08-13
 
 Use this file as the source of truth for current product behavior when continuing work.
 Detailed design notes also live under `docs/superpowers/specs/`.
@@ -28,8 +28,8 @@ docs/          Specs/plans (superpowers)
 
 ## Auth
 
-- **Desktop → API:** `Authorization: Bearer sk-...` (API key). Create via `POST /api-keys` (admin JWT). Full secret shown only once at create time. **Admin UI for keys is not built yet** (API-only).
-- **Dashboard → API:** NextAuth Credentials → `POST /auth/token` → JWT stored on session as `apiToken`.
+- **Desktop → API:** `Authorization: Bearer sk-...` (API key). Create via `POST /api-keys` (admin JWT) or the dashboard `/api-keys` page. Full secret shown only once at create time (auto-generated `sk-`); can rename / toggle active / delete.
+- **Dashboard → API:** NextAuth Credentials → `POST /auth/token` → JWT stored on session as `apiToken`. If the API is restarted and the stored JWT is rejected (401 on `/reports`), **sign out and back in** to refresh the token.
 
 ## Data flow
 
@@ -55,7 +55,7 @@ Restart the API after model/query changes; old processes strip unknown fields (e
 uv run system-info --api-key sk-...          # full collect + save
 uv run system-info --no-save                 # print only
 uv run system-info --pc-name Office-PC-3     # Windows custom name
-uv run system-info --printers | --disk | --network | --sys | ...
+uv run system-info --printers | --disk | --network | --sys | --security | --health
 ```
 
 Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`.
@@ -75,13 +75,47 @@ Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`.
 | `os` | `os_info.py` | Includes hostname |
 | `private_ip`, `public_ip`, `mac_address`, `mac_addresses` | `ip.py` | |
 | `location` | `geo.py` | ip-api.com |
-| `resources` | `resources.py` | CPU/RAM/swap |
+| `resources` | `resources.py` | CPU/RAM/swap + laptop `battery` |
 | `uptime` | `uptime.py` | Session + UTC day-wise on-seconds (`by_day`) |
 | `network` | `network.py` | NIC totals/rates |
 
 | `disk` | `disk.py` | Physical devices + partitions (mac + Win) |
 | `printers` | `printers.py` | See below |
-| `network` | `network.py` | Bandwidth totals + rates |
+| `security` | `security.py` | Internet-security products, see below |
+| `health` | `health.py` | Disk + battery health, see below |
+
+### Battery (`resources.battery`)
+
+Laptop only (`psutil.sensors_battery()`), `null` on desktops:
+
+`battery: { percent, power_plugged, seconds_left }`.
+
+### Internet Security (`security`)
+
+Detects installed internet-security products:
+
+- **Windows:** Security Center via `root/SecurityCenter2` (WMI `productState` bit 0x1000 = active); falls back to scanning running processes + Program Files dirs when Security Center is empty.
+- **macOS:** scans `/Applications` + `~/Applications`, running processes, and launch agents/daemons for known vendors (McAfee, ESET, AVG, F-Secure, CrowdStrike, …); defaults to **XProtect** when nothing else is found.
+
+`security: [{ name, status: "active" | "inactive" }]` (best-effort; can be `null`/`[]`).
+
+### Health (`health`)
+
+`health: { disk: [...], battery: {...} }`.
+
+**Disk:** physical drives with media type + SMART status:
+
+`{ name, device, media_type: "ssd" | "hdd" | "unknown", smart_status, internal, health: "ok" | "warning" | "fail" | "unknown" }`
+
+- Windows: `Get-PhysicalDisk` (FriendlyName/MediaType/HealthStatus/BusType).
+- macOS: `system_profiler SPStorageDataType -json`, physical drives de-duplicated by bsd base (`disk3s1s1` → `disk3`).
+
+**Battery (laptop):**
+
+`{ cycle_count, condition, max_capacity_percent, health_percent }`
+
+- Windows: `root/WMI` BatteryFullChargedCapacity / BatteryStaticData / BatteryCycleCount.
+- macOS: `SPPowerDataType` (`sppower_battery_cycle_count`, `sppower_battery_health`, `sppower_battery_health_maximum_capacity` like `"82%"`).
 
 ### Printers
 
@@ -109,7 +143,7 @@ agent accumulates on-seconds per UTC day in `uptime.json`; admin labels days in 
 
 ### Report model extras
 
-Optional on `Report`: `pc_name`, `device_id`, `disk`, `printers`, `network`, `uptime` (plus original OS/IP/geo/resources).
+Optional on `Report`: `pc_name`, `device_id`, `disk`, `printers`, `network`, `uptime`, `security`, `health` (plus original OS/IP/geo/resources).
 
 ### `GET /reports` query params
 
@@ -128,7 +162,9 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
 
 - `POST /reports` — API key; stores `source_key` prefix.
 - `GET /reports/{id}` — JWT.
-- Auth, users, API keys, health — unchanged pattern.
+- `GET/POST/PATCH/DELETE /api-keys` — admin JWT; `PATCH` renames / toggles active; secret shown only at create.
+- `GET/POST/PATCH/DELETE /groups` — admin JWT; a machine key belongs to **one group only** (assigning removes it from others).
+- Auth, users, health — unchanged pattern.
 
 ---
 
@@ -146,17 +182,23 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 | `/dashboard` | **Fleet** — sidebar PC list + live detail for selected machine |
 | `/reports` | **Reports browser** — filters + one row per PC |
 | `/reports/[key]` | PC detail from reports (encoded machine key) |
+| `/api-keys` | Manage desktop API keys (create/copy/rename/toggle/delete) |
+| `/groups` | Create/rename/delete groups, assign PCs (one group per PC) |
 
 ### Fleet (`/dashboard`)
 
-- Sidebar: filter by name, select PC, Refresh, link to Reports.
-- Detail: CPU/RAM/swap tiles, **Uptime** (session + UTC day bars with BD labels), location/machine, **Storage** (device count + partition bars: blue &lt;50%, amber 50–80%, red &gt;80%), **Network bandwidth** (usage chart), **Printers** (USB/Network/Other with IP + print count), charts, report history.
+- Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports.
+- Detail tabs (`machine-detail.tsx`): **Overview / Uptime / Storage / Health**.
+  - **Overview:** CPU/RAM/swap tiles, compact UptimeState (session + days tracked) + DiskState (devices/used/free), location/machine, Battery stat card (laptops only), Network bandwidth chart, Printers, Security card.
+  - **Uptime:** session + UTC day bars with BD labels; day bars load in batches (default 14, Load more for the rest).
+  - **Storage:** device count + partition bars (blue &lt;50%, amber 50–80%, red &gt;80%).
+  - **Health:** storage health cards (SSD/HDD badge, SMART status, Internal/External, Healthy/Failing) + battery health (condition, health %, cycle count, max capacity).
 - Shared detail UI: `src/components/dashboard/machine-detail.tsx`.
 
 ### Reports (`/reports`)
 
 - Same slate+blue **sidebar + detail** layout as Fleet.
-- Sidebar filters: date from/to, PC name, country, OS.
+- Sidebar filters: date from/to, PC name, country, OS, **group**.
 - **Usage sort** (highest first): Most CPU, Most RAM, Most disk space used, Most network usage (bytes sent+recv), or Last seen.
 - **Min thresholds**: Min CPU %, Min RAM %, Min disk % (filters out PCs below threshold).
 - Sidebar lists matching PCs with CPU/RAM/Disk/Net; main pane shows `MachineDetail`.
