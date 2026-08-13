@@ -14,6 +14,7 @@ def _patch_db(monkeypatch, user=None):
         "_id": "64b000000000000000000001",
         "username": "admin",
         "role": "admin",
+        "groups": [],
     }
     monkeypatch.setattr(db, "save_report", lambda doc: "64b00000000000000000000a")
 
@@ -25,12 +26,15 @@ def _patch_db(monkeypatch, user=None):
     monkeypatch.setattr(
         db,
         "list_reports",
-        lambda limit=20, device_id=None, pc_name=None, from_ts=None, to_ts=None, country=None, os_name=None, group_id=None: [],
+        lambda limit=20, device_id=None, pc_name=None, from_ts=None, to_ts=None, country=None, os_name=None, group_id=None, group_ids=None: [],
     )
     monkeypatch.setattr(db, "get_report", lambda rid: None)
     monkeypatch.setattr(db, "list_users", lambda: [dict(user)])
     monkeypatch.setattr(db, "list_api_keys", lambda: [])
     monkeypatch.setattr(db, "list_groups", lambda: [])
+    monkeypatch.setattr(db, "create_user", lambda *a, **k: True)
+    monkeypatch.setattr(db, "update_user", lambda *a, **k: True)
+    monkeypatch.setattr(db, "delete_user", lambda uid: True)
 
     # Refresh-token store: in-memory, shared across tests in this module.
     global _REFRESH_STORE
@@ -323,6 +327,7 @@ def test_list_reports_passes_filters(monkeypatch):
         country=None,
         os_name=None,
         group_id=None,
+        group_ids=None,
     ):
         seen["limit"] = limit
         seen["device_id"] = device_id
@@ -415,6 +420,7 @@ def test_list_reports_with_group_id(monkeypatch):
         country=None,
         os_name=None,
         group_id=None,
+        group_ids=None,
     ):
         seen["group_id"] = group_id
         return []
@@ -423,6 +429,132 @@ def test_list_reports_with_group_id(monkeypatch):
     resp = client.get("/reports?group_id=64b00000000000000000000c", headers=_auth_header())
     assert resp.status_code == 200
     assert seen["group_id"] == "64b00000000000000000000c"
+
+
+def test_list_reports_user_role_scoped_by_groups(monkeypatch):
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "ops1",
+        "role": "user",
+        "groups": ["g1", "g2"],
+    })
+    seen = {}
+
+    def fake_list(
+        limit=20,
+        device_id=None,
+        pc_name=None,
+        from_ts=None,
+        to_ts=None,
+        country=None,
+        os_name=None,
+        group_id=None,
+        group_ids=None,
+    ):
+        seen["group_ids"] = group_ids
+        return []
+
+    monkeypatch.setattr(db, "list_reports", fake_list)
+    resp = client.get("/reports", headers=_auth_header())
+    assert resp.status_code == 200
+    assert seen["group_ids"] == ["g1", "g2"]
+
+
+def test_list_reports_user_role_no_groups_returns_empty(monkeypatch):
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "ops1",
+        "role": "user",
+        "groups": [],
+    })
+    seen = {}
+
+    def fake_list(
+        limit=20,
+        device_id=None,
+        pc_name=None,
+        from_ts=None,
+        to_ts=None,
+        country=None,
+        os_name=None,
+        group_id=None,
+        group_ids=None,
+    ):
+        seen["group_ids"] = group_ids
+        return []
+
+    monkeypatch.setattr(db, "list_reports", fake_list)
+    resp = client.get("/reports", headers=_auth_header())
+    assert resp.status_code == 200
+    assert seen["group_ids"] == []
+
+
+def test_list_groups_user_sees_only_own(monkeypatch):
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "ops1",
+        "role": "user",
+        "groups": ["g1"],
+    })
+    monkeypatch.setattr(
+        db,
+        "list_groups",
+        lambda: [
+            {"_id": "g1", "name": "Ops", "machine_keys": [], "created_at": 1.0},
+            {"_id": "g2", "name": "Sales", "machine_keys": [], "created_at": 1.0},
+        ],
+    )
+    resp = client.get("/groups", headers=_auth_header())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [g["id"] for g in body] == ["g1"]
+
+
+def test_user_cannot_create_group(monkeypatch):
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "ops1",
+        "role": "user",
+        "groups": ["g1"],
+    })
+    resp = client.post("/groups", json={"name": "Rogue"}, headers=_auth_header())
+    assert resp.status_code == 403
+
+
+def test_user_cannot_get_out_of_group_report(monkeypatch):
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "ops1",
+        "role": "user",
+        "groups": ["g1"],
+    })
+    report = {"_id": "1", "device_id": "dev-x", "os": {"hostname": "other"}}
+    monkeypatch.setattr(db, "get_report", lambda rid: report)
+    monkeypatch.setattr(
+        db,
+        "list_groups",
+        lambda: [{"_id": "g1", "name": "Ops", "machine_keys": ["id:dev-mine"]}],
+    )
+    resp = client.get("/reports/1", headers=_auth_header())
+    assert resp.status_code == 403
+
+
+def test_user_can_get_own_group_report(monkeypatch):
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "ops1",
+        "role": "user",
+        "groups": ["g1"],
+    })
+    report = {"_id": "1", "device_id": "dev-mine", "os": {"hostname": "pc1"}}
+    monkeypatch.setattr(db, "get_report", lambda rid: report)
+    monkeypatch.setattr(
+        db,
+        "list_groups",
+        lambda: [{"_id": "g1", "name": "Ops", "machine_keys": ["id:dev-mine"]}],
+    )
+    resp = client.get("/reports/1", headers=_auth_header())
+    assert resp.status_code == 200
 
 
 def test_export_reports_requires_jwt(monkeypatch):
@@ -517,16 +649,30 @@ def test_get_report_not_found(monkeypatch):
     assert resp.status_code == 404
 
 
-# ---- api keys admin ----
+# ---- api keys admin (super admin only) ----
+
+SUPER_USER = {
+    "_id": "64b000000000000000000001",
+    "username": "admin",
+    "role": "super_admin",
+    "groups": [],
+}
+
 
 def test_create_api_key_requires_jwt(monkeypatch):
-    _patch_db(monkeypatch)
+    _patch_db(monkeypatch, user=SUPER_USER)
     resp = client.post("/api-keys", json={"name": "desktop-1"})
     assert resp.status_code == 401
 
 
-def test_create_api_key(monkeypatch):
+def test_create_api_key_requires_super_admin(monkeypatch):
     _patch_db(monkeypatch)
+    resp = client.post("/api-keys", json={"name": "desktop-1"}, headers=_auth_header())
+    assert resp.status_code == 403
+
+
+def test_create_api_key(monkeypatch):
+    _patch_db(monkeypatch, user=SUPER_USER)
     monkeypatch.setattr(db, "create_api_key", lambda name, kh, prefix: "64b00000000000000000000b")
     resp = client.post("/api-keys", json={"name": "desktop-1"}, headers=_auth_header())
     assert resp.status_code == 201
@@ -535,7 +681,7 @@ def test_create_api_key(monkeypatch):
 
 
 def test_update_api_key(monkeypatch):
-    _patch_db(monkeypatch)
+    _patch_db(monkeypatch, user=SUPER_USER)
     monkeypatch.setattr(
         db,
         "update_api_key",
@@ -566,7 +712,7 @@ def test_update_api_key(monkeypatch):
 
 
 def test_update_api_key_not_found(monkeypatch):
-    _patch_db(monkeypatch)
+    _patch_db(monkeypatch, user=SUPER_USER)
     monkeypatch.setattr(db, "update_api_key", lambda key_id, name=None, active=None: False)
     resp = client.patch(
         "/api-keys/64b00000000000000000000b",
@@ -577,7 +723,7 @@ def test_update_api_key_not_found(monkeypatch):
 
 
 def test_delete_api_key(monkeypatch):
-    _patch_db(monkeypatch)
+    _patch_db(monkeypatch, user=SUPER_USER)
     monkeypatch.setattr(db, "delete_api_key", lambda key_id: True)
     resp = client.delete(
         "/api-keys/64b00000000000000000000b", headers=_auth_header()
@@ -688,14 +834,91 @@ def test_delete_group(monkeypatch):
 
 
 def test_list_users(monkeypatch):
-    _patch_db(monkeypatch)
+    _patch_db(monkeypatch, user=SUPER_USER)
     resp = client.get("/users", headers=_auth_header())
     assert resp.status_code == 200
     assert resp.json()[0]["username"] == "admin"
 
 
-def test_list_api_keys(monkeypatch):
+def test_list_users_requires_super_admin(monkeypatch):
     _patch_db(monkeypatch)
+    resp = client.get("/users", headers=_auth_header())
+    assert resp.status_code == 403
+
+
+def test_list_users_requires_jwt(monkeypatch):
+    _patch_db(monkeypatch)
+    resp = client.get("/users")
+    assert resp.status_code == 401
+
+
+def test_create_user_with_groups(monkeypatch):
+    _patch_db(monkeypatch, user=SUPER_USER)
+    created = {"_id": "64b000000000000000000009", "username": "ops1", "role": "user", "groups": ["g1", "g2"]}
+    calls = {"n": 0}
+
+    def fake_find_user(uname):
+        if uname == "ops1":
+            calls["n"] += 1
+            return created if calls["n"] > 1 else None
+        return None
+
+    monkeypatch.setattr(db, "find_user_by_username", fake_find_user)
+    resp = client.post(
+        "/users",
+        json={"username": "ops1", "password": "secret123", "role": "user", "groups": ["g1", "g2"]},
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["username"] == "ops1"
+    assert body["role"] == "user"
+    assert body["groups"] == ["g1", "g2"]
+
+
+def test_create_user_invalid_role(monkeypatch):
+    _patch_db(monkeypatch, user=SUPER_USER)
+    resp = client.post(
+        "/users",
+        json={"username": "ops1", "password": "secret123", "role": "root", "groups": []},
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 422
+
+
+def test_update_user_role_and_groups(monkeypatch):
+    _patch_db(monkeypatch, user=SUPER_USER)
+    updated = {"_id": "64b000000000000000000009", "username": "ops1", "role": "user", "groups": ["g3"]}
+
+    def fake_get_user(uid):
+        if uid == "64b000000000000000000009":
+            return dict(updated)
+        return dict(SUPER_USER)
+
+    monkeypatch.setattr(db, "get_user_by_id", fake_get_user)
+    resp = client.patch(
+        "/users/64b000000000000000000009",
+        json={"role": "user", "groups": ["g3"]},
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["groups"] == ["g3"]
+
+
+def test_delete_user(monkeypatch):
+    _patch_db(monkeypatch, user=SUPER_USER)
+    resp = client.delete("/users/64b000000000000000000009", headers=_auth_header())
+    assert resp.status_code == 204
+
+
+def test_delete_self_forbidden(monkeypatch):
+    _patch_db(monkeypatch, user=SUPER_USER)
+    resp = client.delete("/users/64b000000000000000000001", headers=_auth_header())
+    assert resp.status_code == 400
+
+
+def test_list_api_keys(monkeypatch):
+    _patch_db(monkeypatch, user=SUPER_USER)
     monkeypatch.setattr(
         db,
         "list_api_keys",

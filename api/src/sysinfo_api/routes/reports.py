@@ -5,7 +5,7 @@ import time
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from .. import db
+from .. import db, security
 from ..models import Report, ReportOut
 from ..security import ApiKey, CurrentUser
 
@@ -21,6 +21,13 @@ def create_report(report: Report, api_key: ApiKey) -> JSONResponse:
     if report_id is None:
         raise HTTPException(status_code=503, detail="MongoDB unavailable")
     return JSONResponse(status_code=201, content={"id": str(report_id)})
+
+
+def _user_group_ids(user: dict) -> list[str] | None:
+    """Group ids to scope a user-role request to, or None (no restriction)."""
+    if user.get("role") == security.ROLE_USER:
+        return user.get("groups") or []
+    return None
 
 
 @router.get("")
@@ -44,6 +51,7 @@ def get_reports(
         country=country or None,
         os_name=os or None,
         group_id=group_id or None,
+        group_ids=_user_group_ids(user),
     )
     return {"total": len(records), "reports": records}
 
@@ -69,6 +77,7 @@ def export_reports_csv(
         country=country or None,
         os_name=os or None,
         group_id=group_id or None,
+        group_ids=_user_group_ids(user),
     )
     buffer = io.StringIO()
     writer = csv.writer(buffer)
@@ -87,11 +96,46 @@ def export_reports_csv(
     )
 
 
+def _report_belongs_to_groups(report: dict, group_ids: list[str]) -> bool:
+    """True if a report's machine identity matches any key in the given groups."""
+    if not group_ids:
+        return False
+    groups = [g for g in db.list_groups() if g["_id"] in set(group_ids)]
+    if not groups:
+        return False
+    allowed_keys: set[str] = set()
+    for g in groups:
+        allowed_keys.update(g.get("machine_keys") or [])
+
+    device = report.get("device_id")
+    name = (report.get("pc_name") or "").lower()
+    hostname = ((report.get("os") or {}).get("hostname") or "").lower()
+    macs = [report.get("mac_address") or ""] + [
+        i.get("mac") or "" for i in (report.get("mac_addresses") or [])
+    ]
+    for key in allowed_keys:
+        if key.startswith("id:") and device and key[3:] == device:
+            return True
+        if key.startswith("name:"):
+            needle = key[5:].lower()
+            if needle and (needle == name or needle == hostname):
+                return True
+        if key.startswith("mac:"):
+            needle = key[3:].lower().replace("-", "").replace(":", "")
+            for m in macs:
+                if m.lower().replace("-", "").replace(":", "") == needle:
+                    return True
+    return False
+
+
 @router.get("/{report_id}")
 def get_report(report_id: str, user: CurrentUser = None) -> dict:
     doc = db.get_report(report_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Report not found")
+    if user.get("role") == security.ROLE_USER:
+        if not _report_belongs_to_groups(doc, user.get("groups") or []):
+            raise HTTPException(status_code=403, detail="Report is outside your groups")
     return doc
 
 

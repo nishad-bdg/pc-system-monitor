@@ -54,6 +54,7 @@ def list_reports(
     country: str | None = None,
     os_name: str | None = None,
     group_id: str | None = None,
+    group_ids: list[str] | None = None,
 ) -> list[dict]:
     records: list[dict] = []
     clauses: list[dict] = []
@@ -83,6 +84,10 @@ def list_reports(
         clauses.append({"os.system": {"$regex": os_name, "$options": "i"}})
     if group_id:
         group_clause = _group_filter(group_id)
+        if group_clause:
+            clauses.append(group_clause)
+    if group_ids:
+        group_clause = _groups_filter(group_ids)
         if group_clause:
             clauses.append(group_clause)
 
@@ -139,14 +144,46 @@ def get_user_by_id(user_id: str) -> dict | None:
     return doc
 
 
-def create_user(username: str, password_hash: str, role: str = "admin") -> bool:
+def create_user(
+    username: str,
+    password_hash: str,
+    role: str = "admin",
+    groups: list[str] | None = None,
+) -> bool:
     try:
         _users().insert_one(
-            {"username": username, "password_hash": password_hash, "role": role}
+            {
+                "username": username,
+                "password_hash": password_hash,
+                "role": role,
+                "groups": groups or [],
+            }
         )
         return True
     except DuplicateKeyError:
         return False
+    except (ConnectionFailure, PyMongoError):
+        return False
+
+
+def update_user(
+    user_id: str,
+    role: str | None = None,
+    groups: list[str] | None = None,
+    password_hash: str | None = None,
+) -> bool:
+    try:
+        changes: dict = {}
+        if role is not None:
+            changes["role"] = role
+        if groups is not None:
+            changes["groups"] = groups
+        if password_hash is not None:
+            changes["password_hash"] = password_hash
+        if not changes:
+            return True
+        result = _users().update_one({"_id": ObjectId(user_id)}, {"$set": changes})
+        return result.matched_count == 1
     except (ConnectionFailure, PyMongoError):
         return False
 
@@ -317,6 +354,18 @@ def _group_filter(group_id: str) -> dict | None:
                     ]
                 }
             )
+    if not ors:
+        return None
+    return {"$or": ors} if len(ors) > 1 else ors[0]
+
+
+def _groups_filter(group_ids: list[str]) -> dict | None:
+    """Combine multiple group filters into one $or across all the groups."""
+    ors: list[dict] = []
+    for gid in group_ids:
+        clause = _group_filter(gid)
+        if clause:
+            ors.append(clause)
     if not ors:
         return None
     return {"$or": ors} if len(ors) > 1 else ors[0]

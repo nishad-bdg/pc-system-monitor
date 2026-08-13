@@ -29,9 +29,25 @@ docs/          Specs/plans (superpowers)
 ## Auth
 
 - **Desktop → API:** `Authorization: Bearer sk-...` (API key). Create via `POST /api-keys` (admin JWT) or the dashboard `/api-keys` page. Full secret shown only once at create time (auto-generated `sk-`); can rename / toggle active / delete.
+- **Roles:** `super_admin`, `admin`, `user` (see below).
 - **Dashboard → API:** NextAuth Credentials → `POST /auth/token` → JWT stored on session as `apiToken`. If the API is restarted and the stored JWT is rejected (401 on `/reports`), **sign out and back in** to refresh the token.
 - **Refresh tokens:** `POST /auth/token` also returns `refresh_token` (opaque, 30 days, stored hashed in Mongo `refresh_tokens` collection). `POST /auth/refresh` rotates it for a new access + refresh pair (old one revoked). `POST /auth/revoke` revokes a refresh token. The dashboard (`auth.ts`) stores the refresh token in the NextAuth JWT and silently calls `/auth/refresh` ~60s before the access token expires — no manual sign-in needed unless the refresh token itself is invalidated.
-- **Password change:** `POST /auth/change-password` (JWT) takes `current_password` + `new_password` (min 6 chars); verifies current, updates the hash, and revokes **all** refresh tokens so other sessions must re-login. UI: "Change password" button in the Fleet sidebar footer (`change-password-button.tsx`, modal).
+- **Password change:** `POST /auth/change-password` (JWT) takes `current_password` + `new_password` (min 6 chars); verifies current, updates the hash, and revokes **all** refresh tokens so other sessions must re-login. UI: `UserNav` in every sidebar footer — profile avatar + name + role badge with **Change password** + **Sign out** buttons (`user-nav.tsx`, modal).
+
+### Roles & group-scoped access
+
+| Role | Users mgmt | API keys | Groups | Reports |
+|------|-----------|----------|--------|---------|
+| `super_admin` (seed default) | ✅ CRUD | ✅ | ✅ CRUD | ✅ all |
+| `admin` | ❌ | ❌ | ✅ CRUD | ✅ all |
+| `user` | ❌ | ❌ | 🔍 own only | ✅ own groups only |
+
+- Seed `ADMIN_USERNAME`/`ADMIN_PASSWORD` is auto-created (and legacy `admin` promoted) to `super_admin` on startup.
+- **Users page** (`/users`, super admin only): create users with a role + a set of groups (multi-select). One user can belong to **multiple groups** and then sees every PC in each assigned group. `PATCH /users/{id}` edits role/groups/password (can't change your own role); deleting yourself is blocked.
+- **Group scoping is enforced server-side**: for a `user`, `GET /reports`, `/reports/export`, and `/reports/{id}` are filtered to the user's groups; `GET /groups` returns only their groups. `admin`/`super_admin` are unrestricted.
+- **API keys** (`/api-keys` page + routes) are **super admin only** (403 otherwise).
+- **Dashboard:** session carries `role` + `groups` (fetched from `/auth/me` at login); sidebar hides API Keys/Users unless `super_admin`; Groups page is read-only for `user`.
+- A `user` with no groups assigned sees no reports (empty fleet).
 
 ## Data flow
 
@@ -187,8 +203,9 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 | `/dashboard` | **Fleet** — sidebar PC list + live detail for selected machine |
 | `/reports` | **Reports browser** — filters + one row per PC |
 | `/reports/[key]` | PC detail from reports (encoded machine key) |
-| `/api-keys` | Manage desktop API keys (create/copy/rename/toggle/delete) |
-| `/groups` | Create/rename/delete groups, assign PCs (one group per PC) |
+| `/api-keys` | Manage desktop API keys (create/copy/rename/toggle/delete) — **super admin only** |
+| `/groups` | Create/rename/delete groups, assign PCs (one group per PC); read-only for `user` role |
+| `/users` | Manage dashboard users (role + groups) — **super admin only** |
 | `/reports/export` | **Report export** — date presets + filters, CSV download |
 
 ### Fleet (`/dashboard`)

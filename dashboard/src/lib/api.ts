@@ -147,6 +147,13 @@ export interface Group {
   created_at?: number | null;
 }
 
+export interface User {
+  id: string;
+  username: string;
+  role: string;
+  groups: string[];
+}
+
 export async function fetchReports(
   apiUrl: string,
   apiToken: string,
@@ -614,6 +621,48 @@ export function deleteGroup(
   id: string,
 ): Promise<void> {
   return apiRequest(apiUrl, apiToken, `/groups/${id}`, {
+    method: "DELETE",
+  });
+}
+
+// ---- users (super admin only) ----
+
+export function fetchUsers(
+  apiUrl: string,
+  apiToken: string,
+): Promise<User[]> {
+  return apiRequest(apiUrl, apiToken, "/users");
+}
+
+export function createUser(
+  apiUrl: string,
+  apiToken: string,
+  data: { username: string; password: string; role: string; groups: string[] },
+): Promise<User> {
+  return apiRequest(apiUrl, apiToken, "/users", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateUser(
+  apiUrl: string,
+  apiToken: string,
+  id: string,
+  data: { role?: string; groups?: string[]; password?: string },
+): Promise<User> {
+  return apiRequest(apiUrl, apiToken, `/users/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteUser(
+  apiUrl: string,
+  apiToken: string,
+  id: string,
+): Promise<void> {
+  return apiRequest(apiUrl, apiToken, `/users/${id}`, {
     method: "DELETE",
   });
 }

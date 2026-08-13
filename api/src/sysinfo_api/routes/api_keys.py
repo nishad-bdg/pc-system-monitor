@@ -26,7 +26,7 @@ class ApiKeyOut(BaseModel):
 
 
 @router.get("", response_model=list[ApiKeyOut])
-def list_api_keys(user: security.CurrentUser) -> list[dict]:
+def list_api_keys(user: security.SuperAdminUser) -> list[dict]:
     return [
         {
             "id": k["_id"],
@@ -40,7 +40,7 @@ def list_api_keys(user: security.CurrentUser) -> list[dict]:
 
 
 @router.post("", status_code=201)
-def create_api_key(payload: ApiKeyCreate, user: security.CurrentUser) -> JSONResponse:
+def create_api_key(payload: ApiKeyCreate, user: security.SuperAdminUser) -> JSONResponse:
     key = security.generate_api_key()
     key_id = db.create_api_key(payload.name, security.hash_api_key(key), key[:20])
     if key_id is None:
@@ -52,7 +52,7 @@ def create_api_key(payload: ApiKeyCreate, user: security.CurrentUser) -> JSONRes
 
 
 @router.delete("/{key_id}", status_code=204)
-def delete_api_key(key_id: str, user: security.CurrentUser) -> None:
+def delete_api_key(key_id: str, user: security.SuperAdminUser) -> None:
     if db.delete_api_key(key_id):
         return None
     raise HTTPException(status_code=404, detail="API key not found")
@@ -60,7 +60,7 @@ def delete_api_key(key_id: str, user: security.CurrentUser) -> None:
 
 @router.patch("/{key_id}", response_model=ApiKeyOut)
 def update_api_key(
-    key_id: str, payload: ApiKeyUpdate, user: security.CurrentUser
+    key_id: str, payload: ApiKeyUpdate, user: security.SuperAdminUser
 ) -> dict:
     if not db.update_api_key(key_id, name=payload.name, active=payload.active):
         raise HTTPException(status_code=404, detail="API key not found")

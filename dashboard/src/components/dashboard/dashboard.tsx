@@ -12,10 +12,8 @@ import {
   groupMachines,
   groupOf,
 } from "@/lib/api";
-import { SignOutButton } from "./sign-out-button";
-import { ChangePasswordButton } from "./change-password-button";
+import { DashboardShell } from "./shell";
 import { MachineDetail } from "./machine-detail";
-import { SidebarNav } from "@/components/sidebar-nav";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -60,22 +58,18 @@ export function Dashboard() {
     null;
 
   return (
-    <div className="flex min-h-screen bg-[var(--bg)] text-[var(--ink)]">
-      <aside className="flex w-72 shrink-0 flex-col border-r border-slate-800 bg-slate-950 text-slate-100">
-        <div className="border-b border-slate-800 px-4 py-5">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-            System Info
-          </p>
-          <h1 className="mt-1 text-lg font-semibold tracking-tight text-white">
-            Fleet
-          </h1>
-          <p className="mt-1 text-xs text-slate-400">
-            {machines.length} machine{machines.length === 1 ? "" : "s"} ·{" "}
-            {reports.length} report{reports.length === 1 ? "" : "s"}
-          </p>
-          <SidebarNav current="fleet" />
-        </div>
-
+    <DashboardShell
+      title="Fleet"
+      nav="fleet"
+      role={session?.user?.role}
+      subtitle={
+        <>
+          {machines.length} machine{machines.length === 1 ? "" : "s"} ·{" "}
+          {reports.length} report{reports.length === 1 ? "" : "s"}
+        </>
+      }
+      sidebar={
+        <>
         <div className="px-3 pt-3">
           <label className="sr-only" htmlFor="pc-filter">
             Filter PCs
@@ -161,26 +155,19 @@ export function Dashboard() {
             })}
           </ul>
         </nav>
-
-        <div className="border-t border-slate-800 p-3">
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => refetch()}
-                className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
-                disabled={isFetching}
-              >
-                {isFetching ? "Refreshing…" : "Refresh"}
-              </button>
-              <SignOutButton />
-            </div>
-            <ChangePasswordButton />
-          </div>
-        </div>
-      </aside>
-
-      <main className="flex min-w-0 flex-1 flex-col">
+        </>
+      }
+      sidebarFooter={
+        <button
+          type="button"
+          onClick={() => refetch()}
+          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+          disabled={isFetching}
+        >
+          {isFetching ? "Refreshing…" : "Refresh"}
+        </button>
+      }
+      header={
         <div className="border-b border-slate-200 bg-white/80 px-6 py-4 backdrop-blur">
           {selected ? (
             <div className="flex flex-wrap items-end justify-between gap-3">
@@ -219,25 +206,25 @@ export function Dashboard() {
             </div>
           )}
         </div>
+      }
+    >
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        {isError && (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            Failed to load reports from the API at {API_URL}. Is it running?
+          </div>
+        )}
 
-        <div className="flex-1 overflow-y-auto px-6 py-6">
-          {isError && (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-              Failed to load reports from the API at {API_URL}. Is it running?
-            </div>
-          )}
+        {!isLoading && !isError && selected && (
+          <MachineDetail machine={selected} />
+        )}
 
-          {!isLoading && !isError && selected && (
-            <MachineDetail machine={selected} />
-          )}
-
-          {!isLoading && !isError && !selected && (
-            <div className="flex h-64 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/60 text-sm text-slate-500">
-              Waiting for the first report…
-            </div>
-          )}
-        </div>
-      </main>
-    </div>
+        {!isLoading && !isError && !selected && (
+          <div className="flex h-64 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/60 text-sm text-slate-500">
+            Waiting for the first report…
+          </div>
+        )}
+      </div>
+    </DashboardShell>
   );
 }

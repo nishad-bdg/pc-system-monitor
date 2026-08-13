@@ -14,8 +14,7 @@ import {
   groupOf,
   updateGroup,
 } from "@/lib/api";
-import { SignOutButton } from "@/components/dashboard/sign-out-button";
-import { SidebarNav } from "@/components/sidebar-nav";
+import { DashboardShell } from "@/components/dashboard/shell";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -31,6 +30,7 @@ type ModalState =
 export function GroupsPanel() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
+  const isUser = session?.user?.role === "user";
   const queryClient = useQueryClient();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -161,30 +161,28 @@ export function GroupsPanel() {
   const loading = loadingGroups || loadingReports;
 
   return (
-    <div className="flex min-h-screen bg-[var(--bg)] text-[var(--ink)]">
-      <aside className="flex w-72 shrink-0 flex-col border-r border-slate-800 bg-slate-950 text-slate-100">
-        <div className="border-b border-slate-800 px-4 py-5">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-            System Info
-          </p>
-          <h1 className="mt-1 text-lg font-semibold tracking-tight text-white">
-            Groups
-          </h1>
-          <p className="mt-1 text-xs text-slate-400">
-            {groups.length} group{groups.length === 1 ? "" : "s"} ·{" "}
-            {machines.length} PC{machines.length === 1 ? "" : "s"}
-          </p>
-          <SidebarNav current="groups" />
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-2 py-3">
-          <button
-            type="button"
-            onClick={() => setModal({ kind: "create", name: "" })}
-            className="mb-3 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500"
-          >
-            + New group
-          </button>
+    <>
+    <DashboardShell
+      title="Groups"
+      nav="groups"
+      role={session?.user?.role}
+      subtitle={
+        <>
+          {groups.length} group{groups.length === 1 ? "" : "s"} ·{" "}
+          {machines.length} PC{machines.length === 1 ? "" : "s"}
+        </>
+      }
+      sidebar={
+        <div className="px-2 py-3">
+          {!isUser && (
+            <button
+              type="button"
+              onClick={() => setModal({ kind: "create", name: "" })}
+              className="mb-3 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500"
+            >
+              + New group
+            </button>
+          )}
           {loadingGroups && (
             <p className="px-2 py-6 text-center text-sm text-slate-400">
               Loading groups…
@@ -228,13 +226,8 @@ export function GroupsPanel() {
             })}
           </ul>
         </div>
-
-        <div className="border-t border-slate-800 p-3">
-          <SignOutButton />
-        </div>
-      </aside>
-
-      <main className="flex min-w-0 flex-1 flex-col">
+      }
+      header={
         <div className="border-b border-slate-200 bg-white/80 px-6 py-4 backdrop-blur">
           {selected ? (
             <div className="flex flex-wrap items-end justify-between gap-3">
@@ -250,22 +243,26 @@ export function GroupsPanel() {
                 </p>
               </div>
               <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setModal({ kind: "rename", group: selected, name: selected.name })
-                  }
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-                >
-                  Rename
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setModal({ kind: "delete", group: selected })}
-                  className="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
-                >
-                  Delete
-                </button>
+                {!isUser && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setModal({ kind: "rename", group: selected, name: selected.name })
+                      }
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                    >
+                      Rename
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setModal({ kind: "delete", group: selected })}
+                      className="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                    >
+                      Delete
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ) : (
@@ -277,8 +274,9 @@ export function GroupsPanel() {
             </div>
           )}
         </div>
-
-        <div className="flex-1 overflow-y-auto px-6 py-6">
+      }
+    >
+      <div className="flex-1 overflow-y-auto px-6 py-6">
           {status && (
             <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
               <span>{status}</span>
@@ -301,7 +299,7 @@ export function GroupsPanel() {
             </div>
           )}
 
-          {selected && (
+          {selected && !isUser && (
             <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="border-b border-slate-200 px-5 py-4">
                 <h3 className="text-sm font-semibold text-slate-900">
@@ -381,8 +379,51 @@ export function GroupsPanel() {
               )}
             </section>
           )}
+
+          {selected && isUser && (
+            <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-200 px-5 py-4">
+                <h3 className="text-sm font-semibold text-slate-900">
+                  PCs in “{selected.name}”
+                </h3>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {selected.machine_keys.length} PC
+                  {selected.machine_keys.length === 1 ? "" : "s"} assigned to this group.
+                </p>
+              </div>
+              {machines.length === 0 && (
+                <p className="px-5 py-10 text-center text-sm text-slate-400">
+                  No PC reports yet.
+                </p>
+              )}
+              {machines.length > 0 && (
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                      <th className="px-5 py-3">PC</th>
+                      <th className="px-5 py-3">Last seen</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {machines
+                      .filter((m) => selected.machine_keys.includes(m.key))
+                      .map((m) => (
+                        <tr key={m.key} className="hover:bg-slate-50/60">
+                          <td className="px-5 py-3.5 font-medium text-slate-900">
+                            {m.name}
+                          </td>
+                          <td className="px-5 py-3.5 text-slate-500">
+                            {fmtRelative(m.latest.created_at)}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              )}
+            </section>
+          )}
         </div>
-      </main>
+    </DashboardShell>
 
       {/* Create modal */}
       {modal?.kind === "create" && (
@@ -506,6 +547,6 @@ export function GroupsPanel() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

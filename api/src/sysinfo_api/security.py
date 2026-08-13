@@ -96,6 +96,28 @@ def _get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> dict:
 
 CurrentUser = Annotated[dict, Depends(_get_current_user)]
 
+ROLE_SUPER_ADMIN = "super_admin"
+ROLE_ADMIN = "admin"
+ROLE_USER = "user"
+SUPER_ADMIN_ONLY_ROLES = (ROLE_SUPER_ADMIN,)
+PROTECTED_ROUTES_ROLES = (ROLE_SUPER_ADMIN, ROLE_ADMIN)
+
+
+def _require_super_admin(user: CurrentUser) -> dict:
+    if user.get("role") not in SUPER_ADMIN_ONLY_ROLES:
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    return user
+
+
+def _require_admin_or_super(user: CurrentUser) -> dict:
+    if user.get("role") not in PROTECTED_ROUTES_ROLES:
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+    return user
+
+
+SuperAdminUser = Annotated[dict, Depends(_require_super_admin)]
+AdminOrSuperUser = Annotated[dict, Depends(_require_admin_or_super)]
+
 
 # --- API keys (hashed with sha256, compared via token hash) ---
 

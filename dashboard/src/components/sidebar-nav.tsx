@@ -2,21 +2,29 @@
 
 import Link from "next/link";
 
-export type NavKey = "fleet" | "reports" | "keys" | "groups" | "export";
+export type NavKey = "fleet" | "reports" | "keys" | "groups" | "export" | "users";
 
-const NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
+const BASE_NAV_ITEMS: { key: NavKey; label: string; href: string; superOnly?: boolean }[] = [
   { key: "fleet", label: "Fleet", href: "/dashboard" },
   { key: "reports", label: "Reports", href: "/reports" },
-  { key: "keys", label: "API Keys", href: "/api-keys" },
-  { key: "groups", label: "Groups", href: "/groups" },
   { key: "export", label: "Export", href: "/reports/export" },
+  { key: "groups", label: "Groups", href: "/groups" },
+  { key: "keys", label: "API Keys", href: "/api-keys", superOnly: true },
+  { key: "users", label: "Users", href: "/users", superOnly: true },
 ];
 
 /** Sidebar navigation pills (wraps on narrow sidebars, no overflow). */
-export function SidebarNav({ current }: { current: NavKey }) {
+export function SidebarNav({
+  current,
+  role,
+}: {
+  current: NavKey;
+  role?: string;
+}) {
+  const items = BASE_NAV_ITEMS.filter((i) => !i.superOnly || role === "super_admin");
   return (
     <nav className="mt-3 flex flex-wrap gap-1.5 text-xs">
-      {NAV_ITEMS.map((item) => {
+      {items.map((item) => {
         const active = item.key === current;
         return active ? (
           <span

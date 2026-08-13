@@ -16,8 +16,7 @@ import {
   maxDiskPercent,
   networkTotalBytes,
 } from "@/lib/api";
-import { SignOutButton } from "@/components/dashboard/sign-out-button";
-import { SidebarNav } from "@/components/sidebar-nav";
+import { DashboardShell } from "@/components/dashboard/shell";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -204,22 +203,14 @@ export function ReportExportPanel() {
     RANGE_LABELS.find((r) => r.key === applied?.range)?.label ?? "";
 
   return (
-    <div className="flex min-h-screen bg-[var(--bg)] text-[var(--ink)]">
-      <aside className="flex w-80 shrink-0 flex-col border-r border-slate-800 bg-slate-950 text-slate-100">
-        <div className="border-b border-slate-800 px-4 py-5">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-            System Info
-          </p>
-          <h1 className="mt-1 text-lg font-semibold tracking-tight text-white">
-            Report Export
-          </h1>
-          <p className="mt-1 text-xs text-slate-400">
-            Generate a CSV report with all collected fields
-          </p>
-          <SidebarNav current="export" />
-        </div>
-
-        <form onSubmit={onSubmit} className="space-y-4 overflow-y-auto border-b border-slate-800 px-3 py-3">
+    <DashboardShell
+      title="Report Export"
+      nav="export"
+      role={session?.user?.role}
+      widthClass="w-80"
+      subtitle="Generate a CSV report with all collected fields"
+      sidebar={
+        <form onSubmit={onSubmit} className="space-y-4 border-b border-slate-800 px-3 py-3">
           <div>
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
               Date range
@@ -326,23 +317,18 @@ export function ReportExportPanel() {
             </button>
           </div>
         </form>
-
-        <div className="border-t border-slate-800 p-3">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onDownload}
-              disabled={!applied || exporting || isFetching}
-              className="flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-            >
-              {exporting ? "Exporting…" : "Download CSV"}
-            </button>
-            <SignOutButton />
-          </div>
-        </div>
-      </aside>
-
-      <main className="flex min-w-0 flex-1 flex-col">
+      }
+      sidebarFooter={
+        <button
+          type="button"
+          onClick={onDownload}
+          disabled={!applied || exporting || isFetching}
+          className="w-full rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+        >
+          {exporting ? "Exporting…" : "Download CSV"}
+        </button>
+      }
+      header={
         <div className="border-b border-slate-200 bg-white/80 px-6 py-4 backdrop-blur">
           {applied ? (
             <div className="flex flex-wrap items-end justify-between gap-3">
@@ -376,8 +362,9 @@ export function ReportExportPanel() {
             </div>
           )}
         </div>
-
-        <div className="flex-1 overflow-y-auto px-6 py-6">
+      }
+    >
+      <div className="flex-1 overflow-y-auto px-6 py-6">
           {exportError && (
             <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
               Export failed: {exportError}
@@ -566,7 +553,6 @@ export function ReportExportPanel() {
             </div>
           )}
         </div>
-      </main>
-    </div>
+    </DashboardShell>
   );
 }

@@ -43,11 +43,39 @@ export const authConfig = {
           });
           if (!res.ok) return null;
           const data = await res.json();
+          let role: string | undefined;
+          let groups: string[] | undefined;
+          try {
+            const me = await fetch(`${apiUrl}/auth/me`, {
+              headers: { Authorization: `Bearer ${data.access_token}` },
+              cache: "no-store",
+            });
+            if (me.ok) {
+              const meJson = await me.json();
+              role = meJson.role;
+              groups = meJson.groups ?? [];
+            }
+          } catch {
+            // fall back to JWT-only session; role comes from the token below
+          }
+          if (!role) {
+            try {
+              const parts = data.access_token.split(".");
+              const payload = JSON.parse(
+                Buffer.from(parts[1], "base64url").toString("utf-8"),
+              );
+              role = payload.role;
+            } catch {
+              // ignore
+            }
+          }
           return {
             id: credentials?.username as string,
             name: credentials?.username as string,
             apiToken: data.access_token,
             refreshToken: data.refresh_token,
+            role,
+            groups: groups ?? [],
           };
         } catch {
           return null;
@@ -60,6 +88,8 @@ export const authConfig = {
       if (user) {
         token.apiToken = (user as { apiToken?: string }).apiToken;
         token.refreshToken = (user as { refreshToken?: string }).refreshToken;
+        token.role = (user as { role?: string }).role;
+        token.groups = (user as { groups?: string[] }).groups ?? [];
         token.name = user.name;
         return token;
       }
@@ -94,6 +124,8 @@ export const authConfig = {
     },
     session({ session, token }) {
       session.user.apiToken = token.apiToken as string | undefined;
+      session.user.role = token.role as string | undefined;
+      session.user.groups = (token.groups as string[] | undefined) ?? [];
       session.user.name = token.name as string | undefined;
       return session;
     },

@@ -1,19 +1,32 @@
 "use client";
 
+import { signOut } from "next-auth/react";
 import { useState } from "react";
 import { useSession } from "next-auth/react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const ROLE_LABELS: Record<string, string> = {
+  super_admin: "Super admin",
+  admin: "Admin",
+  user: "User",
+};
 
-export function ChangePasswordButton() {
+/** Top-bar profile menu: avatar dropdown with change-password + sign out. */
+export function UserNav({ apiUrl }: { apiUrl?: string }) {
   const { data: session } = useSession();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const username = session?.user?.name ?? "—";
+  const role = session?.user?.role ?? "";
+  const apiToken = session?.user?.apiToken;
+  const baseUrl = apiUrl ?? process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -23,13 +36,13 @@ export function ChangePasswordButton() {
       setError("New passwords do not match");
       return;
     }
-    setLoading(true);
+    setSaving(true);
     try {
-      const res = await fetch(`${API_URL}/auth/change-password`, {
+      const res = await fetch(`${baseUrl}/auth/change-password`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${session?.user?.apiToken ?? ""}`,
+          Authorization: `Bearer ${apiToken ?? ""}`,
         },
         body: JSON.stringify({ current_password: current, new_password: next }),
         cache: "no-store",
@@ -46,19 +59,102 @@ export function ChangePasswordButton() {
     } catch {
       setError("Could not reach the API");
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   }
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
-      >
-        Change password
-      </button>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setMenuOpen((o) => !o)}
+          className="flex items-center gap-2 rounded-full border border-slate-200 bg-white py-1 pl-1 pr-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 lg:pr-3"
+          aria-expanded={menuOpen}
+          aria-haspopup="menu"
+        >
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
+            {(username[0] ?? "?").toUpperCase()}
+          </span>
+          <span className="hidden max-w-44 truncate sm:block">{username}</span>
+          <svg
+            className={`h-3.5 w-3.5 text-slate-400 transition-transform ${
+              menuOpen ? "rotate-180" : ""
+            }`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="m6 9 6 6 6-6"
+            />
+          </svg>
+        </button>
+
+        {menuOpen && (
+          <>
+            <button
+              type="button"
+              aria-label="Close menu"
+              onClick={() => setMenuOpen(false)}
+              className="fixed inset-0 z-40 cursor-default"
+            />
+            <div
+              role="menu"
+              className="absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-xl"
+            >
+              <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">
+                  {(username[0] ?? "?").toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-slate-900">
+                    {username}
+                  </p>
+                  <p
+                    className={`text-[11px] font-semibold uppercase tracking-wide ${
+                      role === "super_admin"
+                        ? "text-violet-600"
+                        : role === "admin"
+                          ? "text-blue-600"
+                          : "text-slate-400"
+                    }`}
+                  >
+                    {ROLE_LABELS[role] ?? role ?? "Signed in"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-2 flex flex-col gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setOpen(true);
+                  }}
+                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Change password
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setLoading(true);
+                    await signOut({ callbackUrl: "/login" });
+                  }}
+                  disabled={loading}
+                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                >
+                  {loading ? "Signing out…" : "Sign out"}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
 
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
@@ -82,13 +178,13 @@ export function ChangePasswordButton() {
               )}
               <div>
                 <label
-                  htmlFor="current-password"
+                  htmlFor="user-nav-current"
                   className="block text-sm font-medium text-gray-700"
                 >
                   Current password
                 </label>
                 <input
-                  id="current-password"
+                  id="user-nav-current"
                   type="password"
                   autoComplete="current-password"
                   required
@@ -99,13 +195,13 @@ export function ChangePasswordButton() {
               </div>
               <div>
                 <label
-                  htmlFor="new-password"
+                  htmlFor="user-nav-new"
                   className="block text-sm font-medium text-gray-700"
                 >
                   New password
                 </label>
                 <input
-                  id="new-password"
+                  id="user-nav-new"
                   type="password"
                   autoComplete="new-password"
                   required
@@ -117,13 +213,13 @@ export function ChangePasswordButton() {
               </div>
               <div>
                 <label
-                  htmlFor="confirm-password"
+                  htmlFor="user-nav-confirm"
                   className="block text-sm font-medium text-gray-700"
                 >
                   Confirm new password
                 </label>
                 <input
-                  id="confirm-password"
+                  id="user-nav-confirm"
                   type="password"
                   autoComplete="new-password"
                   required
@@ -142,10 +238,10 @@ export function ChangePasswordButton() {
                 </button>
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={saving}
                   className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {loading ? "Saving…" : "Save"}
+                  {saving ? "Saving…" : "Save"}
                 </button>
               </div>
             </form>

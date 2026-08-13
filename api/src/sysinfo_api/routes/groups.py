@@ -36,11 +36,16 @@ def _to_out(doc: dict) -> dict:
 
 @router.get("", response_model=list[GroupOut])
 def list_groups(user: security.CurrentUser) -> list[dict]:
-    return [_to_out(d) for d in db.list_groups()]
+    """All groups for admin/super_admin; only a user's assigned groups otherwise."""
+    all_groups = [_to_out(d) for d in db.list_groups()]
+    if user.get("role") == security.ROLE_USER:
+        allowed = set(user.get("groups") or [])
+        return [g for g in all_groups if g["id"] in allowed]
+    return all_groups
 
 
 @router.post("", status_code=201, response_model=GroupOut)
-def create_group(payload: GroupCreate, user: security.CurrentUser) -> dict:
+def create_group(payload: GroupCreate, user: security.AdminOrSuperUser) -> dict:
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=422, detail="Group name is required")
@@ -52,7 +57,7 @@ def create_group(payload: GroupCreate, user: security.CurrentUser) -> dict:
 
 @router.patch("/{group_id}", response_model=GroupOut)
 def update_group(
-    group_id: str, payload: GroupUpdate, user: security.CurrentUser
+    group_id: str, payload: GroupUpdate, user: security.AdminOrSuperUser
 ) -> dict:
     name = payload.name.strip() if payload.name is not None else None
     if name == "":
@@ -78,7 +83,7 @@ def update_group(
 
 
 @router.delete("/{group_id}", status_code=204)
-def delete_group(group_id: str, user: security.CurrentUser) -> None:
+def delete_group(group_id: str, user: security.AdminOrSuperUser) -> None:
     if db.delete_group(group_id):
         return None
     raise HTTPException(status_code=404, detail="Group not found")
