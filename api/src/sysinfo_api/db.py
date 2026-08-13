@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from functools import lru_cache
 
 from bson import ObjectId
@@ -28,6 +29,10 @@ def _users():
 
 def _api_keys():
     return _db()[config.MONGO_API_KEYS]
+
+
+def _groups():
+    return _db()[config.MONGO_GROUPS]
 
 
 def save_report(document: dict) -> ObjectId | None:
@@ -164,11 +169,35 @@ def delete_user(user_id: str) -> bool:
 def create_api_key(name: str, key_hash: str, prefix: str) -> ObjectId | None:
     try:
         result = _api_keys().insert_one(
-            {"name": name, "key_hash": key_hash, "prefix": prefix, "active": True}
+            {
+                "name": name,
+                "key_hash": key_hash,
+                "prefix": prefix,
+                "active": True,
+                "created_at": datetime.now(UTC).timestamp(),
+            }
         )
         return result.inserted_id
     except (ConnectionFailure, PyMongoError):
         return None
+
+
+def update_api_key(
+    key_id: str, name: str | None = None, active: bool | None = None
+) -> bool:
+    """Update an API key's name/active flag. Returns True if one doc was updated."""
+    try:
+        changes: dict = {}
+        if name is not None:
+            changes["name"] = name
+        if active is not None:
+            changes["active"] = bool(active)
+        if not changes:
+            return True
+        result = _api_keys().update_one({"_id": ObjectId(key_id)}, {"$set": changes})
+        return result.matched_count == 1
+    except (ConnectionFailure, PyMongoError):
+        return False
 
 
 def find_api_key_by_hash(key_hash: str) -> dict | None:
@@ -204,6 +233,54 @@ def delete_api_key(key_id: str) -> bool:
         return result.deleted_count == 1
     except Exception:
         return False
+
+
+def create_group(name: str) -> ObjectId | None:
+    try:
+        result = _groups().insert_one(
+            {"name": name, "machine_keys": [], "created_at": datetime.now(UTC).timestamp()}
+        )
+        return result.inserted_id
+    except (ConnectionFailure, PyMongoError):
+        return None
+
+
+def list_groups() -> list[dict]:
+    records: list[dict] = []
+    try:
+        cursor = _groups().find()
+        for doc in cursor:
+            doc["_id"] = str(doc["_id"])
+            records.append(doc)
+    except (ConnectionFailure, PyMongoError):
+        return records
+    return records
+
+
+def update_group(
+    group_id: str, name: str | None = None, machine_keys: list[str] | None = None
+) -> bool:
+    try:
+        changes: dict = {}
+        if name is not None:
+            changes["name"] = name
+        if machine_keys is not None:
+            changes["machine_keys"] = machine_keys
+        if not changes:
+            return True
+        result = _groups().update_one({"_id": ObjectId(group_id)}, {"$set": changes})
+        return result.matched_count == 1
+    except (ConnectionFailure, PyMongoError):
+        return False
+
+
+def delete_group(group_id: str) -> bool:
+    try:
+        result = _groups().delete_one({"_id": ObjectId(group_id)})
+        return result.deleted_count == 1
+    except Exception:
+        return False
+
 
 def ping() -> bool:
     """True if MongoDB is reachable."""

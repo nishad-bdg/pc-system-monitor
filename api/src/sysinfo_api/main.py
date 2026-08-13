@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import config, db, security
-from .routes import api_keys, auth, health, reports, users
+from .routes import api_keys, auth, groups, health, reports, users
 
 
 @asynccontextmanager
@@ -38,6 +38,7 @@ app.include_router(auth.router)
 app.include_router(reports.router)
 app.include_router(users.router)
 app.include_router(api_keys.router)
+app.include_router(groups.router)
 
 
 def seed_admin() -> None:

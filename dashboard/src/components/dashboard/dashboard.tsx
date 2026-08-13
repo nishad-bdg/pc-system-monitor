@@ -5,10 +5,13 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {
+  fetchGroups,
   fetchReports,
   fmtPercent,
   fmtRelative,
+  Group,
   groupMachines,
+  groupOf,
 } from "@/lib/api";
 import { SignOutButton } from "./sign-out-button";
 import { MachineDetail } from "./machine-detail";
@@ -19,6 +22,7 @@ export function Dashboard() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
   const [filter, setFilter] = useState("");
+  const [groupFilter, setGroupFilter] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
@@ -28,14 +32,26 @@ export function Dashboard() {
     refetchInterval: 30_000,
   });
 
+  const { data: groups = [] } = useQuery({
+    queryKey: ["groups"],
+    queryFn: () => fetchGroups(API_URL, apiToken ?? ""),
+    enabled: !!apiToken,
+  });
+
   const reports = data?.reports ?? [];
   const machines = useMemo(() => groupMachines(reports), [reports]);
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return machines;
-    return machines.filter((m) => m.name.toLowerCase().includes(q));
-  }, [machines, filter]);
+    return machines.filter((m) => {
+      if (q && !m.name.toLowerCase().includes(q)) return false;
+      if (groupFilter) {
+        const g = groupOf(m, groups);
+        if (!g || g.id !== groupFilter) return false;
+      }
+      return true;
+    });
+  }, [machines, filter, groupFilter, groups]);
 
   useEffect(() => {
     if (filtered.length === 0) {
@@ -74,6 +90,18 @@ export function Dashboard() {
             >
               Reports
             </Link>
+            <Link
+              href="/api-keys"
+              className="rounded-md px-2 py-1 font-medium text-slate-300 hover:bg-slate-900 hover:text-white"
+            >
+              API Keys
+            </Link>
+            <Link
+              href="/groups"
+              className="rounded-md px-2 py-1 font-medium text-slate-300 hover:bg-slate-900 hover:text-white"
+            >
+              Groups
+            </Link>
           </div>
         </div>
 
@@ -88,6 +116,25 @@ export function Dashboard() {
             placeholder="Filter by PC name…"
             className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
           />
+        </div>
+
+        <div className="px-3 pt-2">
+          <label className="sr-only" htmlFor="pc-group-filter">
+            Filter by group
+          </label>
+          <select
+            id="pc-group-filter"
+            value={groupFilter}
+            onChange={(e) => setGroupFilter(e.target.value)}
+            className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+          >
+            <option value="">All groups</option>
+            {groups.map((g: Group) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         <nav className="mt-3 flex-1 overflow-y-auto px-2 pb-4">

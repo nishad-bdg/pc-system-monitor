@@ -12,16 +12,31 @@ class ApiKeyCreate(BaseModel):
     name: str
 
 
+class ApiKeyUpdate(BaseModel):
+    name: str | None = None
+    active: bool | None = None
+
+
 class ApiKeyOut(BaseModel):
     id: str
     name: str
     prefix: str
     active: bool
+    created_at: float | None = None
 
 
 @router.get("", response_model=list[ApiKeyOut])
-def list_api_keys(user: security.CurrentUser) -> list:
-    return db.list_api_keys()
+def list_api_keys(user: security.CurrentUser) -> list[dict]:
+    return [
+        {
+            "id": k["_id"],
+            "name": k["name"],
+            "prefix": k["prefix"],
+            "active": k["active"],
+            "created_at": k.get("created_at"),
+        }
+        for k in db.list_api_keys()
+    ]
 
 
 @router.post("", status_code=201)
@@ -40,4 +55,22 @@ def create_api_key(payload: ApiKeyCreate, user: security.CurrentUser) -> JSONRes
 def delete_api_key(key_id: str, user: security.CurrentUser) -> None:
     if db.delete_api_key(key_id):
         return None
+    raise HTTPException(status_code=404, detail="API key not found")
+
+
+@router.patch("/{key_id}", response_model=ApiKeyOut)
+def update_api_key(
+    key_id: str, payload: ApiKeyUpdate, user: security.CurrentUser
+) -> dict:
+    if not db.update_api_key(key_id, name=payload.name, active=payload.active):
+        raise HTTPException(status_code=404, detail="API key not found")
+    for key in db.list_api_keys():
+        if key["_id"] == key_id:
+            return {
+                "id": key["_id"],
+                "name": key["name"],
+                "prefix": key["prefix"],
+                "active": key["active"],
+                "created_at": key.get("created_at"),
+            }
     raise HTTPException(status_code=404, detail="API key not found")

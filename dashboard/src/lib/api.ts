@@ -92,6 +92,27 @@ export interface MachineSummary {
   reports: Report[];
 }
 
+export interface ApiKey {
+  id: string;
+  name: string;
+  prefix: string;
+  active: boolean;
+  created_at?: number | null;
+}
+
+export interface ApiKeyCreated {
+  id: string;
+  name: string;
+  api_key: string;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  machine_keys: string[];
+  created_at?: number | null;
+}
+
 export async function fetchReports(
   apiUrl: string,
   apiToken: string,
@@ -123,9 +144,7 @@ export async function fetchReports(
 /** Encode machine key for URL path segment. */
 export function encodeMachineKey(key: string): string {
   return encodeURIComponent(key);
-}
-
-export function decodeMachineKey(encoded: string): string {
+}export function decodeMachineKey(encoded: string): string {
   return decodeURIComponent(encoded);
 }
 
@@ -401,4 +420,130 @@ export function formatUtcDayBd(utcDay: string): string {
     day: "numeric",
   }).format(new Date(noonUtc));
   return `${utcDay} UTC · ${bd} BD`;
+}
+
+// ---- API keys ----
+
+async function apiRequest<T>(
+  apiUrl: string,
+  apiToken: string,
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
+  const res = await fetch(`${apiUrl}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+      "Content-Type": "application/json",
+      ...init?.headers,
+    },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    let detail = `API error ${res.status}`;
+    try {
+      const body = await res.json();
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      // ignore body parse errors
+    }
+    throw new Error(detail);
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json();
+}
+
+export function fetchApiKeys(
+  apiUrl: string,
+  apiToken: string,
+): Promise<ApiKey[]> {
+  return apiRequest(apiUrl, apiToken, "/api-keys");
+}
+
+export function createApiKey(
+  apiUrl: string,
+  apiToken: string,
+  name: string,
+): Promise<ApiKeyCreated> {
+  return apiRequest(apiUrl, apiToken, "/api-keys", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export function updateApiKey(
+  apiUrl: string,
+  apiToken: string,
+  id: string,
+  changes: { name?: string; active?: boolean },
+): Promise<ApiKey> {
+  return apiRequest(apiUrl, apiToken, `/api-keys/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(changes),
+  });
+}
+
+export function deleteApiKey(
+  apiUrl: string,
+  apiToken: string,
+  id: string,
+): Promise<void> {
+  return apiRequest(apiUrl, apiToken, `/api-keys/${id}`, {
+    method: "DELETE",
+  });
+}
+
+// ---- groups ----
+
+export function fetchGroups(
+  apiUrl: string,
+  apiToken: string,
+): Promise<Group[]> {
+  return apiRequest(apiUrl, apiToken, "/groups");
+}
+
+export function createGroup(
+  apiUrl: string,
+  apiToken: string,
+  name: string,
+): Promise<Group> {
+  return apiRequest(apiUrl, apiToken, "/groups", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export function updateGroup(
+  apiUrl: string,
+  apiToken: string,
+  id: string,
+  changes: { name?: string; machineKeys?: string[] },
+): Promise<Group> {
+  return apiRequest(apiUrl, apiToken, `/groups/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      ...(changes.name !== undefined ? { name: changes.name } : {}),
+      ...(changes.machineKeys !== undefined
+        ? { machine_keys: changes.machineKeys }
+        : {}),
+    }),
+  });
+}
+
+export function deleteGroup(
+  apiUrl: string,
+  apiToken: string,
+  id: string,
+): Promise<void> {
+  return apiRequest(apiUrl, apiToken, `/groups/${id}`, {
+    method: "DELETE",
+  });
+}
+
+/** Group a machine belongs to, or null. */
+export function groupOf(
+  machine: MachineSummary,
+  groups: Group[],
+): Group | null {
+  return groups.find((g) => g.machine_keys.includes(machine.key)) ?? null;
 }

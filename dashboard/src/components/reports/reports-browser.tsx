@@ -6,11 +6,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {
   encodeMachineKey,
+  fetchGroups,
   fetchReports,
   fmtBytes,
   fmtPercent,
   fmtRelative,
   groupMachines,
+  groupOf,
   MachineSortKey,
   maxDiskPercent,
   networkTotalBytes,
@@ -35,6 +37,7 @@ type AppliedFilters = {
   pcName: string;
   country: string;
   os: string;
+  group: string;
   fromTs?: number;
   toTs?: number;
   sort: MachineSortKey;
@@ -47,6 +50,7 @@ const defaultApplied: AppliedFilters = {
   pcName: "",
   country: "",
   os: "",
+  group: "",
   fromTs: undefined,
   toTs: undefined,
   sort: "cpu",
@@ -62,6 +66,7 @@ export function ReportsBrowser() {
   const [pcName, setPcName] = useState("");
   const [country, setCountry] = useState("");
   const [os, setOs] = useState("");
+  const [group, setGroup] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [sort, setSort] = useState<MachineSortKey>("cpu");
@@ -70,6 +75,12 @@ export function ReportsBrowser() {
   const [minDisk, setMinDisk] = useState("0");
   const [applied, setApplied] = useState<AppliedFilters>(defaultApplied);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
+  const { data: groups = [] } = useQuery({
+    queryKey: ["groups"],
+    queryFn: () => fetchGroups(API_URL, apiToken ?? ""),
+    enabled: !!apiToken,
+  });
 
   const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["reports-browse", applied],
@@ -94,10 +105,14 @@ export function ReportsBrowser() {
       if (cpu < applied.minCpu) return false;
       if (ram < applied.minRam) return false;
       if (disk < applied.minDisk) return false;
+      if (applied.group) {
+        const g = groupOf(m, groups);
+        if (!g || g.id !== applied.group) return false;
+      }
       return true;
     });
     return sortMachines(list, applied.sort);
-  }, [data?.reports, applied]);
+  }, [data?.reports, applied, groups]);
 
   useEffect(() => {
     if (machines.length === 0) {
@@ -118,6 +133,7 @@ export function ReportsBrowser() {
       pcName: pcName.trim(),
       country: country.trim(),
       os: os.trim(),
+      group,
       fromTs: dateInputToTs(fromDate, false),
       toTs: dateInputToTs(toDate, true),
       sort,
@@ -131,6 +147,7 @@ export function ReportsBrowser() {
     setPcName("");
     setCountry("");
     setOs("");
+    setGroup("");
     setFromDate("");
     setToDate("");
     setSort("cpu");
@@ -164,6 +181,18 @@ export function ReportsBrowser() {
             <span className="rounded-md bg-blue-600 px-2 py-1 font-medium text-white">
               Reports
             </span>
+            <Link
+              href="/api-keys"
+              className="rounded-md px-2 py-1 font-medium text-slate-300 hover:bg-slate-900 hover:text-white"
+            >
+              API Keys
+            </Link>
+            <Link
+              href="/groups"
+              className="rounded-md px-2 py-1 font-medium text-slate-300 hover:bg-slate-900 hover:text-white"
+            >
+              Groups
+            </Link>
           </div>
         </div>
 
@@ -218,6 +247,21 @@ export function ReportsBrowser() {
               placeholder="Darwin, Windows…"
               className={inputClass}
             />
+          </label>
+          <label className="block text-xs text-slate-400">
+            Group
+            <select
+              value={group}
+              onChange={(e) => setGroup(e.target.value)}
+              className={inputClass}
+            >
+              <option value="">All groups</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
           </label>
 
           <p className="pt-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
