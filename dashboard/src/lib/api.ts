@@ -249,16 +249,45 @@ export function networkTotalBytes(r: Report): number {
   return (r.network?.bytes_sent ?? 0) + (r.network?.bytes_recv ?? 0);
 }
 
+function _normalizeDev(dev?: string | null): string {
+  if (!dev) return "";
+  return dev
+    .toLowerCase()
+    .replace(/^\/dev\//, "")
+    .replace(/(?:s\d+)+$/, "");
+}
+
+/** Total capacity bytes on SSD or HDD physical drives (best-effort match). */
+export function diskBytesByType(r: Report, type: "ssd" | "hdd"): number {
+  const healthDisks = r.health?.disks ?? [];
+  const media = new Map<string, string>();
+  for (const d of healthDisks) {
+    media.set(_normalizeDev(d.device), d.media_type);
+  }
+  let total = 0;
+  for (const dev of r.disk?.devices ?? []) {
+    if (media.get(_normalizeDev(dev.device)) === type) {
+      total += dev.total ?? 0;
+    }
+  }
+  return total;
+}
+
 export type MachineSortKey =
   | "last_seen"
   | "cpu"
   | "ram"
   | "disk"
+  | "ssd"
+  | "hdd"
   | "network";
+
+export type SortOrder = "desc" | "asc";
 
 export function sortMachines(
   machines: MachineSummary[],
   sort: MachineSortKey,
+  order: SortOrder = "desc",
 ): MachineSummary[] {
   const copy = machines.slice();
   const metric = (m: MachineSummary): number => {
@@ -270,6 +299,10 @@ export function sortMachines(
         return r.resources?.ram_percent ?? 0;
       case "disk":
         return maxDiskPercent(r);
+      case "ssd":
+        return diskBytesByType(r, "ssd");
+      case "hdd":
+        return diskBytesByType(r, "hdd");
       case "network":
         return networkTotalBytes(r);
       case "last_seen":
@@ -277,7 +310,7 @@ export function sortMachines(
         return r.created_at ?? 0;
     }
   };
-  copy.sort((a, b) => metric(b) - metric(a));
+  copy.sort((a, b) => (order === "asc" ? metric(a) - metric(b) : metric(b) - metric(a)));
   return copy;
 }
 
