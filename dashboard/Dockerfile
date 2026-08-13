@@ -11,7 +11,7 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 
 # Client-side API base URL is baked in at build time by Next.js.
-ARG NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+ARG NEXT_PUBLIC_API_URL=https://sysinfo-api.onrender.com
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 RUN pnpm build
