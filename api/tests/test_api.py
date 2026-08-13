@@ -731,6 +731,54 @@ def test_delete_api_key(monkeypatch):
     assert resp.status_code == 204
 
 
+def test_regenerate_api_key(monkeypatch):
+    _patch_db(monkeypatch, user=SUPER_USER)
+    calls: list[tuple] = []
+
+    def fake_update(key_id, name=None, active=None, key_hash=None, prefix=None):
+        calls.append((key_id, key_hash, prefix))
+        return True
+
+    monkeypatch.setattr(db, "update_api_key", fake_update)
+    monkeypatch.setattr(
+        db,
+        "list_api_keys",
+        lambda: [
+            {
+                "_id": "64b00000000000000000000b",
+                "name": "desktop-1",
+                "prefix": "sk-replaced-prefix",
+                "active": True,
+                "created_at": 1.0,
+            }
+        ],
+    )
+    resp = client.post(
+        "/api-keys/64b00000000000000000000b/regenerate",
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["api_key"].startswith("sk-")
+    assert body["name"] == "desktop-1"
+    assert len(calls) == 1
+    _, key_hash, prefix = calls[0]
+    assert key_hash != "replaced-hash"
+    assert prefix == body["api_key"][:20]
+
+
+def test_regenerate_api_key_not_found(monkeypatch):
+    _patch_db(monkeypatch, user=SUPER_USER)
+    monkeypatch.setattr(
+        db, "update_api_key", lambda key_id, name=None, active=None, key_hash=None, prefix=None: False
+    )
+    resp = client.post(
+        "/api-keys/64b00000000000000000000b/regenerate",
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 404
+
+
 # ---- groups admin ----
 
 def test_create_group(monkeypatch):

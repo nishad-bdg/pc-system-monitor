@@ -244,15 +244,23 @@ def create_api_key(name: str, key_hash: str, prefix: str) -> ObjectId | None:
 
 
 def update_api_key(
-    key_id: str, name: str | None = None, active: bool | None = None
+    key_id: str,
+    name: str | None = None,
+    active: bool | None = None,
+    key_hash: str | None = None,
+    prefix: str | None = None,
 ) -> bool:
-    """Update an API key's name/active flag. Returns True if one doc was updated."""
+    """Update an API key's name/active flag or rotate its secret hash."""
     try:
         changes: dict = {}
         if name is not None:
             changes["name"] = name
         if active is not None:
             changes["active"] = bool(active)
+        if key_hash is not None:
+            changes["key_hash"] = key_hash
+        if prefix is not None:
+            changes["prefix"] = prefix
         if not changes:
             return True
         result = _api_keys().update_one({"_id": ObjectId(key_id)}, {"$set": changes})

@@ -647,6 +647,16 @@ export function updateApiKey(
   });
 }
 
+export function regenerateApiKey(
+  apiUrl: string,
+  apiToken: string,
+  id: string,
+): Promise<ApiKeyCreated> {
+  return apiRequest(apiUrl, apiToken, `/api-keys/${id}/regenerate`, {
+    method: "POST",
+  });
+}
+
 export function deleteApiKey(
   apiUrl: string,
   apiToken: string,

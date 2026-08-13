@@ -9,6 +9,7 @@ import {
   deleteApiKey,
   fetchApiKeys,
   fmtRelative,
+  regenerateApiKey,
   updateApiKey,
 } from "@/lib/api";
 import { DashboardShell } from "@/components/dashboard/shell";
@@ -21,6 +22,7 @@ const inputClass =
 type ModalState =
   | { kind: "create"; name: string; error?: string }
   | { kind: "created"; name: string; key: string; copied: boolean }
+  | { kind: "regenerated"; name: string; key: string; copied: boolean }
   | { kind: "rename"; key: ApiKey; name: string; error?: string }
   | { kind: "delete"; key: ApiKey }
   | null;
@@ -70,6 +72,16 @@ export function ApiKeysPanel() {
       ),
   });
 
+  const regenerateMut = useMutation({
+    mutationFn: (id: string) => regenerateApiKey(API_URL, apiToken ?? "", id),
+    onSuccess: (res) => {
+      invalidate();
+      setModal({ kind: "regenerated", name: res.name, key: res.api_key, copied: false });
+    },
+    onError: (e) =>
+      setStatus(`Could not regenerate key: ${(e as Error).message}`),
+  });
+
   const deleteMut = useMutation({
     mutationFn: (id: string) => deleteApiKey(API_URL, apiToken ?? "", id),
     onSuccess: () => {
@@ -81,7 +93,7 @@ export function ApiKeysPanel() {
   });
 
   useEffect(() => {
-    if (modal?.kind === "created") {
+    if (modal?.kind === "created" || modal?.kind === "regenerated") {
       copyInputRef.current?.select();
     }
   }, [modal]);
@@ -107,7 +119,7 @@ export function ApiKeysPanel() {
   }
 
   async function copyKey() {
-    if (modal?.kind !== "created") return;
+    if (modal?.kind !== "created" && modal?.kind !== "regenerated") return;
     try {
       await navigator.clipboard.writeText(modal.key);
       setModal({ ...modal, copied: true });
@@ -259,6 +271,15 @@ export function ApiKeysPanel() {
                         <div className="flex justify-end gap-2">
                           <button
                             type="button"
+                            onClick={() => regenerateMut.mutate(k.id)}
+                            disabled={regenerateMut.isPending}
+                            className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                            title="Generate a new secret for this key (old one stops working)"
+                          >
+                            Copy
+                          </button>
+                          <button
+                            type="button"
                             onClick={() =>
                               setModal({ kind: "rename", key: k, name: k.name })
                             }
@@ -351,6 +372,56 @@ export function ApiKeysPanel() {
                 SYSTEM_INFO_API_KEY
               </code>
               .
+            </p>
+            <div className="mt-4 flex items-center gap-2">
+              <input
+                ref={copyInputRef}
+                readOnly
+                value={modal.key}
+                onFocus={(e) => e.currentTarget.select()}
+                className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-800 outline-none"
+              />
+              <button
+                type="button"
+                onClick={copyKey}
+                className={`shrink-0 rounded-lg px-4 py-2 text-sm font-medium transition ${
+                  modal.copied
+                    ? "bg-emerald-600 text-white"
+                    : "bg-blue-600 text-white hover:bg-blue-500"
+                }`}
+              >
+                {modal.copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setModal(null)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Regenerated — show new secret once */}
+      {modal?.kind === "regenerated" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-slate-900">
+              New key for {modal.name}
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Copy it now —{" "}
+              <span className="font-semibold text-amber-600">
+                it won&apos;t be shown again.
+              </span>{" "}
+              <span className="font-medium text-red-600">
+                The previous secret no longer works.
+              </span>{" "}
+              Update desktop PCs using this key.
             </p>
             <div className="mt-4 flex items-center gap-2">
               <input
