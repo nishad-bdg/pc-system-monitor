@@ -179,6 +179,7 @@ _CSV_COLUMN_PREFIXES = (
     "uptime.",
     "security.",
     "health.",
+    "email_accounts.",
     "mac_addresses.",
 )
 

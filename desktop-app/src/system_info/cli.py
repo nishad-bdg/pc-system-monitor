@@ -16,6 +16,7 @@ from .network import collect_network_usage
 from .uptime import collect_uptime
 from .security import collect_security_info
 from .health import collect_health_info
+from .email_accounts import collect_email_accounts
 from .device import get_or_create_device_id, resolve_pc_name
 from .update import check_for_update, maybe_auto_update
 # Load packaged/installer config before reading defaults.
@@ -41,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--network", action="store_true", help="Only show network bandwidth")
     parser.add_argument("--security", action="store_true", help="Only show internet-security software")
     parser.add_argument("--health", action="store_true", help="Only show storage/battery health")
+    parser.add_argument("--emails", action="store_true", help="Only show configured POP/IMAP email accounts")
     parser.add_argument("--json", action="store_true", help="Print output as JSON")
     parser.add_argument("--no-save", action="store_true", help="Do not save report to the API")
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="API base URL to save reports to")
@@ -126,6 +128,7 @@ def run(args: argparse.Namespace) -> int:
         or args.network
         or args.security
         or args.health
+        or args.emails
         or args.os
     )
     show_os = not specific or args.os
@@ -137,6 +140,7 @@ def run(args: argparse.Namespace) -> int:
     show_network = not specific or args.network
     show_security = not specific or args.security
     show_health = not specific or args.health
+    show_emails = not specific or args.emails
 
     pc_name = resolve_pc_name(args.pc_name)
     device_id = get_or_create_device_id(pc_name)
@@ -175,6 +179,9 @@ def run(args: argparse.Namespace) -> int:
     if show_health:
         data["health"] = collect_health_info().to_dict()
 
+    if show_emails:
+        data["email_accounts"] = collect_email_accounts().to_dict()
+
     _print(
         data,
         show_os,
@@ -186,6 +193,7 @@ def run(args: argparse.Namespace) -> int:
         show_network,
         show_security,
         show_health,
+        show_emails,
         args,
     )
 
@@ -228,6 +236,7 @@ def _print(
     show_network: bool,
     show_security: bool,
     show_health: bool,
+    show_emails: bool,
     args: argparse.Namespace,
 ) -> None:
     if args.json:
@@ -392,6 +401,28 @@ def _print(
             print(f"  cycle count:   {battery.get('cycle_count')}" if battery.get("cycle_count") is not None else "  cycle count:   unknown")
         else:
             print("  no battery detected")
+
+    if show_emails:
+        emails = data.get("email_accounts") or {}
+        accounts = emails.get("accounts") or []
+        print("== Email Accounts ==")
+        if accounts:
+            for acc in accounts:
+                parts = [
+                    f"client={acc.get('client') or 'unknown'}",
+                    f"protocol={acc.get('protocol') or 'unknown'}",
+                ]
+                if acc.get("incoming_host"):
+                    parts.append(f"in={acc.get('incoming_host')}:{acc.get('incoming_port') or '?'}")
+                if acc.get("outgoing_host"):
+                    parts.append(f"out={acc.get('outgoing_host')}:{acc.get('outgoing_port') or '?'}")
+                if acc.get("security"):
+                    parts.append(f"security={acc.get('security')}")
+                suffix = f" [{', '.join(parts)}]" if parts else ""
+                label = acc.get("email") or acc.get("username") or "unknown"
+                print(f"  - {label}{suffix}")
+        else:
+            print("  none detected")
 
 
 def main() -> int:

@@ -93,6 +93,21 @@ export interface Report {
     }[];
     platform?: string;
   } | null;
+  email_accounts?: {
+    count?: number;
+    accounts?: {
+      client?: string;
+      email?: string;
+      username?: string | null;
+      full_name?: string | null;
+      protocol?: string | null;
+      incoming_host?: string | null;
+      incoming_port?: number | null;
+      outgoing_host?: string | null;
+      outgoing_port?: number | null;
+      security?: string | null;
+    }[];
+  } | null;
   health?: {
     disks?: {
       name: string;
@@ -244,6 +259,28 @@ export function machineMac(r: Report): string | null {
   const hex = raw.toLowerCase().replace(/[^0-9a-f]/g, "");
   if (hex.length === 12) return hex.match(/.{1,2}/g)!.join(":").toUpperCase();
   return raw;
+}
+
+/** Configured email accounts on a report. */
+export type EmailAccountInfo = Exclude<
+  NonNullable<Report["email_accounts"]>["accounts"],
+  undefined
+>[number];
+
+export function machineEmails(r: Report): EmailAccountInfo[] {
+  return r.email_accounts?.accounts ?? [];
+}
+
+const CLIENT_LABELS: Record<string, string> = {
+  apple_mail: "Apple Mail",
+  thunderbird: "Thunderbird",
+  outlook_mac: "Outlook (Mac)",
+  outlook_new: "Outlook (new)",
+  outlook_classic: "Outlook",
+};
+
+export function clientLabel(client?: string | null): string {
+  return (client && CLIENT_LABELS[client]) || client || "Mail client";
 }
 
 /** Highest physical-device disk usage % on a report (0 if unknown). */

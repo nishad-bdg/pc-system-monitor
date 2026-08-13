@@ -19,7 +19,10 @@ import {
   fmtTime,
   fmtUptime,
   formatUtcDayBd,
+  clientLabel,
+  EmailAccountInfo,
   MachineSummary,
+  machineEmails,
   machineMac,
   networkTotalBytes,
   Report,
@@ -28,7 +31,13 @@ import {
 export function MachineDetail({ machine }: { machine: MachineSummary }) {
   const host = machine.latest;
   const [tab, setTab] = useState<
-    "summary" | "overview" | "printers" | "uptime" | "storage" | "health"
+    | "summary"
+    | "overview"
+    | "printers"
+    | "uptime"
+    | "storage"
+    | "health"
+    | "emails"
   >("summary");
   const timeSeries = machine.reports.map((r) => ({
     time: fmtTime(r.created_at),
@@ -127,6 +136,17 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         >
           Health
         </button>
+        <button
+          type="button"
+          onClick={() => setTab("emails")}
+          className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+            tab === "emails"
+              ? "border-blue-600 text-blue-700"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          Emails
+        </button>
       </div>
 
       {tab === "printers" ? (
@@ -155,6 +175,8 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         )
       ) : tab === "health" ? (
         <HealthSection health={host.health ?? null} />
+      ) : tab === "emails" ? (
+        <EmailsTab accounts={machineEmails(host)} />
       ) : tab === "summary" ? (
         <SummarySection machine={machine} />
       ) : (
@@ -632,6 +654,47 @@ function SummarySection({ machine }: { machine: MachineSummary }) {
                   <span className="shrink-0 text-xs text-slate-600">
                     {p.print_count == null ? "—" : `${p.print_count.toLocaleString()} prints`}
                   </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-medium text-slate-700">Email accounts</h2>
+            <p className="text-xs text-slate-500">
+              <span className="font-semibold text-slate-800">
+                {machineEmails(r).length}
+              </span>{" "}
+              configured
+            </p>
+          </div>
+          {machineEmails(r).length === 0 ? (
+            <p className="mt-4 text-sm text-slate-500">
+              No POP/IMAP email accounts detected.
+            </p>
+          ) : (
+            <ul className="mt-4 space-y-2">
+              {machineEmails(r).map((a, i) => (
+                <li
+                  key={`${a.email}-${a.client}-${i}`}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-2.5"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-900">
+                      {a.email || "—"}
+                    </p>
+                    <p className="truncate text-xs text-slate-500">
+                      {clientLabel(a.client)}
+                      {a.incoming_host ? ` · ${a.incoming_host}` : ""}
+                    </p>
+                  </div>
+                  {a.protocol && (
+                    <span className="shrink-0 rounded-full bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold uppercase text-blue-700">
+                      {a.protocol}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>
@@ -1127,6 +1190,107 @@ function PrintersSection({
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmailsTab({
+  accounts,
+}: {
+  accounts: EmailAccountInfo[];
+}) {
+  const total = accounts.length;
+  const protocols = [...new Set(accounts.map((a) => a.protocol).filter(Boolean))];
+  const clients = [...new Set(accounts.map((a) => a.client).filter(Boolean))];
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard
+          label="Email accounts"
+          value={String(total)}
+          sub="POP / IMAP accounts configured"
+          accent
+        />
+        <StatCard
+          label="Protocols"
+          value={protocols.join(", ") || "—"}
+          sub="Across configured accounts"
+        />
+        <StatCard
+          label="Clients"
+          value={clients.length ? String(clients.length) : "—"}
+          sub={clients.map(clientLabel).join(", ") || "Mail clients"}
+        />
+      </div>
+
+      {total === 0 ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500">
+          No POP/IMAP email accounts detected on this PC.
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-medium text-slate-700">Configured accounts</h2>
+            <p className="text-xs text-slate-500">
+              Server config only — passwords stay in the OS keychain and are not read
+            </p>
+          </div>
+          <ul className="mt-4 space-y-2">
+            {accounts.map((a, i) => (
+              <li
+                key={`${a.email}-${a.client}-${i}`}
+                className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-900">
+                      {a.email || a.username || "—"}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-slate-500">
+                      {a.full_name ? `${a.full_name} · ` : ""}
+                      {clientLabel(a.client)}
+                      {a.username ? ` · ${a.username}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {a.protocol && (
+                      <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold uppercase text-blue-700">
+                        {a.protocol}
+                      </span>
+                    )}
+                    {a.security && (
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                          a.security === "none"
+                            ? "bg-red-50 text-red-700"
+                            : "bg-emerald-50 text-emerald-700"
+                        }`}
+                      >
+                        {a.security.toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-slate-500">
+                  {a.incoming_host && (
+                    <span>
+                      IN {a.incoming_host}
+                      {a.incoming_port ? `:${a.incoming_port}` : ""}
+                    </span>
+                  )}
+                  {a.outgoing_host && (
+                    <span>
+                      OUT {a.outgoing_host}
+                      {a.outgoing_port ? `:${a.outgoing_port}` : ""}
+                    </span>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>

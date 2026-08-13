@@ -14,6 +14,7 @@ import {
   groupMachines,
   groupOf,
   MachineSortKey,
+  machineEmails,
   machineMac,
   maxDiskPercent,
   networkTotalBytes,
@@ -480,6 +481,7 @@ export function ReportExportPanel() {
                       <th className="px-4 py-3">PC</th>
                       <th className="px-4 py-3">IP</th>
                       <th className="px-4 py-3">MAC</th>
+                      <th className="px-4 py-3">Emails</th>
                       <th className="px-4 py-3">Last seen</th>
                       <th className="px-4 py-3">Reports</th>
                       <th className="px-4 py-3">CPU %</th>
@@ -539,6 +541,11 @@ export function ReportExportPanel() {
                           </td>
                           <td className="px-4 py-3 font-mono text-slate-600">
                             {machineMac(r) ?? "—"}
+                          </td>
+                          <td className="max-w-[220px] truncate px-4 py-3 text-slate-600" title={machineEmails(r).map((a) => a.email).filter(Boolean).join(", ")}>
+                            {machineEmails(r).length
+                              ? machineEmails(r).map((a) => a.email).filter(Boolean).join(", ")
+                              : "—"}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {fmtRelative(r.created_at)}

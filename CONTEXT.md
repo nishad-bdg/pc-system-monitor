@@ -73,7 +73,7 @@ Restart the API after model/query changes; old processes strip unknown fields (e
 uv run system-info --api-key sk-...          # full collect + save
 uv run system-info --no-save                 # print only
 uv run system-info --pc-name Office-PC-3     # Windows custom name
-uv run system-info --printers | --disk | --network | --sys | --security | --health
+uv run system-info --printers | --disk | --network | --sys | --security | --health | --emails
 ```
 
 Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`.
@@ -101,6 +101,7 @@ Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`.
 | `printers` | `printers.py` | See below |
 | `security` | `security.py` | Internet-security products, see below |
 | `health` | `health.py` | Disk + battery health, see below |
+| `email_accounts` | `email_accounts.py` | POP/IMAP accounts, see below |
 
 ### Battery (`resources.battery`)
 
@@ -155,13 +156,28 @@ totals since boot + ~0.5s NIC sample rates (`psutil`).
 `uptime: { boot_time, uptime_seconds, by_day: { "YYYY-MM-DD": seconds }, day_timezone: "UTC" }` —
 agent accumulates on-seconds per UTC day in `uptime.json`; admin labels days in Asia/Dhaka (BD).
 
+### Email accounts (`email_accounts`)
+
+Detects POP/IMAP accounts configured in mail clients (address + server config only —
+**passwords are encrypted in the OS keychain / credential manager and are not read**):
+
+`email_accounts: { count, accounts: [{ client, email, username, full_name, protocol, incoming_host, incoming_port, outgoing_host, outgoing_port, security }] }`
+
+- **Apple Mail (macOS):** `~/Library/Preferences/com.apple.mail.plist` (`MailAccounts` + `DeliveryAccounts` for SMTP).
+- **Thunderbird (mac + Win):** `prefs.js` in each profile (`mail.account.*`, `mail.server.*.type|hostname|port|socketType`, `mail.identity.*.email`, SMTP via `mail.smtpserver.*`). `socketType`/`try_ssl` map to `none|starttls|ssl`.
+- **Outlook for Mac:** account plists under `~/Library/Group Containers/UBF8T346G9.Office/Outlook/*/Accounts/`.
+- **New Outlook (Win):** account JSON under `%LOCALAPPDATA%\Packages\Microsoft.OutlookForWindows_8wekyb3d8bbwe\LocalState`.
+- **Classic Outlook (Win, best-effort):** `%APPDATA%\Microsoft\Outlook\outlook.xml` + registry profile blob string scan.
+
+`client` is one of `apple_mail | thunderbird | outlook_mac | outlook_new | outlook_classic`.
+
 ---
 
 ## API (`api/`)
 
 ### Report model extras
 
-Optional on `Report`: `pc_name`, `device_id`, `disk`, `printers`, `network`, `uptime`, `security`, `health` (plus original OS/IP/geo/resources).
+Optional on `Report`: `pc_name`, `device_id`, `disk`, `printers`, `network`, `uptime`, `security`, `health`, `email_accounts` (plus original OS/IP/geo/resources).
 
 ### `GET /reports` query params
 
@@ -211,7 +227,7 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 ### Fleet (`/dashboard`)
 
 - Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports.
-- Detail tabs (`machine-detail.tsx`): **Summary (default) / Overview / Printers / Uptime / Storage / Health**.
+- Detail tabs (`machine-detail.tsx`): **Summary (default) / Overview / Printers / Uptime / Storage / Health / Emails**.
   - **Summary:** total uptime + session, network total + bandwidth, full CPU spec (model/arch/cores/clock + **brand**), full RAM spec (total/available/free/swap + **bus speed** `ram_speed_mhz` + `ram_type`), storage health (SSD/HDD badge + brand, SMART, Healthy/Failing), battery health (condition, health %, cycle count), internet security, printers + total prints.
   - **Overview:** CPU/RAM/swap tiles, compact UptimeState (session + days tracked) + DiskState (devices/used/free), location/machine, Battery stat card (laptops only), Network bandwidth chart, Printers, Security card.
   - **Printers:** stat cards (connected printers, total prints, avg prints/printer) + per-group lists (USB/Network/Other) with name, port, IP, print counts.
