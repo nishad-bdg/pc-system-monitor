@@ -27,7 +27,7 @@ import {
 export function MachineDetail({ machine }: { machine: MachineSummary }) {
   const host = machine.latest;
   const [tab, setTab] = useState<
-    "summary" | "overview" | "uptime" | "storage" | "health"
+    "summary" | "overview" | "printers" | "uptime" | "storage" | "health"
   >("summary");
   const timeSeries = machine.reports.map((r) => ({
     time: fmtTime(r.created_at),
@@ -79,6 +79,17 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         </button>
         <button
           type="button"
+          onClick={() => setTab("printers")}
+          className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+            tab === "printers"
+              ? "border-blue-600 text-blue-700"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          Printers
+        </button>
+        <button
+          type="button"
           onClick={() => setTab("uptime")}
           className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
             tab === "uptime"
@@ -112,7 +123,15 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         </button>
       </div>
 
-      {tab === "uptime" ? (
+      {tab === "printers" ? (
+        host.printers ? (
+          <PrintersTab printers={host.printers} />
+        ) : (
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500">
+            No printer data for this PC yet.
+          </div>
+        )
+      ) : tab === "uptime" ? (
         host.uptime ? (
           <UptimeSection uptime={host.uptime} />
         ) : (
@@ -405,7 +424,7 @@ function SummarySection({ machine }: { machine: MachineSummary }) {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard
           label="Total uptime"
           value={fmtUptime(totalUp)}
@@ -423,17 +442,13 @@ function SummarySection({ machine }: { machine: MachineSummary }) {
           sub="Sent + received since boot"
           accent
         />
-        <StatCard
-          label="Bandwidth"
-          value={fmtRate(network?.recv_rate_bps)}
-          sub={`Up ${fmtRate(network?.send_rate_bps)}`}
-          accent
-        />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <InfoBlock title="CPU (full spec)">
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+            <span className="text-slate-500">Brand</span>
+            <span className="font-medium text-slate-900">{res?.cpu_brand || "—"}</span>
             <span className="text-slate-500">Model</span>
             <span className="font-medium text-slate-900">{r.os?.processor || "—"}</span>
             <span className="text-slate-500">Architecture</span>
@@ -490,7 +505,9 @@ function SummarySection({ machine }: { machine: MachineSummary }) {
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-slate-900">{d.name}</p>
-                    <p className="truncate text-xs text-slate-500">{d.device}</p>
+                    <p className="truncate text-xs text-slate-500">
+                      {d.brand ? `${d.brand} · ` : ""}{d.device}
+                    </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <span
@@ -666,6 +683,7 @@ function HealthSection({
                   </span>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                  {d.brand && <span className="font-medium text-slate-700">{d.brand}</span>}
                   {d.device && <span className="font-mono">{d.device}</span>}
                   {d.internal != null && (
                     <span>{d.internal ? "Internal" : "External"}</span>
@@ -921,6 +939,108 @@ function NetworkSection({
           </ResponsiveContainer>
         </div>
       )}
+    </div>
+  );
+}
+
+function PrintersTab({
+  printers,
+}: {
+  printers: NonNullable<Report["printers"]>;
+}) {
+  const groups: { key: "usb" | "network" | "other"; label: string }[] = [
+    { key: "usb", label: "USB" },
+    { key: "network", label: "Network" },
+    { key: "other", label: "Other" },
+  ];
+  const all = [
+    ...(printers.usb ?? []),
+    ...(printers.network ?? []),
+    ...(printers.other ?? []),
+  ];
+  const count =
+    all.length > 0 ? all.length : printers.count ?? 0;
+  const totalPrints = all.reduce((s, p) => s + (p.print_count ?? 0), 0);
+  const printed = all.filter((p) => p.print_count != null).length;
+  const avgPrints = printed > 0 ? totalPrints / printed : 0;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard
+          label="Connected printers"
+          value={String(count)}
+          sub={`${groups.reduce((s, { key }) => s + (printers[key]?.length ?? 0), 0)} detected`}
+          accent
+        />
+        <StatCard
+          label="Total prints"
+          value={totalPrints.toLocaleString()}
+          sub={`${printed} printer${printed === 1 ? "" : "s"} reporting counts`}
+          accent
+        />
+        <StatCard
+          label="Avg prints / printer"
+          value={avgPrints > 0 ? avgPrints.toFixed(1) : "—"}
+          sub="Across printers with counts"
+        />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        {groups.map(({ key, label }) => {
+          const items = printers[key] ?? [];
+          const groupPrints = items.reduce((s, p) => s + (p.print_count ?? 0), 0);
+          return (
+            <div
+              key={key}
+              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50"
+            >
+              <div className="flex items-baseline justify-between gap-2">
+                <h3 className="text-sm font-semibold text-slate-700">{label}</h3>
+                <span className="text-xs font-medium text-slate-700">
+                  {items.length} · {groupPrints.toLocaleString()} prints
+                </span>
+              </div>
+              {items.length === 0 ? (
+                <p className="mt-3 text-sm text-slate-400">None</p>
+              ) : (
+                <ul className="mt-3 space-y-3">
+                  {items.map((p) => (
+                    <li
+                      key={`${p.name}-${p.port}`}
+                      className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3"
+                    >
+                      <p className="truncate text-sm font-medium text-slate-900">
+                        {p.name}
+                      </p>
+                      <p className="mt-0.5 truncate font-mono text-[11px] text-slate-500">
+                        {p.port || "—"}
+                      </p>
+                      <div className="mt-1.5 flex items-center justify-between gap-2 text-xs text-slate-600">
+                        {key === "network" ? (
+                          <span>
+                            IP:{" "}
+                            <span className="font-medium text-slate-800">
+                              {p.ip || "—"}
+                            </span>
+                          </span>
+                        ) : (
+                          <span />
+                        )}
+                        <span className="font-semibold text-slate-800">
+                          {p.print_count == null
+                            ? "—"
+                            : `${p.print_count.toLocaleString()} prints`}
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

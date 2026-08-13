@@ -9,7 +9,6 @@ import {
   fetchReports,
   fmtBytes,
   fmtPercent,
-  fmtRate,
   fmtRelative,
   fmtUptime,
   groupMachines,
@@ -419,6 +418,7 @@ export function ReportExportPanel() {
                       <th className="px-4 py-3">Last seen</th>
                       <th className="px-4 py-3">Reports</th>
                       <th className="px-4 py-3">CPU %</th>
+                      <th className="px-4 py-3">CPU brand</th>
                       <th className="px-4 py-3">CPU model</th>
                       <th className="px-4 py-3">Cores</th>
                       <th className="px-4 py-3">RAM %</th>
@@ -429,15 +429,17 @@ export function ReportExportPanel() {
                       <th className="px-4 py-3">RAM type</th>
                       <th className="px-4 py-3">Swap</th>
                       <th className="px-4 py-3">Disk %</th>
+                      <th className="px-4 py-3">SSD brand</th>
+                      <th className="px-4 py-3">HDD brand</th>
                       <th className="px-4 py-3">Disk used</th>
                       <th className="px-4 py-3">Disk free</th>
                       <th className="px-4 py-3">Net total</th>
-                      <th className="px-4 py-3">Bandwidth</th>
                       <th className="px-4 py-3">Uptime</th>
                       <th className="px-4 py-3">OS</th>
                       <th className="px-4 py-3">Country</th>
                       <th className="px-4 py-3">Security</th>
                       <th className="px-4 py-3">Printers</th>
+                      <th className="px-4 py-3">Total prints</th>
                       <th className="px-4 py-3">Battery</th>
                     </tr>
                   </thead>
@@ -446,7 +448,6 @@ export function ReportExportPanel() {
                       const r = m.latest;
                       const res = r.resources;
                       const dis = r.disk;
-                      const net = r.network;
                       const up = r.uptime;
                       const sec = r.security;
                       const prv = r.printers;
@@ -455,6 +456,14 @@ export function ReportExportPanel() {
                       const usedDisk = dis?.devices?.reduce((s, d) => s + (d.used ?? 0), 0) ?? 0;
                       const freeDisk = dis?.devices?.reduce((s, d) => s + (d.free ?? 0), 0) ?? 0;
                       const printerCount = (prv?.usb?.length ?? 0) + (prv?.network?.length ?? 0) + (prv?.other?.length ?? 0);
+                      const printTotal = (prv?.usb ?? []).reduce((s, p) => s + (p.print_count ?? 0), 0) +
+                        (prv?.network ?? []).reduce((s, p) => s + (p.print_count ?? 0), 0) +
+                        (prv?.other ?? []).reduce((s, p) => s + (p.print_count ?? 0), 0);
+                      const healthDisks = r.health?.disks ?? [];
+                      const ssdBrands = [...new Set(healthDisks.filter((d) => d.media_type === "ssd").map((d) => d.brand).filter(Boolean))]
+                        .join(", ") || "—";
+                      const hddBrands = [...new Set(healthDisks.filter((d) => d.media_type === "hdd").map((d) => d.brand).filter(Boolean))]
+                        .join(", ") || "—";
                       return (
                         <tr key={m.key} className="hover:bg-slate-50/80">
                           <td className="px-4 py-3 font-medium text-slate-900">
@@ -468,6 +477,9 @@ export function ReportExportPanel() {
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {fmtPercent(res?.cpu_percent)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {res?.cpu_brand || "—"}
                           </td>
                           <td className="max-w-[180px] truncate px-4 py-3 text-slate-600" title={r.os?.processor}>
                             {r.os?.processor || "—"}
@@ -500,6 +512,12 @@ export function ReportExportPanel() {
                             {fmtPercent(maxDiskPercent(r))}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
+                            {ssdBrands}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {hddBrands}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
                             {fmtBytes(usedDisk)}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
@@ -507,9 +525,6 @@ export function ReportExportPanel() {
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {fmtBytes(networkTotalBytes(r))}
-                          </td>
-                          <td className="px-4 py-3 text-slate-600">
-                            {fmtRate(net?.recv_rate_bps)}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {fmtUptime(up?.uptime_seconds)}
@@ -529,6 +544,9 @@ export function ReportExportPanel() {
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {printerCount || "—"}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {printTotal > 0 ? printTotal.toLocaleString() : "—"}
                           </td>
                           <td className="px-4 py-3 text-slate-600" title={bat ? `Plugged: ${bat.power_plugged}` : undefined}>
                             {bat ? `${fmtPercent(bat.percent)}` : "—"}

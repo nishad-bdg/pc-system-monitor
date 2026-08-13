@@ -135,9 +135,10 @@ def test_resources_to_dict_keys():
     loc = SystemResources(cpu_count=8, cpu_count_physical=4, cpu_percent=10.0, cpu_freq_mhz=1000.0,
                           ram_total=1024, ram_used=512, ram_available=512, ram_free=256,
                           ram_percent=50.0, swap_total=2048, swap_used=0, swap_percent=0.0, battery=None,
-                          ram_speed_mhz=None, ram_type=None)
+                          ram_speed_mhz=None, ram_type=None, cpu_brand=None)
     assert set(loc.to_dict()) == {
             "cpu_count", "cpu_count_physical", "cpu_percent", "cpu_freq_mhz",
+            "cpu_brand",
             "ram_total", "ram_used", "ram_available", "ram_free", "ram_percent",
             "swap_total", "swap_used", "swap_percent", "battery",
             "ram_speed_mhz", "ram_type",
@@ -206,14 +207,24 @@ def test_collect_network_usage(monkeypatch):
             self.bytes_sent = sent
             self.bytes_recv = recv
 
-    values = iter([Counters(1000, 2000), Counters(1500, 2600)])
+    # first read, 6 window samples, then a final read
+    values = iter([
+        Counters(1000, 2000),  # initial
+        Counters(1500, 2500),  # +500 / +500
+        Counters(1600, 3000),  # +100 / +500
+        Counters(1800, 5000),  # +200 / +2000  <- peak recv burst
+        Counters(2000, 5200),  # +200 / +200
+        Counters(2200, 5400),  # +200 / +200
+        Counters(2400, 5600),  # +200 / +200
+        Counters(2500, 5900),  # final
+    ])
     monkeypatch.setattr(network.psutil, "net_io_counters", lambda: next(values))
     monkeypatch.setattr(network.time, "sleep", lambda s: None)
     usage = network.collect_network_usage(interval=0.5)
-    assert usage.bytes_sent == 1500
-    assert usage.bytes_recv == 2600
-    assert usage.send_rate_bps == 1000.0  # 500 bytes / 0.5s
-    assert usage.recv_rate_bps == 1200.0
+    assert usage.bytes_sent == 2500
+    assert usage.bytes_recv == 5900
+    assert usage.send_rate_bps == 1000.0  # peak 500 bytes / 0.5s
+    assert usage.recv_rate_bps == 4000.0  # peak 2000 bytes / 0.5s burst
 
 def test_split_seconds_by_utc_day():
     from system_info.uptime import split_seconds_by_utc_day
@@ -343,7 +354,8 @@ def test_run_show_sys_only(monkeypatch):
     monkeypatch.setattr(cli, "collect_resources", lambda: SystemResources(
         cpu_count=8, cpu_count_physical=4, cpu_percent=10.0, cpu_freq_mhz=1000.0,
         ram_total=1024, ram_used=512, ram_available=512, ram_free=256, ram_percent=50.0,
-        swap_total=2048, swap_used=0, swap_percent=0.0, battery=None, ram_speed_mhz=None, ram_type=None))
+        swap_total=2048, swap_used=0, swap_percent=0.0, battery=None, ram_speed_mhz=None, ram_type=None,
+        cpu_brand=None))
     monkeypatch.setattr(
         cli,
         "collect_uptime",

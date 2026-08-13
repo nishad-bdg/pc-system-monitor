@@ -192,9 +192,10 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 ### Fleet (`/dashboard`)
 
 - Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports.
-- Detail tabs (`machine-detail.tsx`): **Summary (default) / Overview / Uptime / Storage / Health**.
-  - **Summary:** total uptime + session, network total + bandwidth, full CPU spec (model/arch/cores/clock), full RAM spec (total/available/free/swap + **bus speed** `ram_speed_mhz` + `ram_type`), storage health (SSD/HDD badge, SMART, Healthy/Failing), battery health (condition, health %, cycle count), internet security, printers + total prints.
+- Detail tabs (`machine-detail.tsx`): **Summary (default) / Overview / Printers / Uptime / Storage / Health**.
+  - **Summary:** total uptime + session, network total + bandwidth, full CPU spec (model/arch/cores/clock + **brand**), full RAM spec (total/available/free/swap + **bus speed** `ram_speed_mhz` + `ram_type`), storage health (SSD/HDD badge + brand, SMART, Healthy/Failing), battery health (condition, health %, cycle count), internet security, printers + total prints.
   - **Overview:** CPU/RAM/swap tiles, compact UptimeState (session + days tracked) + DiskState (devices/used/free), location/machine, Battery stat card (laptops only), Network bandwidth chart, Printers, Security card.
+  - **Printers:** stat cards (connected printers, total prints, avg prints/printer) + per-group lists (USB/Network/Other) with name, port, IP, print counts.
   - **Uptime:** session + UTC day bars with BD labels; day bars load in batches (default 14, Load more for the rest).
   - **Storage:** device count + partition bars (blue &lt;50%, amber 50–80%, red &gt;80%).
   - **Health:** storage health cards (SSD/HDD badge, SMART status, Internal/External, Healthy/Failing) + battery health (condition, health %, cycle count, max capacity).

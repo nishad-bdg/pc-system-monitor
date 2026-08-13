@@ -31,6 +31,7 @@ export interface Report {
     cpu_count_physical?: number;
     cpu_percent?: number;
     cpu_freq_mhz?: number | null;
+    cpu_brand?: string | null;
     ram_total?: number;
     ram_used?: number;
     ram_available?: number;
@@ -97,6 +98,7 @@ export interface Report {
       name: string;
       device: string;
       media_type: string;
+      brand?: string | null;
       smart_status?: string | null;
       internal?: boolean | null;
       health: string;

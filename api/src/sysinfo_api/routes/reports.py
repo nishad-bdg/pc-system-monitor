@@ -116,6 +116,7 @@ _CSV_COLUMN_PREFIXES = (
     "resources.cpu_count_physical",
     "resources.cpu_percent",
     "resources.cpu_freq_mhz",
+    "resources.cpu_brand",
     "resources.ram_total",
     "resources.ram_used",
     "resources.ram_available",
@@ -199,14 +200,25 @@ def enrich_summary(report: dict) -> dict:
     if total_bytes > 0:
         disk_percent_used = int(round(used_bytes / total_bytes * 100))
 
+    res = report.get("resources") or {}
+    ssd_brands = sorted(
+        {str(d.get("brand") or "").strip() for d in disk_list if isinstance(d, dict) and d.get("media_type") == "ssd" and d.get("brand")}
+    )
+    hdd_brands = sorted(
+        {str(d.get("brand") or "").strip() for d in disk_list if isinstance(d, dict) and d.get("media_type") == "hdd" and d.get("brand")}
+    )
+
     enriched["summary"] = {
         "total_uptime_seconds": uptime_secs,
         "total_uptime_days": round(uptime_secs / 86400, 2),
         "network_total_bytes": network_total,
         "print_count_total": print_total,
         "printer_count": printer_count,
+        "cpu_brand": res.get("cpu_brand"),
         "ssd_count": ssd_count,
         "hdd_count": hdd_count,
+        "ssd_brands": "; ".join(ssd_brands) or None,
+        "hdd_brands": "; ".join(hdd_brands) or None,
         "disk_healthy_count": disk_ok,
         "disk_problem_count": disk_problems,
         "disk_percent_used": disk_percent_used,

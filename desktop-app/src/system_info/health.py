@@ -26,6 +26,7 @@ class DiskHealth:
     name: str
     device: str = ""
     media_type: str = "unknown"  # ssd | hdd | unknown
+    brand: str | None = None  # vendor of the physical drive
     smart_status: str | None = None  # Verified | Not Supported | Failing | ...
     internal: bool | None = None
     health: str = "unknown"  # ok | warning | fail | unknown
@@ -35,6 +36,7 @@ class DiskHealth:
             "name": self.name,
             "device": self.device,
             "media_type": self.media_type,
+            "brand": self.brand,
             "smart_status": self.smart_status,
             "internal": self.internal,
             "health": self.health,
@@ -109,13 +111,37 @@ def _derive_health(smart: str | None) -> str:
     return "unknown"
 
 
+def _extract_brand(name: str, manufacturer: str | None = None) -> str | None:
+    """Best-effort vendor from a device name / manufacturer.
+
+    Windows Get-PhysicalDisk exposes a Manufacturer (e.g. "Samsung"),
+    while macOS device names embed the brand ("APPLE SSD AP0256Z" -> APPLE).
+    """
+    if manufacturer:
+        brand = str(manufacturer).strip()
+        if brand and brand.lower() not in ("unknown", "(unknown)"):
+            return brand
+    tokens = [t for t in name.split() if t]
+    if not tokens:
+        return None
+    lowered = name.lower()
+    # Skip words that look like the drive model, keep the leading vendor token.
+    if any(kw in lowered for kw in (" ssd ", "ssd ", " hdd ", "hdd ", " solid ", " hard ")):
+        vendor = tokens[0]
+        return vendor if vendor else None
+    # Apple drives: "APPLE SSD AP0256Z", "APPLE HDD HTS.." -> APPLE
+    if lowered.startswith("apple"):
+        return "Apple"
+    return tokens[0]
+
+
 # ---- Windows ----
 
 def _collect_windows_disks() -> list[DiskHealth]:
     script = (
         "Get-PhysicalDisk -ErrorAction SilentlyContinue | "
         "Select-Object FriendlyName, DeviceId, MediaType, HealthStatus, "
-        "BusType | ConvertTo-Json -Compress"
+        "BusType, Manufacturer | ConvertTo-Json -Compress"
     )
     raw = _run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
@@ -155,6 +181,7 @@ def _collect_windows_disks() -> list[DiskHealth]:
                 name=name,
                 device=str(item.get("DeviceId") or ""),
                 media_type=_to_media_type(media_type),
+                brand=_extract_brand(name, str(item.get("Manufacturer") or "") or None),
                 smart_status=None,
                 internal=str(item.get("BusType") or "").lower() not in ("usb", "sas"),
                 health=health,
@@ -257,6 +284,7 @@ def _collect_macos_disks() -> list[DiskHealth]:
             name=name,
             device=disk_base,
             media_type=media_type,
+            brand=_extract_brand(name),
             smart_status=smart,
             internal=True if internal_raw in ("yes", "true") else False,
             health=_derive_health(smart),

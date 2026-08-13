@@ -14,6 +14,7 @@ class SystemResources:
     cpu_count_physical: int
     cpu_percent: float
     cpu_freq_mhz: float | None
+    cpu_brand: str | None
     ram_total: int
     ram_used: int
     ram_available: int
@@ -32,6 +33,7 @@ class SystemResources:
             "cpu_count_physical": self.cpu_count_physical,
             "cpu_percent": self.cpu_percent,
             "cpu_freq_mhz": self.cpu_freq_mhz,
+            "cpu_brand": self.cpu_brand,
             "ram_total": self.ram_total,
             "ram_used": self.ram_used,
             "ram_available": self.ram_available,
@@ -177,6 +179,66 @@ def _collect_ram_speed() -> tuple[int | None, str | None]:
     return None, None
 
 
+def _collect_cpu_brand() -> str | None:
+    """Best-effort CPU vendor/brand."""
+    if platform.system() == "Darwin":
+        raw = _run(["system_profiler", "SPHardwareDataType", "-json"])
+        if not raw.strip():
+            return None
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            return None
+        for item in payload.get("SPHardwareDataType", []):
+            if not isinstance(item, dict):
+                continue
+            chip = str(item.get("chip_type") or "").strip()
+            if chip:
+                # "Apple M2" -> "Apple", "Intel Core i7-..." -> "Intel"
+                return chip.split()[0] if chip.split() else chip
+            proc = str(item.get("processor_name") or "").strip()
+            if proc and proc.split():
+                return proc.split()[0]
+        return None
+
+    if os.name == "nt":
+        raw = _run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "Get-CimInstance Win32_Processor | "
+                "Select-Object Name | ConvertTo-Json",
+            ]
+        )
+        if not raw.strip():
+            return None
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            return None
+        if isinstance(payload, dict):
+            payload = [payload]
+        for p in payload:
+            if not isinstance(p, dict):
+                continue
+            name = str(p.get("Name") or "").strip()
+            if not name:
+                continue
+            lowered = name.lower()
+            if "intel" in lowered:
+                return "Intel"
+            if "amd" in lowered or "ryzen" in lowered or "athlon" in lowered:
+                return "AMD"
+            if "qualcomm" in lowered or "snapdragon" in lowered:
+                return "Qualcomm"
+            if name.split():
+                return name.split()[0]
+        return None
+
+    return None
+
+
 def collect_resources() -> SystemResources:
     """Collect CPU and memory stats via psutil (cross-platform mac/Windows)."""
     vm = psutil.virtual_memory()
@@ -188,12 +250,14 @@ def collect_resources() -> SystemResources:
         cpu_freq_mhz = None
 
     ram_speed_mhz, ram_type = _collect_ram_speed()
+    cpu_brand = _collect_cpu_brand()
 
     return SystemResources(
         cpu_count=psutil.cpu_count(logical=True) or 0,
         cpu_count_physical=psutil.cpu_count(logical=False) or 0,
         cpu_percent=psutil.cpu_percent(interval=0.2),
         cpu_freq_mhz=cpu_freq_mhz,
+        cpu_brand=cpu_brand,
         ram_total=vm.total,
         ram_used=vm.used,
         ram_available=vm.available,
