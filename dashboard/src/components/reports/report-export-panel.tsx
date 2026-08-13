@@ -13,8 +13,11 @@ import {
   fmtUptime,
   groupMachines,
   groupOf,
+  MachineSortKey,
   maxDiskPercent,
   networkTotalBytes,
+  SortOrder,
+  sortMachines,
 } from "@/lib/api";
 import { DashboardShell } from "@/components/dashboard/shell";
 
@@ -122,6 +125,8 @@ export function ReportExportPanel() {
   } | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [sort, setSort] = useState<MachineSortKey>("last_seen");
+  const [order, setOrder] = useState<SortOrder>("desc");
 
   const { data: groups = [] } = useQuery({
     queryKey: ["groups"],
@@ -153,8 +158,8 @@ export function ReportExportPanel() {
         return !!g && g.id === applied.groupId;
       });
     }
-    return list;
-  }, [data?.reports, applied, groups]);
+    return sortMachines(list, sort, order);
+  }, [data?.reports, applied, groups, sort, order]);
 
   const reports = data?.reports ?? [];
   const totalReports = data?.total ?? 0;
@@ -187,6 +192,8 @@ export function ReportExportPanel() {
     setCountry("");
     setOs("");
     setGroupId("");
+    setSort("last_seen");
+    setOrder("desc");
     setApplied(null);
     setExportError(null);
   }
@@ -318,6 +325,37 @@ export function ReportExportPanel() {
                   {g.name}
                 </option>
               ))}
+            </select>
+          </label>
+
+          <p className="pt-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+            Sort by
+          </p>
+          <label className="block text-xs text-slate-400">
+            Metric
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as MachineSortKey)}
+              className={inputClass}
+            >
+              <option value="last_seen">Last seen</option>
+              <option value="cpu">Most CPU %</option>
+              <option value="ram">Most RAM %</option>
+              <option value="disk">Most disk used %</option>
+              <option value="ssd">Most SSD capacity</option>
+              <option value="hdd">Most HDD capacity</option>
+              <option value="network">Most network usage</option>
+            </select>
+          </label>
+          <label className="block text-xs text-slate-400">
+            Order
+            <select
+              value={order}
+              onChange={(e) => setOrder(e.target.value as SortOrder)}
+              className={inputClass}
+            >
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
             </select>
           </label>
 
