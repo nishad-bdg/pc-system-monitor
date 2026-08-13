@@ -6,7 +6,7 @@ release manifest URL** (not live `git pull`).
 
 ## Prerequisites (build machine)
 
-- Windows with Python 3.12+ (3.14 if your PyInstaller build supports it)
+- Windows with Python 3.14 (the project pins `requires-python = ">=3.14"`; PyInstaller must be on a build that supports 3.14)
 - [uv](https://github.com/astral-sh/uv)
 - [Inno Setup 6](https://jrsoftware.org/isinfo.php)
 
