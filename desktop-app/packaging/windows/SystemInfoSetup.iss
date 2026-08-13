@@ -104,15 +104,27 @@ end;
 procedure CreateScheduledTask;
 var
   ResultCode: Integer;
-  ExePath, ReportArgs: string;
+  ExePath, ReportArgs, CmdOut, CmdErr: string;
 begin
   ExePath := ExpandConstant('{app}\{#MyAppExeName}');
-  { Full report every hour }
+  { Full report every hour, start 08:00, runs only while this user is logged on }
   ReportArgs :=
-    '/Create /F /TN "SystemInfoReport" /SC HOURLY ' +
+    '/Create /F /TN "SystemInfoReport" /SC HOURLY /ST 08:00 /IT ' +
     '/TR "\"' + ExePath + '\"" ' +
     '/RL LIMITED';
-  Exec('schtasks.exe', ReportArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('schtasks.exe', ReportArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode, CmdOut, CmdErr);
+  if ResultCode <> 0 then
+  begin
+    MsgBox(
+      'Could not create the scheduled task (SystemInfoReport).' + #13#10 +
+      'schtasks exit code: ' + IntToStr(ResultCode) + #13#10 +
+      CmdOut + CmdErr + #13#10 +
+      'Run this manually:' + #13#10 +
+      'schtasks /Create /F /TN SystemInfoReport /SC HOURLY /ST 08:00 /IT ' +
+      '/TR "\"' + ExePath + '\""' + #13#10 +
+      'The installer will continue, but reports will not run automatically.',
+      mbError, MB_OK);
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
