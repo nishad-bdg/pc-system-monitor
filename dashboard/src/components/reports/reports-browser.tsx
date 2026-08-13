@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
@@ -115,18 +115,10 @@ export function ReportsBrowser() {
     return sortMachines(list, applied.sort);
   }, [data?.reports, applied, groups]);
 
-  useEffect(() => {
-    if (machines.length === 0) {
-      setSelectedKey(null);
-      return;
-    }
-    if (!selectedKey || !machines.some((m) => m.key === selectedKey)) {
-      setSelectedKey(machines[0].key);
-    }
-  }, [machines, selectedKey]);
-
   const selected =
-    machines.find((m) => m.key === selectedKey) ?? machines[0] ?? null;
+    (selectedKey && machines.find((m) => m.key === selectedKey)) ||
+    machines[0] ||
+    null;
 
   function onApply(e: FormEvent) {
     e.preventDefault();

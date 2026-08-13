@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {
@@ -53,18 +53,10 @@ export function Dashboard() {
     });
   }, [machines, filter, groupFilter, groups]);
 
-  useEffect(() => {
-    if (filtered.length === 0) {
-      setSelectedKey(null);
-      return;
-    }
-    if (!selectedKey || !filtered.some((m) => m.key === selectedKey)) {
-      setSelectedKey(filtered[0].key);
-    }
-  }, [filtered, selectedKey]);
-
   const selected =
-    filtered.find((m) => m.key === selectedKey) ?? filtered[0] ?? null;
+    (selectedKey && filtered.find((m) => m.key === selectedKey)) ||
+    filtered[0] ||
+    null;
 
   return (
     <div className="flex min-h-screen bg-[var(--bg)] text-[var(--ink)]">

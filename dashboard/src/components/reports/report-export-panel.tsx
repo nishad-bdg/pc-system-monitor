@@ -9,7 +9,9 @@ import {
   fetchReports,
   fmtBytes,
   fmtPercent,
+  fmtRate,
   fmtRelative,
+  fmtUptime,
   groupMachines,
   groupOf,
   maxDiskPercent,
@@ -409,21 +411,50 @@ export function ReportExportPanel() {
                   No PCs match these filters.
                 </p>
               ) : (
-                <table className="w-full text-left text-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[1400px] text-left text-sm">
                   <thead className="border-b bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-4 py-3">PC</th>
                       <th className="px-4 py-3">Last seen</th>
                       <th className="px-4 py-3">Reports</th>
-                      <th className="px-4 py-3">CPU</th>
-                      <th className="px-4 py-3">RAM</th>
-                      <th className="px-4 py-3">Disk</th>
+                      <th className="px-4 py-3">CPU %</th>
+                      <th className="px-4 py-3">CPU model</th>
+                      <th className="px-4 py-3">Cores</th>
+                      <th className="px-4 py-3">RAM %</th>
+                      <th className="px-4 py-3">RAM total</th>
+                      <th className="px-4 py-3">RAM used</th>
+                      <th className="px-4 py-3">RAM free</th>
+                      <th className="px-4 py-3">RAM speed</th>
+                      <th className="px-4 py-3">RAM type</th>
+                      <th className="px-4 py-3">Swap</th>
+                      <th className="px-4 py-3">Disk %</th>
+                      <th className="px-4 py-3">Disk used</th>
+                      <th className="px-4 py-3">Disk free</th>
                       <th className="px-4 py-3">Net total</th>
+                      <th className="px-4 py-3">Bandwidth</th>
+                      <th className="px-4 py-3">Uptime</th>
+                      <th className="px-4 py-3">OS</th>
+                      <th className="px-4 py-3">Country</th>
+                      <th className="px-4 py-3">Security</th>
+                      <th className="px-4 py-3">Printers</th>
+                      <th className="px-4 py-3">Battery</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {machines.map((m) => {
                       const r = m.latest;
+                      const res = r.resources;
+                      const dis = r.disk;
+                      const net = r.network;
+                      const up = r.uptime;
+                      const sec = r.security;
+                      const prv = r.printers;
+                      const bat = res?.battery;
+                      const totalDisk = dis?.devices?.reduce((s, d) => s + (d.total ?? 0), 0) ?? 0;
+                      const usedDisk = dis?.devices?.reduce((s, d) => s + (d.used ?? 0), 0) ?? 0;
+                      const freeDisk = dis?.devices?.reduce((s, d) => s + (d.free ?? 0), 0) ?? 0;
+                      const printerCount = (prv?.usb?.length ?? 0) + (prv?.network?.length ?? 0) + (prv?.other?.length ?? 0);
                       return (
                         <tr key={m.key} className="hover:bg-slate-50/80">
                           <td className="px-4 py-3 font-medium text-slate-900">
@@ -436,22 +467,78 @@ export function ReportExportPanel() {
                             {m.reports.length}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
-                            {fmtPercent(r.resources?.cpu_percent)}
+                            {fmtPercent(res?.cpu_percent)}
+                          </td>
+                          <td className="max-w-[180px] truncate px-4 py-3 text-slate-600" title={r.os?.processor}>
+                            {r.os?.processor || "—"}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
-                            {fmtPercent(r.resources?.ram_percent)}
+                            {res?.cpu_count != null ? `${res.cpu_count} (${res.cpu_count_physical ?? "?"} phys)` : "—"}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {fmtPercent(res?.ram_percent)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {fmtBytes(res?.ram_total)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {fmtBytes(res?.ram_used)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {fmtBytes(res?.ram_free)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {res?.ram_speed_mhz != null ? `${res.ram_speed_mhz} MHz` : "—"}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {res?.ram_type || "—"}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {fmtBytes(res?.swap_total)}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {fmtPercent(maxDiskPercent(r))}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
+                            {fmtBytes(usedDisk)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {fmtBytes(freeDisk)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
                             {fmtBytes(networkTotalBytes(r))}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {fmtRate(net?.recv_rate_bps)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {fmtUptime(up?.uptime_seconds)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {r.os?.system || "—"}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {r.location?.country || "—"}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {sec
+                              ? Array.isArray(sec)
+                                ? sec.map((s: any) => s.name).join(", ")
+                                : (sec as any).installed?.map((s: any) => s.name).join(", ") || "—"
+                              : "—"}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {printerCount || "—"}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600" title={bat ? `Plugged: ${bat.power_plugged}` : undefined}>
+                            {bat ? `${fmtPercent(bat.percent)}` : "—"}
                           </td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
+                </div>
               )}
               {isFetching && (
                 <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-400">
