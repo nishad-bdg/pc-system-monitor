@@ -36,13 +36,20 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
   }));
   const bandwidthSeries = machine.reports.map((r) => ({
     time: fmtTime(r.created_at),
-    upload: (r.network?.send_rate_bps ?? 0) / 1000,
-    download: (r.network?.recv_rate_bps ?? 0) / 1000,
+    upload: (r.network?.send_rate_bps ?? 0) / 1024,
+    download: (r.network?.recv_rate_bps ?? 0) / 1024,
   }));
 
   const hasDisk =
     (host.disk?.devices?.length ?? 0) > 0 ||
     (host.disk?.partitions?.length ?? 0) > 0;
+
+  const ramTotal = host.resources?.ram_total;
+  const ramAvailable = host.resources?.ram_available;
+  const ramUsedBytes =
+    ramTotal != null && ramAvailable != null
+      ? Math.max(0, ramTotal - ramAvailable)
+      : (host.resources?.ram_used ?? 0);
 
   return (
     <div className="space-y-6">
@@ -126,7 +133,7 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
               <StatCard
                 label="Memory (RAM)"
                 value={fmtPercent(host.resources.ram_percent)}
-                sub={`${fmtBytes(host.resources.ram_used)} / ${fmtBytes(
+                sub={`${fmtBytes(ramUsedBytes)} / ${fmtBytes(
                   host.resources.ram_total,
                 )}`}
               />
@@ -631,14 +638,14 @@ function NetworkSection({
             <LineChart data={series}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis dataKey="time" fontSize={11} stroke="#94a3b8" />
-              <YAxis fontSize={11} stroke="#94a3b8" unit=" KB/s" />
+              <YAxis fontSize={11} stroke="#94a3b8" unit=" KiB/s" />
               <Tooltip />
               <Legend />
               <Line
                 type="monotone"
                 dataKey="upload"
                 stroke="#2563eb"
-                name="Upload KB/s"
+                name="Upload KiB/s"
                 strokeWidth={2}
                 dot={false}
               />
@@ -646,7 +653,7 @@ function NetworkSection({
                 type="monotone"
                 dataKey="download"
                 stroke="#0f766e"
-                name="Download KB/s"
+                name="Download KiB/s"
                 strokeWidth={2}
                 dot={false}
               />

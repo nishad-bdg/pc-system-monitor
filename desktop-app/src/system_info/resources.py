@@ -47,7 +47,8 @@ def _collect_battery() -> dict | None:
         return None
     secsleft = getattr(batt, "secsleft", -1)
     seconds_left = None
-    if isinstance(secsleft, int) and secsleft >= 0:
+    unlimited = getattr(psutil, "POWER_TIME_UNLIMITED", 2**24 - 1)
+    if isinstance(secsleft, int) and 0 <= secsleft < unlimited:
         seconds_left = secsleft
     return {
         "percent": float(batt.percent),
