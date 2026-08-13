@@ -11,6 +11,7 @@ import {
   Group,
   groupMachines,
   groupOf,
+  machineMac,
 } from "@/lib/api";
 import { DashboardShell } from "./shell";
 import { MachineDetail } from "./machine-detail";
@@ -149,6 +150,18 @@ export function Dashboard() {
                       <span aria-hidden>·</span>
                       <span>RAM {fmtPercent(m.latest.resources?.ram_percent)}</span>
                     </div>
+                    {(m.latest.private_ip || machineMac(m.latest)) && (
+                      <div
+                        className={`mt-1 truncate font-mono text-[10px] ${
+                          active ? "text-blue-100/70" : "text-slate-500"
+                        }`}
+                      >
+                        {m.latest.private_ip ?? "—"}
+                        {machineMac(m.latest)
+                          ? ` · ${machineMac(m.latest)}`
+                          : ""}
+                      </div>
+                    )}
                   </button>
                 </li>
               );

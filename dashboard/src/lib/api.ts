@@ -237,6 +237,15 @@ export function machineName(r: Report): string {
   return r.pc_name || r.os?.hostname || r.public_ip || "Unknown PC";
 }
 
+/** Primary MAC address for display, normalized to AA:BB:CC:DD:EE:FF. */
+export function machineMac(r: Report): string | null {
+  const raw = r.mac_address || r.mac_addresses?.[0]?.mac || null;
+  if (!raw) return null;
+  const hex = raw.toLowerCase().replace(/[^0-9a-f]/g, "");
+  if (hex.length === 12) return hex.match(/.{1,2}/g)!.join(":").toUpperCase();
+  return raw;
+}
+
 /** Highest physical-device disk usage % on a report (0 if unknown). */
 export function maxDiskPercent(r: Report): number {
   const devices = r.disk?.devices ?? [];

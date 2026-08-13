@@ -14,6 +14,7 @@ import {
   groupMachines,
   groupOf,
   MachineSortKey,
+  machineMac,
   maxDiskPercent,
   networkTotalBytes,
   SortOrder,
@@ -477,6 +478,8 @@ export function ReportExportPanel() {
                   <thead className="border-b bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-4 py-3">PC</th>
+                      <th className="px-4 py-3">IP</th>
+                      <th className="px-4 py-3">MAC</th>
                       <th className="px-4 py-3">Last seen</th>
                       <th className="px-4 py-3">Reports</th>
                       <th className="px-4 py-3">CPU %</th>
@@ -530,6 +533,12 @@ export function ReportExportPanel() {
                         <tr key={m.key} className="hover:bg-slate-50/80">
                           <td className="px-4 py-3 font-medium text-slate-900">
                             {m.name}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-slate-600">
+                            {r.private_ip ?? "—"}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-slate-600">
+                            {machineMac(r) ?? "—"}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {fmtRelative(r.created_at)}

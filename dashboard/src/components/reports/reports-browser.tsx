@@ -14,6 +14,7 @@ import {
   groupMachines,
   groupOf,
   MachineSortKey,
+  machineMac,
   maxDiskPercent,
   networkTotalBytes,
   sortMachines,
@@ -351,6 +352,16 @@ export function ReportsBrowser() {
                       <span>Disk {fmtPercent(disk)}</span>
                       <span>Net {fmtBytes(net)}</span>
                     </div>
+                    {(r.private_ip || machineMac(r)) && (
+                      <div
+                        className={`mt-1 truncate font-mono text-[10px] ${
+                          active ? "text-blue-100/70" : "text-slate-500"
+                        }`}
+                      >
+                        {r.private_ip ?? "—"}
+                        {machineMac(r) ? ` · ${machineMac(r)}` : ""}
+                      </div>
+                    )}
                   </button>
                 </li>
               );

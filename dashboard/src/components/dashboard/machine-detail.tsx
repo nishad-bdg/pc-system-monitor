@@ -20,6 +20,7 @@ import {
   fmtUptime,
   formatUtcDayBd,
   MachineSummary,
+  machineMac,
   networkTotalBytes,
   Report,
 } from "@/lib/api";
@@ -54,6 +55,11 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm shadow-slate-200/50">
+        <IdentityItem label="Private IP" value={host.private_ip} />
+        <IdentityItem label="Public IP" value={host.public_ip} />
+        <IdentityItem label="MAC address" value={machineMac(host)} />
+      </div>
       <div className="flex gap-2 overflow-x-auto border-b border-slate-200">
         <button
           type="button"
@@ -208,9 +214,6 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
               <InfoBlock title="Machine">
                 {host.os.system ?? "—"} {host.os.release ?? "—"} ·{" "}
                 {host.os.machine ?? "—"} · {host.os.platform_detail ?? "—"}
-                <span className="mx-1 text-slate-300">·</span>
-                {host.private_ip ?? "—"}
-                {host.public_ip ? ` / ${host.public_ip}` : ""}
               </InfoBlock>
             )}
           </div>
@@ -277,6 +280,7 @@ function reportMatchesQuery(r: Report, query: string): boolean {
     r.os?.hostname,
     r.private_ip,
     r.public_ip,
+    machineMac(r),
     r.location?.country,
     r.location?.city,
     r.location?.region,
@@ -337,6 +341,7 @@ function ReportHistorySection({ reports }: { reports: Report[] }) {
             <th className="px-4 py-3">Time</th>
             <th className="px-4 py-3">PC</th>
             <th className="px-4 py-3">IP</th>
+            <th className="px-4 py-3">MAC</th>
             <th className="px-4 py-3">Country</th>
             <th className="px-4 py-3">CPU</th>
             <th className="px-4 py-3">RAM</th>
@@ -346,7 +351,7 @@ function ReportHistorySection({ reports }: { reports: Report[] }) {
           {pageRows.length === 0 ? (
             <tr>
               <td
-                colSpan={6}
+                colSpan={7}
                 className="px-4 py-8 text-center text-sm text-slate-500"
               >
                 {query.trim()
@@ -1391,6 +1396,23 @@ function InfoBlock({
   );
 }
 
+function IdentityItem({
+  label,
+  value,
+}: {
+  label: string;
+  value?: string | null;
+}) {
+  return (
+    <span className="flex items-baseline gap-1.5 text-xs">
+      <span className="font-medium text-slate-500">{label}</span>
+      <span className="font-mono text-sm font-medium text-slate-900">
+        {value || "—"}
+      </span>
+    </span>
+  );
+}
+
 function ReportRow({ r }: { r: Report }) {
   return (
     <tr className="hover:bg-slate-50/80">
@@ -1401,6 +1423,9 @@ function ReportRow({ r }: { r: Report }) {
       <td className="px-4 py-3 text-slate-600">
         {r.private_ip ?? "—"}
         {r.public_ip ? ` / ${r.public_ip}` : ""}
+      </td>
+      <td className="px-4 py-3 font-mono text-slate-600">
+        {machineMac(r) ?? "—"}
       </td>
       <td className="px-4 py-3 text-slate-600">
         {r.location?.country ?? "—"}
