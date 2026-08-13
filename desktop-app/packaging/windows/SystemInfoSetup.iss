@@ -8,7 +8,7 @@
 ;   - Copies system-info.exe
 ;   - Asks for API URL, API key, optional PC name + update manifest URL
 ;   - Writes %APPDATA%\system-info\config.env
-;   - Creates Task Scheduler job SystemInfoReport every 30 minutes
+;   - Creates Task Scheduler job SystemInfoReport every hour
 
 #define MyAppName "System Info Reporter"
 #define MyAppVersion "0.1.0"
@@ -105,9 +105,9 @@ var
   ExePath, ReportArgs: string;
 begin
   ExePath := ExpandConstant('{app}\{#MyAppExeName}');
-  { Full report every 30 minutes }
+  { Full report every hour }
   ReportArgs :=
-    '/Create /F /TN "SystemInfoReport" /SC MINUTE /MO 30 ' +
+    '/Create /F /TN "SystemInfoReport" /SC HOURLY ' +
     '/TR "\"' + ExePath + '\"" ' +
     '/RL LIMITED';
   Exec('schtasks.exe', ReportArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);

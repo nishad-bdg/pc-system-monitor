@@ -228,7 +228,7 @@ See `desktop-app/packaging/windows/README.md`.
 
 - **Installer (Inno Setup):** installs exe under `%LOCALAPPDATA%\SystemInfo`, writes
   `%APPDATA%\system-info\config.env` (API URL/key/PC name/update URL), creates
-  Task Scheduler job **SystemInfoReport** every 30 minutes.
+  Task Scheduler job **SystemInfoReport** every hour.
 - **Updates:** host a JSON release manifest (`SYSTEM_INFO_UPDATE_URL`); app checks
   on each run and stages a new exe (not live `git pull`).
 

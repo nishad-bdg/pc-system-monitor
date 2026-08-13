@@ -1,7 +1,7 @@
 # Windows installer (release-based updates)
 
 Creates a per-user install of `system-info.exe`, writes API settings, registers a
-**Task Scheduler** job every **30 minutes**, and supports **auto-update from a
+**Task Scheduler** job every **hour**, and supports **auto-update from a
 release manifest URL** (not live `git pull`).
 
 ## Prerequisites (build machine)
@@ -38,7 +38,7 @@ Wizard asks for:
 | PC name | optional Windows display name |
 | Update manifest URL | optional HTTPS JSON (see below) |
 
-Writes `%APPDATA%\system-info\config.env` and creates task **SystemInfoReport** (every 30 minutes).
+Writes `%APPDATA%\system-info\config.env` and creates task **SystemInfoReport** (every hour).
 
 ## 4. Release updates (not git)
 
@@ -56,7 +56,7 @@ Publish a new `system-info.exe` (GitHub Release, S3, etc.) and a manifest JSON:
 
 Set `SYSTEM_INFO_UPDATE_URL` in `config.env` (installer field) to that JSON URL.
 
-On each scheduled run the app checks the manifest; if newer, it downloads and stages a replace via `apply-update.cmd`. The **next** 30‑minute run uses the new binary.
+On each scheduled run the app checks the manifest; if newer, it downloads and stages a replace via `apply-update.cmd`. The **next** hourly run uses the new binary.
 
 Manual check:
 
