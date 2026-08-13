@@ -76,6 +76,15 @@ export interface Report {
     send_rate_bps?: number;
     recv_rate_bps?: number;
   } | null;
+  security?: {
+    count?: number;
+    installed?: {
+      name: string;
+      vendor: string;
+      active?: boolean | null;
+    }[];
+    platform?: string;
+  } | null;
   created_at?: number;
 }
 

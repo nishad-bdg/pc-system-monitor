@@ -14,6 +14,7 @@ from .disk import collect_disk_info
 from .printers import collect_printers
 from .network import collect_network_usage
 from .uptime import collect_uptime
+from .security import collect_security_info
 from .device import get_or_create_device_id, resolve_pc_name
 from .update import check_for_update, maybe_auto_update
 # Load packaged/installer config before reading defaults.
@@ -37,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--disk", action="store_true", help="Only show storage/disk info")
     parser.add_argument("--printers", action="store_true", help="Only show printers")
     parser.add_argument("--network", action="store_true", help="Only show network bandwidth")
+    parser.add_argument("--security", action="store_true", help="Only show internet-security software")
     parser.add_argument("--json", action="store_true", help="Print output as JSON")
     parser.add_argument("--no-save", action="store_true", help="Do not save report to the API")
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="API base URL to save reports to")
@@ -120,6 +122,7 @@ def run(args: argparse.Namespace) -> int:
         or args.disk
         or args.printers
         or args.network
+        or args.security
         or args.os
     )
     show_os = not specific or args.os
@@ -129,6 +132,7 @@ def run(args: argparse.Namespace) -> int:
     show_disk = not specific or args.disk
     show_printers = not specific or args.printers
     show_network = not specific or args.network
+    show_security = not specific or args.security
 
     pc_name = resolve_pc_name(args.pc_name)
     device_id = get_or_create_device_id(pc_name)
@@ -161,6 +165,9 @@ def run(args: argparse.Namespace) -> int:
     if show_network:
         data["network"] = collect_network_usage().to_dict()
 
+    if show_security:
+        data["security"] = collect_security_info().to_dict()
+
     _print(
         data,
         show_os,
@@ -170,6 +177,7 @@ def run(args: argparse.Namespace) -> int:
         show_disk,
         show_printers,
         show_network,
+        show_security,
         args,
     )
 
@@ -210,6 +218,7 @@ def _print(
     show_disk: bool,
     show_printers: bool,
     show_network: bool,
+    show_security: bool,
     args: argparse.Namespace,
 ) -> None:
     if args.json:
@@ -320,6 +329,24 @@ def _print(
                     extra.append(f"prints={item['print_count']}")
                 suffix = f" [{', '.join(extra)}]" if extra else ""
                 print(f"    - {item.get('name')} ({item.get('port') or 'unknown'}){suffix}")
+
+    if show_security:
+        security = data.get("security") or {}
+        installed = security.get("installed") or []
+        print("== Internet Security ==")
+        if installed:
+            for product in installed:
+                name = product.get("name")
+                vendor = product.get("vendor")
+                active = product.get("active")
+                state = ""
+                if active is True:
+                    state = " [active]"
+                elif active is False:
+                    state = " [inactive]"
+                print(f"  - {name} ({vendor}){state}")
+        else:
+            print("  none detected")
 
 
 def main() -> int:

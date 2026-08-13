@@ -24,6 +24,9 @@ import {
 
 export function MachineDetail({ machine }: { machine: MachineSummary }) {
   const host = machine.latest;
+  const [tab, setTab] = useState<"overview" | "uptime" | "storage">(
+    "overview",
+  );
   const timeSeries = machine.reports.map((r) => ({
     time: fmtTime(r.created_at),
     cpu: r.resources?.cpu_percent ?? 0,
@@ -36,104 +39,162 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
     download: (r.network?.recv_rate_bps ?? 0) / 1000,
   }));
 
+  const hasDisk =
+    (host.disk?.devices?.length ?? 0) > 0 ||
+    (host.disk?.partitions?.length ?? 0) > 0;
+
   return (
     <div className="space-y-6">
-      {host.resources && (
-        <div className="grid gap-4 sm:grid-cols-3">
-          <StatCard
-            label="CPU usage"
-            value={fmtPercent(host.resources.cpu_percent)}
-            sub={`${host.resources.cpu_count ?? "?"} cores · ${
-              host.resources.cpu_freq_mhz ?? "?"
-            } MHz`}
-            accent
-          />
-          <StatCard
-            label="Memory (RAM)"
-            value={fmtPercent(host.resources.ram_percent)}
-            sub={`${fmtBytes(host.resources.ram_used)} / ${fmtBytes(
-              host.resources.ram_total,
-            )}`}
-          />
-          <StatCard
-            label="Swap"
-            value={fmtPercent(host.resources.swap_percent)}
-            sub={`${fmtBytes(host.resources.swap_used)} / ${fmtBytes(
-              host.resources.swap_total,
-            )}`}
-          />
-        </div>
-      )}
-
-      {host.uptime && <UptimeSection uptime={host.uptime} />}
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        {host.location && (
-          <InfoBlock title="Location">
-            {host.location.city ?? "—"}, {host.location.region ?? "—"},{" "}
-            {host.location.country ?? "—"} ({host.location.country_code ?? "—"})
-            <span className="mx-1 text-slate-300">·</span>
-            ISP: {host.location.isp ?? "—"}
-          </InfoBlock>
-        )}
-        {host.os && (
-          <InfoBlock title="Machine">
-            {host.os.system ?? "—"} {host.os.release ?? "—"} ·{" "}
-            {host.os.machine ?? "—"} · {host.os.platform_detail ?? "—"}
-            <span className="mx-1 text-slate-300">·</span>
-            {host.private_ip ?? "—"}
-            {host.public_ip ? ` / ${host.public_ip}` : ""}
-          </InfoBlock>
-        )}
+      <div className="flex gap-2 border-b border-slate-200">
+        <button
+          type="button"
+          onClick={() => setTab("overview")}
+          className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+            tab === "overview"
+              ? "border-blue-600 text-blue-700"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          Overview
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("uptime")}
+          className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+            tab === "uptime"
+              ? "border-blue-600 text-blue-700"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          Uptime
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("storage")}
+          className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+            tab === "storage"
+              ? "border-blue-600 text-blue-700"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          Storage
+        </button>
       </div>
 
-      {host.disk &&
-        ((host.disk.devices?.length ?? 0) > 0 ||
-          (host.disk.partitions?.length ?? 0) > 0) && (
-          <StorageSection disk={host.disk} />
-        )}
+      {tab === "uptime" ? (
+        host.uptime ? (
+          <UptimeSection uptime={host.uptime} />
+        ) : (
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500">
+            No uptime data for this PC yet.
+          </div>
+        )
+      ) : tab === "storage" ? (
+        hasDisk ? (
+          <StorageSection disk={host.disk!} />
+        ) : (
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500">
+            No disk data for this PC yet.
+          </div>
+        )
+      ) : (
+        <>
+          {host.resources && (
+            <div className="grid gap-4 sm:grid-cols-3">
+              <StatCard
+                label="CPU usage"
+                value={fmtPercent(host.resources.cpu_percent)}
+                sub={`${host.resources.cpu_count ?? "?"} cores · ${
+                  host.resources.cpu_freq_mhz ?? "?"
+                } MHz`}
+                accent
+              />
+              <StatCard
+                label="Memory (RAM)"
+                value={fmtPercent(host.resources.ram_percent)}
+                sub={`${fmtBytes(host.resources.ram_used)} / ${fmtBytes(
+                  host.resources.ram_total,
+                )}`}
+              />
+              <StatCard
+                label="Swap"
+                value={fmtPercent(host.resources.swap_percent)}
+                sub={`${fmtBytes(host.resources.swap_used)} / ${fmtBytes(
+                  host.resources.swap_total,
+                )}`}
+              />
+            </div>
+          )}
 
-      <NetworkSection network={host.network ?? null} series={bandwidthSeries} />
+          {host.uptime && <UptimeState uptime={host.uptime} />}
 
-      {host.printers && <PrintersSection printers={host.printers} />}
+          <div className="grid gap-4 lg:grid-cols-2">
+            {host.location && (
+              <InfoBlock title="Location">
+                {host.location.city ?? "—"}, {host.location.region ?? "—"},{" "}
+                {host.location.country ?? "—"} ({host.location.country_code ?? "—"})
+                <span className="mx-1 text-slate-300">·</span>
+                ISP: {host.location.isp ?? "—"}
+              </InfoBlock>
+            )}
+            {host.os && (
+              <InfoBlock title="Machine">
+                {host.os.system ?? "—"} {host.os.release ?? "—"} ·{" "}
+                {host.os.machine ?? "—"} · {host.os.platform_detail ?? "—"}
+                <span className="mx-1 text-slate-300">·</span>
+                {host.private_ip ?? "—"}
+                {host.public_ip ? ` / ${host.public_ip}` : ""}
+              </InfoBlock>
+            )}
+          </div>
 
-      <ChartCard title="CPU / RAM / Swap over time">
-        <ResponsiveContainer width="100%" height={280}>
-          <LineChart data={timeSeries}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-            <XAxis dataKey="time" fontSize={11} stroke="#94a3b8" />
-            <YAxis domain={[0, 100]} fontSize={11} stroke="#94a3b8" />
-            <Tooltip />
-            <Legend />
-            <Line
-              type="monotone"
-              dataKey="cpu"
-              stroke="#2563eb"
-              name="CPU %"
-              strokeWidth={2}
-              dot={false}
-            />
-            <Line
-              type="monotone"
-              dataKey="ram"
-              stroke="#0f766e"
-              name="RAM %"
-              strokeWidth={2}
-              dot={false}
-            />
-            <Line
-              type="monotone"
-              dataKey="swap"
-              stroke="#d97706"
-              name="Swap %"
-              strokeWidth={2}
-              dot={false}
-            />
-          </LineChart>
-        </ResponsiveContainer>
-      </ChartCard>
+          {host.disk && hasDisk && <DiskState disk={host.disk} />}
 
-      <ReportHistorySection reports={machine.reports} />
+          <NetworkSection network={host.network ?? null} series={bandwidthSeries} />
+
+          {host.printers && <PrintersSection printers={host.printers} />}
+
+          {host.security && <SecuritySection security={host.security} />}
+
+          <ChartCard title="CPU / RAM / Swap over time">
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart data={timeSeries}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="time" fontSize={11} stroke="#94a3b8" />
+                <YAxis domain={[0, 100]} fontSize={11} stroke="#94a3b8" />
+                <Tooltip />
+                <Legend />
+                <Line
+                  type="monotone"
+                  dataKey="cpu"
+                  stroke="#2563eb"
+                  name="CPU %"
+                  strokeWidth={2}
+                  dot={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="ram"
+                  stroke="#0f766e"
+                  name="RAM %"
+                  strokeWidth={2}
+                  dot={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="swap"
+                  stroke="#d97706"
+                  name="Swap %"
+                  strokeWidth={2}
+                  dot={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ReportHistorySection reports={machine.reports} />
+        </>
+      )}
     </div>
   );
 }
@@ -265,15 +326,46 @@ function ReportHistorySection({ reports }: { reports: Report[] }) {
   );
 }
 
+function UptimeState({
+  uptime,
+}: {
+  uptime: NonNullable<Report["uptime"]>;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-medium text-slate-700">Uptime</h2>
+        <p className="text-xs text-slate-500">Summary · full details in the Uptime tab</p>
+      </div>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <StatCard
+          label="Current session"
+          value={fmtUptime(uptime.uptime_seconds)}
+          sub={`Since boot · ${fmtTime(uptime.boot_time)}`}
+          accent
+        />
+        <StatCard
+          label="Days tracked"
+          value={String(Object.keys(uptime.by_day ?? {}).length)}
+          sub={`${uptime.day_timezone ?? "UTC"} buckets`}
+        />
+      </div>
+    </div>
+  );
+}
+
 function UptimeSection({
   uptime,
 }: {
   uptime: NonNullable<Report["uptime"]>;
 }) {
-  const days = Object.entries(uptime.by_day ?? {})
-    .sort(([a], [b]) => a.localeCompare(b))
-    .slice(-14);
-  const maxSec = Math.max(1, ...days.map(([, s]) => s));
+  const [visibleDays, setVisibleDays] = useState(14);
+  const allDays = Object.entries(uptime.by_day ?? {}).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  const days = allDays.slice(-visibleDays);
+  const maxSec = Math.max(1, ...allDays.map(([, s]) => s));
+  const remaining = allDays.length - days.length;
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
@@ -292,7 +384,7 @@ function UptimeSection({
         />
         <StatCard
           label="Days tracked"
-          value={String(Object.keys(uptime.by_day ?? {}).length)}
+          value={String(allDays.length)}
           sub={`${uptime.day_timezone ?? "UTC"} buckets`}
         />
       </div>
@@ -318,6 +410,16 @@ function UptimeSection({
             );
           })}
         </ul>
+      )}
+      {remaining > 0 && (
+        <button
+          type="button"
+          onClick={() => setVisibleDays((v) => v + 14)}
+          className="mt-5 w-full rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          Load {Math.min(remaining, 14)} more{" "}
+          {remaining === 1 ? "day" : "days"} ({remaining} older remaining)
+        </button>
       )}
     </div>
   );
@@ -482,10 +584,121 @@ function PrintersSection({
   );
 }
 
+function SecuritySection({
+  security,
+}: {
+  security: NonNullable<Report["security"]>;
+}) {
+  const installed = security.installed ?? [];
+  const protectedOk = installed.length > 0;
+
+  return (
+    <div
+      className={`rounded-2xl border p-5 shadow-sm shadow-slate-200/50 ${
+        protectedOk ? "border-emerald-200 bg-white" : "border-red-200 bg-white"
+      }`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-medium text-slate-700">
+            Internet Security
+          </h2>
+          <p className="mt-0.5 text-xs text-slate-500">
+            {security.platform === "windows"
+              ? "From Windows Security Center"
+              : "Detected apps, processes and launch items"}
+          </p>
+        </div>
+        {protectedOk ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            {security.count} product{security.count === 1 ? "" : "s"} installed
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
+            <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+            No security software detected
+          </span>
+        )}
+      </div>
+
+      {installed.length === 0 ? (
+        <p className="mt-4 text-sm text-slate-500">
+          No internet-security software was found on this PC.
+        </p>
+      ) : (
+        <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+          {installed.map((p) => (
+            <li
+              key={`${p.name}-${p.vendor}`}
+              className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-slate-900">
+                  {p.name}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-500">{p.vendor}</p>
+              </div>
+              {p.active === true && (
+                <span className="shrink-0 text-[11px] font-semibold text-emerald-600">
+                  Active
+                </span>
+              )}
+              {p.active === false && (
+                <span className="shrink-0 text-[11px] font-semibold text-red-600">
+                  Inactive
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function diskBarColor(percent: number): string {
   if (percent > 80) return "bg-red-500";
   if (percent >= 50) return "bg-amber-500";
   return "bg-blue-500";
+}function DiskState({ disk }: { disk: NonNullable<Report["disk"]> }) {
+  const devices = disk.devices ?? [];
+  const total = devices.reduce((sum, d) => sum + (d.total ?? 0), 0);
+  const used = devices.reduce((sum, d) => sum + (d.used ?? 0), 0);
+  const free = devices.reduce((sum, d) => sum + (d.free ?? 0), 0);
+  const pct =
+    total > 0
+      ? Math.min(100, Math.max(0, (used / total) * 100))
+      : 0;
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-medium text-slate-700">Storage</h2>
+        <p className="text-xs text-slate-500">
+          Summary · full details in the Storage tab
+        </p>
+      </div>
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <StatCard
+          label="Devices"
+          value={String(devices.length)}
+          sub={`${disk.partitions?.length ?? 0} partitions`}
+        />
+        <StatCard
+          label="Used"
+          value={fmtBytes(used)}
+          sub={`${fmtBytes(total)} total`}
+          accent
+        />
+        <StatCard
+          label="Free"
+          value={fmtBytes(free)}
+          sub={`${pct.toFixed(0)}% used`}
+        />
+      </div>
+    </div>
+  );
 }
 
 function StorageSection({ disk }: { disk: NonNullable<Report["disk"]> }) {

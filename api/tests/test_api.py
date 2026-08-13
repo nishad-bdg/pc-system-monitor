@@ -131,6 +131,13 @@ def test_create_report_with_api_key(monkeypatch):
                 "send_rate_bps": 10,
                 "recv_rate_bps": 20,
             },
+            "security": {
+                "count": 1,
+                "installed": [
+                    {"name": "Windows Defender", "vendor": "Windows Defender", "active": True}
+                ],
+                "platform": "windows",
+            },
         },
         headers={"Authorization": f"Bearer {key}"},
     )
@@ -139,6 +146,8 @@ def test_create_report_with_api_key(monkeypatch):
     assert saved["pc_name"] == "MacBook-Pro"
     assert saved["device_id"] == "dev-1"
     assert saved["uptime"]["by_day"]["2026-08-12"] == 3600.0
+    assert saved["security"]["count"] == 1
+    assert saved["security"]["installed"][0]["name"] == "Windows Defender"
 
 
 def test_list_reports_passes_filters(monkeypatch):

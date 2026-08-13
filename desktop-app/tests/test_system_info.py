@@ -452,3 +452,76 @@ def test_disk_to_dict():
     p = DiskPartition("/dev/disk0s1", "/", "apfs", 100, 50, 50, 50.0)
     assert d.to_dict()["device"] == "/dev/disk0"
     assert set(p.to_dict()) == {"device", "mountpoint", "fstype", "total", "used", "free", "percent"}
+
+
+def test_security_collect_windows(monkeypatch):
+    from system_info.security import collect_security_info, SecurityInfo
+
+    monkeypatch.setattr("system_info.security.os.name", "nt")
+    monkeypatch.setattr(
+        "system_info.security._collect_windows",
+        lambda: [
+            {"name": "Windows Defender", "vendor": "Windows Defender", "active": True}
+        ],
+    )
+    info = collect_security_info()
+    assert info.platform == "windows"
+    assert info.count == 1
+    assert info.installed[0]["name"] == "Windows Defender"
+
+
+def test_security_product_state_active():
+    from system_info.security import _product_state_active
+
+    assert _product_state_active(0x1000) is True
+    assert _product_state_active(0x0000) is False
+    assert _product_state_active(None) is None
+
+
+def test_security_match_vendor():
+    from system_info.security import _match_vendor
+
+    assert _match_vendor("Norton Internet Security") == "Norton"
+    assert _match_vendor("McAfee Total Protection") == "McAfee"
+    assert _match_vendor("Some Random App") is None
+
+
+def test_security_macos_defaults_to_xprotect(monkeypatch):
+    from system_info.security import collect_security_info
+
+    monkeypatch.setattr("system_info.security.os.name", "posix")
+    monkeypatch.setattr("system_info.security._scan_installed_paths", lambda: [])
+    monkeypatch.setattr("system_info.security._scan_processes", lambda: [])
+    monkeypatch.setattr("system_info.security._scan_launch_items", lambda: [])
+    info = collect_security_info()
+    assert info.platform == "macos"
+    assert any("XProtect" in p.name for p in info.installed)
+
+
+def test_security_macos_finds_known_app(monkeypatch):
+    from system_info.security import collect_security_info
+
+    monkeypatch.setattr("system_info.security.os.name", "posix")
+    monkeypatch.setattr(
+        "system_info.security._scan_installed_paths", lambda: ["Sophos Endpoint.app"]
+    )
+    monkeypatch.setattr("system_info.security._scan_processes", lambda: [])
+    monkeypatch.setattr("system_info.security._scan_launch_items", lambda: [])
+    info = collect_security_info()
+    assert any("sophos" in p.name.lower() for p in info.installed)
+
+
+def test_security_windows_fallback_when_security_center_empty(monkeypatch):
+    from system_info.security import collect_security_info
+
+    monkeypatch.setattr("system_info.security.os.name", "nt")
+    monkeypatch.setattr("system_info.security._collect_windows_security_center", lambda: [])
+    monkeypatch.setattr(
+        "system_info.security._scan_installed_paths",
+        lambda: ["C:\\Program Files\\Norton Security\\Norton.exe"],
+    )
+    monkeypatch.setattr("system_info.security._scan_processes", lambda: [])
+    monkeypatch.setattr("system_info.security._scan_launch_items", lambda: [])
+    info = collect_security_info()
+    assert info.platform == "windows"
+    assert any(p.vendor == "Norton" for p in info.installed)
