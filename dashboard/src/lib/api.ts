@@ -39,6 +39,11 @@ export interface Report {
     swap_total?: number;
     swap_used?: number;
     swap_percent?: number;
+    battery?: {
+      percent?: number;
+      power_plugged?: boolean;
+      seconds_left?: number | null;
+    } | null;
   } | null;
   uptime?: {
     boot_time?: number;
@@ -84,6 +89,22 @@ export interface Report {
       active?: boolean | null;
     }[];
     platform?: string;
+  } | null;
+  health?: {
+    disks?: {
+      name: string;
+      device: string;
+      media_type: string;
+      smart_status?: string | null;
+      internal?: boolean | null;
+      health: string;
+    }[];
+    battery?: {
+      cycle_count?: number | null;
+      condition?: string | null;
+      max_capacity_percent?: number | null;
+      health_percent?: number | null;
+    } | null;
   } | null;
   created_at?: number;
 }
@@ -410,6 +431,17 @@ export function fmtUptime(seconds?: number | null): string {
   const minutes = Math.floor((total % 3600) / 60);
   if (days > 0) return `${days}d ${hours}h ${minutes}m`;
   if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+/** Battery time-left label (e.g. "3h 12m"). */
+export function fmtBatteryTime(seconds?: number | null): string {
+  if (seconds === undefined || seconds === null) return "Unknown time";
+  const total = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h`;
   return `${minutes}m`;
 }
 

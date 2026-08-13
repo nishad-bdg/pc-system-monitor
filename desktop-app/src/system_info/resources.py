@@ -17,6 +17,7 @@ class SystemResources:
     swap_total: int
     swap_used: int
     swap_percent: float
+    battery: dict | None
 
     def to_dict(self) -> dict:
         return {
@@ -32,7 +33,27 @@ class SystemResources:
             "swap_total": self.swap_total,
             "swap_used": self.swap_used,
             "swap_percent": self.swap_percent,
+            "battery": self.battery,
         }
+
+
+def _collect_battery() -> dict | None:
+    """Battery info (percent, plugged, time left) — None on desktops."""
+    try:
+        batt = psutil.sensors_battery()
+    except (NotImplementedError, OSError):
+        return None
+    if batt is None:
+        return None
+    secsleft = getattr(batt, "secsleft", -1)
+    seconds_left = None
+    if isinstance(secsleft, int) and secsleft >= 0:
+        seconds_left = secsleft
+    return {
+        "percent": float(batt.percent),
+        "power_plugged": bool(batt.power_plugged),
+        "seconds_left": seconds_left,
+    }
 
 
 def collect_resources() -> SystemResources:
@@ -58,4 +79,5 @@ def collect_resources() -> SystemResources:
         swap_total=sw.total,
         swap_used=sw.used,
         swap_percent=sw.percent,
+        battery=_collect_battery(),
     )

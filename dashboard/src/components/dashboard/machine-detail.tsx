@@ -12,6 +12,7 @@ import {
   Legend,
 } from "recharts";
 import {
+  fmtBatteryTime,
   fmtBytes,
   fmtPercent,
   fmtRate,
@@ -24,7 +25,7 @@ import {
 
 export function MachineDetail({ machine }: { machine: MachineSummary }) {
   const host = machine.latest;
-  const [tab, setTab] = useState<"overview" | "uptime" | "storage">(
+  const [tab, setTab] = useState<"overview" | "uptime" | "storage" | "health">(
     "overview",
   );
   const timeSeries = machine.reports.map((r) => ({
@@ -79,6 +80,17 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         >
           Storage
         </button>
+        <button
+          type="button"
+          onClick={() => setTab("health")}
+          className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+            tab === "health"
+              ? "border-blue-600 text-blue-700"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          Health
+        </button>
       </div>
 
       {tab === "uptime" ? (
@@ -97,6 +109,8 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
             No disk data for this PC yet.
           </div>
         )
+      ) : tab === "health" ? (
+        <HealthSection health={host.health ?? null} />
       ) : (
         <>
           {host.resources && (
@@ -123,6 +137,19 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
                   host.resources.swap_total,
                 )}`}
               />
+              {host.resources.battery && (
+                <StatCard
+                  label="Battery"
+                  value={fmtPercent(host.resources.battery.percent)}
+                  sub={
+                    host.resources.battery.power_plugged
+                      ? "Charging / plugged in"
+                      : fmtBatteryTime(host.resources.battery.seconds_left) +
+                        " remaining"
+                  }
+                  accent
+                />
+              )}
             </div>
           )}
 
@@ -323,6 +350,136 @@ function ReportHistorySection({ reports }: { reports: Report[] }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function HealthSection({
+  health,
+}: {
+  health: Report["health"];
+}) {
+  const disks = health?.disks ?? [];
+  const battery = health?.battery ?? null;
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm font-medium text-slate-700">Storage health</h2>
+          <p className="text-xs text-slate-500">
+            SSD / HDD type and SMART status
+          </p>
+        </div>
+
+        {disks.length === 0 ? (
+          <p className="mt-4 text-sm text-slate-500">
+            No storage health data for this PC.
+          </p>
+        ) : (
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            {disks.map((d) => (
+              <div
+                key={`${d.device}-${d.name}`}
+                className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="truncate text-sm font-medium text-slate-900">
+                    {d.name}
+                  </p>
+                  <span
+                    className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                      d.media_type === "ssd"
+                        ? "bg-blue-50 text-blue-700"
+                        : d.media_type === "hdd"
+                          ? "bg-amber-50 text-amber-700"
+                          : "bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    {(d.media_type || "unknown").toUpperCase()}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                  {d.device && <span className="font-mono">{d.device}</span>}
+                  {d.internal != null && (
+                    <span>{d.internal ? "Internal" : "External"}</span>
+                  )}
+                  {d.smart_status && <span>SMART: {d.smart_status}</span>}
+                  <HealthBadge health={d.health} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm font-medium text-slate-700">Battery health</h2>
+          {battery?.condition && (
+            <span
+              className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                /good|normal|ok/i.test(battery.condition)
+                  ? "bg-emerald-50 text-emerald-700"
+                  : "bg-amber-50 text-amber-700"
+              }`}
+            >
+              {battery.condition}
+            </span>
+          )}
+        </div>
+
+        {!battery ? (
+          <p className="mt-4 text-sm text-slate-500">
+            No battery detected (desktop or unsupported).
+          </p>
+        ) : (
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <StatCard
+              label="Health"
+              value={
+                battery.health_percent != null
+                  ? `${battery.health_percent}%`
+                  : "—"
+              }
+              sub="of original design capacity"
+              accent
+            />
+            <StatCard
+              label="Cycle count"
+              value={battery.cycle_count != null ? String(battery.cycle_count) : "—"}
+              sub="Full charge cycles"
+            />
+            <StatCard
+              label="Max capacity"
+              value={
+                battery.max_capacity_percent != null
+                  ? `${battery.max_capacity_percent}%`
+                  : "—"
+              }
+              sub="Current maximum charge"
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function HealthBadge({ health }: { health: string }) {
+  const map: Record<string, string> = {
+    ok: "bg-emerald-50 text-emerald-700",
+    warning: "bg-amber-50 text-amber-700",
+    fail: "bg-red-50 text-red-700",
+    unknown: "bg-slate-100 text-slate-600",
+  };
+  return (
+    <span
+      className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+        map[health] ?? map.unknown
+      }`}
+    >
+      {health === "ok" ? "Healthy" : health === "fail" ? "Failing" : health === "warning" ? "Warning" : "Unknown"}
+    </span>
   );
 }
 

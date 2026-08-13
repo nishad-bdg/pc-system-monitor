@@ -15,6 +15,7 @@ from .printers import collect_printers
 from .network import collect_network_usage
 from .uptime import collect_uptime
 from .security import collect_security_info
+from .health import collect_health_info
 from .device import get_or_create_device_id, resolve_pc_name
 from .update import check_for_update, maybe_auto_update
 # Load packaged/installer config before reading defaults.
@@ -39,6 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--printers", action="store_true", help="Only show printers")
     parser.add_argument("--network", action="store_true", help="Only show network bandwidth")
     parser.add_argument("--security", action="store_true", help="Only show internet-security software")
+    parser.add_argument("--health", action="store_true", help="Only show storage/battery health")
     parser.add_argument("--json", action="store_true", help="Print output as JSON")
     parser.add_argument("--no-save", action="store_true", help="Do not save report to the API")
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="API base URL to save reports to")
@@ -123,6 +125,7 @@ def run(args: argparse.Namespace) -> int:
         or args.printers
         or args.network
         or args.security
+        or args.health
         or args.os
     )
     show_os = not specific or args.os
@@ -133,6 +136,7 @@ def run(args: argparse.Namespace) -> int:
     show_printers = not specific or args.printers
     show_network = not specific or args.network
     show_security = not specific or args.security
+    show_health = not specific or args.health
 
     pc_name = resolve_pc_name(args.pc_name)
     device_id = get_or_create_device_id(pc_name)
@@ -168,6 +172,9 @@ def run(args: argparse.Namespace) -> int:
     if show_security:
         data["security"] = collect_security_info().to_dict()
 
+    if show_health:
+        data["health"] = collect_health_info().to_dict()
+
     _print(
         data,
         show_os,
@@ -178,6 +185,7 @@ def run(args: argparse.Namespace) -> int:
         show_printers,
         show_network,
         show_security,
+        show_health,
         args,
     )
 
@@ -219,6 +227,7 @@ def _print(
     show_printers: bool,
     show_network: bool,
     show_security: bool,
+    show_health: bool,
     args: argparse.Namespace,
 ) -> None:
     if args.json:
@@ -269,6 +278,13 @@ def _print(
         print(f"  total:      {_fmt_bytes(res['swap_total'])}")
         print(f"  used:       {_fmt_bytes(res['swap_used'])}")
         print(f"  usage:      {res['swap_percent']:.1f}%")
+        battery = res.get("battery")
+        if battery:
+            plugged = "plugged in" if battery.get("power_plugged") else "on battery"
+            secs = battery.get("seconds_left")
+            remaining = f" · {_fmt_duration(secs)} remaining" if secs is not None else ""
+            print("== Battery ==")
+            print(f"  charge:     {battery['percent']:.0f}% ({plugged}){remaining}")
         uptime = data.get("uptime") or {}
         print("== Uptime ==")
         print(f"  session:    {_fmt_duration(float(uptime.get('uptime_seconds') or 0))}")
@@ -347,6 +363,29 @@ def _print(
                 print(f"  - {name} ({vendor}){state}")
         else:
             print("  none detected")
+
+    if show_health:
+        health = data.get("health") or {}
+        disks = health.get("disks") or []
+        print("== Storage Health ==")
+        if disks:
+            for d in disks:
+                print(
+                    f"  - {d.get('name')}"
+                    f" [{d.get('media_type') or 'unknown'}]"
+                    f" health={d.get('health') or 'unknown'}"
+                    + (f" smart={d.get('smart_status')}" if d.get("smart_status") else "")
+                )
+        else:
+            print("  none detected")
+        battery = health.get("battery")
+        print("== Battery Health ==")
+        if battery:
+            print(f"  condition:     {battery.get('condition') or 'unknown'}")
+            print(f"  health:        {battery.get('health_percent')}%" if battery.get("health_percent") is not None else "  health:        unknown")
+            print(f"  cycle count:   {battery.get('cycle_count')}" if battery.get("cycle_count") is not None else "  cycle count:   unknown")
+        else:
+            print("  no battery detected")
 
 
 def main() -> int:

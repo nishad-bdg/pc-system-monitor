@@ -134,12 +134,12 @@ def test_collect_resources_fields():
 def test_resources_to_dict_keys():
     loc = SystemResources(cpu_count=8, cpu_count_physical=4, cpu_percent=10.0, cpu_freq_mhz=1000.0,
                           ram_total=1024, ram_used=512, ram_available=512, ram_free=256,
-                          ram_percent=50.0, swap_total=2048, swap_used=0, swap_percent=0.0)
+                          ram_percent=50.0, swap_total=2048, swap_used=0, swap_percent=0.0, battery=None)
     assert set(loc.to_dict()) == {
-        "cpu_count", "cpu_count_physical", "cpu_percent", "cpu_freq_mhz",
-        "ram_total", "ram_used", "ram_available", "ram_free", "ram_percent",
-        "swap_total", "swap_used", "swap_percent",
-    }
+            "cpu_count", "cpu_count_physical", "cpu_percent", "cpu_freq_mhz",
+            "ram_total", "ram_used", "ram_available", "ram_free", "ram_percent",
+            "swap_total", "swap_used", "swap_percent", "battery",
+        }
 
 
 def test_fmt_bytes():
@@ -341,7 +341,7 @@ def test_run_show_sys_only(monkeypatch):
     monkeypatch.setattr(cli, "collect_resources", lambda: SystemResources(
         cpu_count=8, cpu_count_physical=4, cpu_percent=10.0, cpu_freq_mhz=1000.0,
         ram_total=1024, ram_used=512, ram_available=512, ram_free=256, ram_percent=50.0,
-        swap_total=2048, swap_used=0, swap_percent=0.0))
+        swap_total=2048, swap_used=0, swap_percent=0.0, battery=None))
     monkeypatch.setattr(
         cli,
         "collect_uptime",
@@ -525,3 +525,76 @@ def test_security_windows_fallback_when_security_center_empty(monkeypatch):
     info = collect_security_info()
     assert info.platform == "windows"
     assert any(p.vendor == "Norton" for p in info.installed)
+
+
+def test_health_macos_disk_dedupe(monkeypatch):
+    from system_info.health import _collect_macos_disks
+
+    payload = {
+        "SPStorageDataType": [
+            {
+                "bsd_name": "disk3s5",
+                "physical_drive": {
+                    "device_name": "APPLE SSD AP0256Z",
+                    "medium_type": "ssd",
+                    "smart_status": "Verified",
+                    "is_internal_disk": "yes",
+                },
+            },
+            {
+                "bsd_name": "disk3s1s1",
+                "physical_drive": {
+                    "device_name": "APPLE SSD AP0256Z",
+                    "medium_type": "ssd",
+                    "smart_status": "Verified",
+                    "is_internal_disk": "yes",
+                },
+            },
+        ]
+    }
+    monkeypatch.setattr(
+        "system_info.health._run",
+        lambda cmd, timeout=15.0: __import__("json").dumps(payload),
+    )
+    disks = _collect_macos_disks()
+    assert len(disks) == 1
+    assert disks[0].device == "disk3"
+    assert disks[0].media_type == "ssd"
+    assert disks[0].health == "ok"
+
+
+def test_health_macos_battery(monkeypatch):
+    from system_info.health import _collect_macos_battery
+
+    payload = {
+        "SPPowerDataType": [
+            {
+                "_name": "spbattery_information",
+                "sppower_battery_health_info": {
+                    "sppower_battery_cycle_count": 471,
+                    "sppower_battery_health": "Good",
+                    "sppower_battery_health_maximum_capacity": "82%",
+                },
+            }
+        ]
+    }
+    monkeypatch.setattr(
+        "system_info.health._run",
+        lambda cmd, timeout=15.0: __import__("json").dumps(payload),
+    )
+    batt = _collect_macos_battery()
+    assert batt is not None
+    assert batt.cycle_count == 471
+    assert batt.health_percent == 82
+    assert batt.condition == "Good"
+
+
+def test_health_media_type():
+    from system_info.health import _to_media_type, _derive_health
+
+    assert _to_media_type("ssd") == "ssd"
+    assert _to_media_type("HDD") == "hdd"
+    assert _to_media_type("") == "unknown"
+    assert _derive_health("Verified") == "ok"
+    assert _derive_health("Failing") == "fail"
+    assert _derive_health("Not Supported") == "unknown"

@@ -16,6 +16,7 @@ class Report(BaseModel):
     network: dict | None = None
     uptime: dict | None = None
     security: dict | None = None
+    health: dict | None = None
     created_at: float | None = Field(default=None, description="Unix timestamp")
 
 
