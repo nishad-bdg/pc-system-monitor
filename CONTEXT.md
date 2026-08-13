@@ -75,7 +75,7 @@ Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`.
 | `os` | `os_info.py` | Includes hostname |
 | `private_ip`, `public_ip`, `mac_address`, `mac_addresses` | `ip.py` | |
 | `location` | `geo.py` | ip-api.com |
-| `resources` | `resources.py` | CPU/RAM/swap + laptop `battery` |
+| `resources` | `resources.py` | CPU/RAM/swap + laptop `battery` + RAM `ram_speed_mhz`/`ram_type` |
 | `uptime` | `uptime.py` | Session + UTC day-wise on-seconds (`by_day`) |
 | `network` | `network.py` | NIC totals/rates |
 
@@ -162,9 +162,12 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
 
 - `POST /reports` — API key; stores `source_key` prefix.
 - `GET /reports/{id}` — JWT.
+- `GET /reports/export` — JWT; same filters as `/reports` plus `group_id`; streams CSV with **every report field flattened** (`a.b.c` columns, arrays as JSON).
 - `GET/POST/PATCH/DELETE /api-keys` — admin JWT; `PATCH` renames / toggles active; secret shown only at create.
 - `GET/POST/PATCH/DELETE /groups` — admin JWT; a machine key belongs to **one group only** (assigning removes it from others).
 - Auth, users, health — unchanged pattern.
+
+`GET /reports` also accepts `group_id` (matches machine keys `id:`/`mac:`/`name:` in the group).
 
 ---
 
@@ -184,11 +187,13 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 | `/reports/[key]` | PC detail from reports (encoded machine key) |
 | `/api-keys` | Manage desktop API keys (create/copy/rename/toggle/delete) |
 | `/groups` | Create/rename/delete groups, assign PCs (one group per PC) |
+| `/reports/export` | **Report export** — date presets + filters, CSV download |
 
 ### Fleet (`/dashboard`)
 
 - Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports.
-- Detail tabs (`machine-detail.tsx`): **Overview / Uptime / Storage / Health**.
+- Detail tabs (`machine-detail.tsx`): **Summary (default) / Overview / Uptime / Storage / Health**.
+  - **Summary:** total uptime + session, network total + bandwidth, full CPU spec (model/arch/cores/clock), full RAM spec (total/available/free/swap + **bus speed** `ram_speed_mhz` + `ram_type`), storage health (SSD/HDD badge, SMART, Healthy/Failing), battery health (condition, health %, cycle count), internet security, printers + total prints.
   - **Overview:** CPU/RAM/swap tiles, compact UptimeState (session + days tracked) + DiskState (devices/used/free), location/machine, Battery stat card (laptops only), Network bandwidth chart, Printers, Security card.
   - **Uptime:** session + UTC day bars with BD labels; day bars load in batches (default 14, Load more for the rest).
   - **Storage:** device count + partition bars (blue &lt;50%, amber 50–80%, red &gt;80%).

@@ -274,6 +274,12 @@ def _print(
         print(f"  available:  {_fmt_bytes(res['ram_available'])}")
         print(f"  free:       {_fmt_bytes(res['ram_free'])}")
         print(f"  usage:      {res['ram_percent']:.1f}%")
+        ram_speed = res.get("ram_speed_mhz")
+        ram_type = res.get("ram_type")
+        if ram_speed:
+            print(f"  bus speed:  {ram_speed} MHz")
+        if ram_type:
+            print(f"  type:       {ram_type}")
         print("== Swap ==")
         print(f"  total:      {_fmt_bytes(res['swap_total'])}")
         print(f"  used:       {_fmt_bytes(res['swap_used'])}")

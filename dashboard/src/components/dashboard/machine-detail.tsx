@@ -20,14 +20,15 @@ import {
   fmtUptime,
   formatUtcDayBd,
   MachineSummary,
+  networkTotalBytes,
   Report,
 } from "@/lib/api";
 
 export function MachineDetail({ machine }: { machine: MachineSummary }) {
   const host = machine.latest;
-  const [tab, setTab] = useState<"overview" | "uptime" | "storage" | "health">(
-    "overview",
-  );
+  const [tab, setTab] = useState<
+    "summary" | "overview" | "uptime" | "storage" | "health"
+  >("summary");
   const timeSeries = machine.reports.map((r) => ({
     time: fmtTime(r.created_at),
     cpu: r.resources?.cpu_percent ?? 0,
@@ -54,6 +55,17 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
   return (
     <div className="space-y-6">
       <div className="flex gap-2 border-b border-slate-200">
+        <button
+          type="button"
+          onClick={() => setTab("summary")}
+          className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+            tab === "summary"
+              ? "border-blue-600 text-blue-700"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          Summary
+        </button>
         <button
           type="button"
           onClick={() => setTab("overview")}
@@ -118,6 +130,8 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         )
       ) : tab === "health" ? (
         <HealthSection health={host.health ?? null} />
+      ) : tab === "summary" ? (
+        <SummarySection machine={machine} />
       ) : (
         <>
           {host.resources && (
@@ -354,6 +368,252 @@ function ReportHistorySection({ reports }: { reports: Report[] }) {
           >
             Next
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SummarySection({ machine }: { machine: MachineSummary }) {
+  const r = machine.latest;
+  const res = r.resources;
+  const uptime = r.uptime;
+  const network = r.network;
+  const security = r.security;
+  const health = r.health;
+  const printers = r.printers;
+
+  const totalUp = Object.values(uptime?.by_day ?? {}).reduce(
+    (sum, sec) => sum + sec,
+    0,
+  );
+
+  const printTotal =
+    (printers?.usb?.reduce((s, p) => s + (p.print_count ?? 0), 0) ?? 0) +
+    (printers?.network?.reduce((s, p) => s + (p.print_count ?? 0), 0) ?? 0) +
+    (printers?.other?.reduce((s, p) => s + (p.print_count ?? 0), 0) ?? 0);
+
+  const printerCount = (printers?.usb?.length ?? 0) +
+    (printers?.network?.length ?? 0) +
+    (printers?.other?.length ?? 0);
+
+  const disks = health?.disks ?? [];
+  const ssdCount = disks.filter((d) => d.media_type === "ssd").length;
+  const hddCount = disks.filter((d) => d.media_type === "hdd").length;
+  const unhealthyDisks = disks.filter((d) => d.health === "fail" || d.health === "warning");
+  const batteryHealth = health?.battery;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label="Total uptime"
+          value={fmtUptime(totalUp)}
+          sub={`${Object.keys(uptime?.by_day ?? {}).length} days tracked`}
+          accent
+        />
+        <StatCard
+          label="Current session"
+          value={fmtUptime(uptime?.uptime_seconds)}
+          sub={uptime?.boot_time ? `Since ${fmtTime(uptime.boot_time)}` : "—"}
+        />
+        <StatCard
+          label="Network total"
+          value={fmtBytes(networkTotalBytes(r))}
+          sub="Sent + received since boot"
+          accent
+        />
+        <StatCard
+          label="Bandwidth"
+          value={fmtRate(network?.recv_rate_bps)}
+          sub={`Up ${fmtRate(network?.send_rate_bps)}`}
+          accent
+        />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <InfoBlock title="CPU (full spec)">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+            <span className="text-slate-500">Model</span>
+            <span className="font-medium text-slate-900">{r.os?.processor || "—"}</span>
+            <span className="text-slate-500">Architecture</span>
+            <span className="font-medium text-slate-900">{r.os?.machine || "—"}</span>
+            <span className="text-slate-500">Cores (logical)</span>
+            <span className="font-medium text-slate-900">{res?.cpu_count ?? "—"}</span>
+            <span className="text-slate-500">Cores (physical)</span>
+            <span className="font-medium text-slate-900">{res?.cpu_count_physical ?? "—"}</span>
+            <span className="text-slate-500">Clock speed</span>
+            <span className="font-medium text-slate-900">
+              {res?.cpu_freq_mhz != null ? `${res.cpu_freq_mhz} MHz` : "—"}
+            </span>
+          </div>
+        </InfoBlock>
+
+        <InfoBlock title="RAM (full spec)">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+            <span className="text-slate-500">Total</span>
+            <span className="font-medium text-slate-900">{fmtBytes(res?.ram_total)}</span>
+            <span className="text-slate-500">Available</span>
+            <span className="font-medium text-slate-900">{fmtBytes(res?.ram_available)}</span>
+            <span className="text-slate-500">Free</span>
+            <span className="font-medium text-slate-900">{fmtBytes(res?.ram_free)}</span>
+            <span className="text-slate-500">Swap total</span>
+            <span className="font-medium text-slate-900">{fmtBytes(res?.swap_total)}</span>
+            <span className="text-slate-500">Swap used</span>
+            <span className="font-medium text-slate-900">{fmtBytes(res?.swap_used)}</span>
+            <span className="text-slate-500">Bus speed</span>
+            <span className="font-medium text-slate-900">
+              {res?.ram_speed_mhz != null ? `${res.ram_speed_mhz} MHz` : "—"}
+            </span>
+            <span className="text-slate-500">Memory type</span>
+            <span className="font-medium text-slate-900">{res?.ram_type || "—"}</span>
+          </div>
+        </InfoBlock>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-medium text-slate-700">Storage health</h2>
+            <p className="text-xs text-slate-500">
+              {ssdCount} SSD{ssdCount === 1 ? "" : "s"} · {hddCount} HDD{hddCount === 1 ? "" : "s"}
+            </p>
+          </div>
+          {disks.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-500">No storage health data for this PC.</p>
+          ) : (
+            <ul className="mt-4 space-y-2">
+              {disks.map((d) => (
+                <li
+                  key={`${d.device}-${d.name}`}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-2.5"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-900">{d.name}</p>
+                    <p className="truncate text-xs text-slate-500">{d.device}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                        d.media_type === "ssd"
+                          ? "bg-blue-50 text-blue-700"
+                          : d.media_type === "hdd"
+                            ? "bg-amber-50 text-amber-700"
+                            : "bg-slate-100 text-slate-600"
+                      }`}
+                    >
+                      {(d.media_type || "unknown").toUpperCase()}
+                    </span>
+                    <HealthBadge health={d.health} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          {unhealthyDisks.length > 0 && (
+            <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
+              {unhealthyDisks.length} disk{unhealthyDisks.length === 1 ? "" : "s"} need attention
+            </p>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-medium text-slate-700">Battery health</h2>
+          </div>
+          {!batteryHealth ? (
+            <p className="mt-4 text-sm text-slate-500">
+              No battery detected on this PC (desktop or unsupported).
+            </p>
+          ) : (
+            <div className="mt-4 grid gap-4 sm:grid-cols-3">
+              <StatCard
+                label="Health"
+                value={batteryHealth.health_percent != null ? `${batteryHealth.health_percent}%` : "—"}
+                sub="of original design capacity"
+                accent
+              />
+              <StatCard
+                label="Cycle count"
+                value={batteryHealth.cycle_count != null ? String(batteryHealth.cycle_count) : "—"}
+                sub="Full charge cycles"
+              />
+              <StatCard
+                label="Max capacity"
+                value={batteryHealth.max_capacity_percent != null ? `${batteryHealth.max_capacity_percent}%` : "—"}
+                sub="Current maximum charge"
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-medium text-slate-700">Internet security</h2>
+            {security?.count ? (
+              <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700">
+                {security.count} product{security.count === 1 ? "" : "s"} installed
+              </span>
+            ) : null}
+          </div>
+          {!security?.installed?.length ? (
+            <p className="mt-4 text-sm text-slate-500">No internet-security software detected.</p>
+          ) : (
+            <ul className="mt-4 space-y-2">
+              {security.installed.map((p) => (
+                <li
+                  key={`${p.name}-${p.vendor}`}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-2.5"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-900">{p.name}</p>
+                    <p className="truncate text-xs text-slate-500">{p.vendor}</p>
+                  </div>
+                  {p.active === true && (
+                    <span className="shrink-0 text-[11px] font-semibold text-emerald-600">Active</span>
+                  )}
+                  {p.active === false && (
+                    <span className="shrink-0 text-[11px] font-semibold text-red-600">Inactive</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-medium text-slate-700">Printers</h2>
+            <p className="text-xs text-slate-500">
+              {printerCount} connected · <span className="font-semibold text-slate-800">{printTotal.toLocaleString()}</span> total prints
+            </p>
+          </div>
+          {printerCount === 0 ? (
+            <p className="mt-4 text-sm text-slate-500">No printers detected.</p>
+          ) : (
+            <ul className="mt-4 space-y-2">
+              {[
+                ...(printers?.usb ?? []),
+                ...(printers?.network ?? []),
+                ...(printers?.other ?? []),
+              ].map((p) => (
+                <li
+                  key={`${p.name}-${p.port}`}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-2.5"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-900">{p.name}</p>
+                    <p className="truncate text-xs text-slate-500">{p.port || "—"}</p>
+                  </div>
+                  <span className="shrink-0 text-xs text-slate-600">
+                    {p.print_count == null ? "—" : `${p.print_count.toLocaleString()} prints`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     </div>

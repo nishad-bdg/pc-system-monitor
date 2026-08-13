@@ -134,11 +134,13 @@ def test_collect_resources_fields():
 def test_resources_to_dict_keys():
     loc = SystemResources(cpu_count=8, cpu_count_physical=4, cpu_percent=10.0, cpu_freq_mhz=1000.0,
                           ram_total=1024, ram_used=512, ram_available=512, ram_free=256,
-                          ram_percent=50.0, swap_total=2048, swap_used=0, swap_percent=0.0, battery=None)
+                          ram_percent=50.0, swap_total=2048, swap_used=0, swap_percent=0.0, battery=None,
+                          ram_speed_mhz=None, ram_type=None)
     assert set(loc.to_dict()) == {
             "cpu_count", "cpu_count_physical", "cpu_percent", "cpu_freq_mhz",
             "ram_total", "ram_used", "ram_available", "ram_free", "ram_percent",
             "swap_total", "swap_used", "swap_percent", "battery",
+            "ram_speed_mhz", "ram_type",
         }
 
 
@@ -341,7 +343,7 @@ def test_run_show_sys_only(monkeypatch):
     monkeypatch.setattr(cli, "collect_resources", lambda: SystemResources(
         cpu_count=8, cpu_count_physical=4, cpu_percent=10.0, cpu_freq_mhz=1000.0,
         ram_total=1024, ram_used=512, ram_available=512, ram_free=256, ram_percent=50.0,
-        swap_total=2048, swap_used=0, swap_percent=0.0, battery=None))
+        swap_total=2048, swap_used=0, swap_percent=0.0, battery=None, ram_speed_mhz=None, ram_type=None))
     monkeypatch.setattr(
         cli,
         "collect_uptime",

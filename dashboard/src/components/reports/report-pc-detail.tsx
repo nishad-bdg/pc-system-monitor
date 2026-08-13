@@ -17,6 +17,7 @@ import {
 } from "@/lib/api";
 import { MachineDetail } from "@/components/dashboard/machine-detail";
 import { SignOutButton } from "@/components/dashboard/sign-out-button";
+import { SidebarNav } from "@/components/sidebar-nav";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -58,20 +59,7 @@ export function ReportPcDetail({ encodedKey }: { encodedKey: string }) {
           <h1 className="mt-1 text-lg font-semibold tracking-tight text-white">
             PC detail
           </h1>
-          <div className="mt-3 flex gap-2 text-xs">
-            <Link
-              href="/dashboard"
-              className="rounded-md px-2 py-1 font-medium text-slate-300 hover:bg-slate-900 hover:text-white"
-            >
-              Fleet
-            </Link>
-            <Link
-              href="/reports"
-              className="rounded-md bg-blue-600 px-2 py-1 font-medium text-white"
-            >
-              Reports
-            </Link>
-          </div>
+          <SidebarNav current="reports" />
         </div>
         <div className="flex-1 px-4 py-4 text-sm text-slate-300">
           <p className="font-medium text-white">{machine?.name ?? "…"}</p>

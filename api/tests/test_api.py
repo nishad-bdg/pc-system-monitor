@@ -22,7 +22,7 @@ def _patch_db(monkeypatch, user=None):
     monkeypatch.setattr(
         db,
         "list_reports",
-        lambda limit=20, device_id=None, pc_name=None, from_ts=None, to_ts=None, country=None, os_name=None: [],
+        lambda limit=20, device_id=None, pc_name=None, from_ts=None, to_ts=None, country=None, os_name=None, group_id=None: [],
     )
     monkeypatch.setattr(db, "get_report", lambda rid: None)
     monkeypatch.setattr(db, "list_users", lambda: [dict(user)])
@@ -162,6 +162,7 @@ def test_list_reports_passes_filters(monkeypatch):
         to_ts=None,
         country=None,
         os_name=None,
+        group_id=None,
     ):
         seen["limit"] = limit
         seen["device_id"] = device_id
@@ -170,6 +171,7 @@ def test_list_reports_passes_filters(monkeypatch):
         seen["to_ts"] = to_ts
         seen["country"] = country
         seen["os_name"] = os_name
+        seen["group_id"] = group_id
         return [
             {
                 "_id": "1",
@@ -194,6 +196,7 @@ def test_list_reports_passes_filters(monkeypatch):
         "to_ts": 200.0,
         "country": "BD",
         "os_name": "Darwin",
+        "group_id": None,
     }
     assert resp.json()["total"] == 1
     assert resp.json()["reports"][0]["pc_name"] == "Office-PC-3"
@@ -236,6 +239,116 @@ def test_list_reports_with_jwt(monkeypatch):
     resp = client.get("/reports", headers=_auth_header())
     assert resp.status_code == 200
     assert resp.json()["total"] == 0
+
+
+def test_list_reports_with_group_id(monkeypatch):
+    _patch_db(monkeypatch)
+    seen = {}
+    monkeypatch.setattr(db, "get_group", lambda gid: {"_id": gid, "name": "Ops", "machine_keys": ["id:dev-1"]})
+
+    def fake_list(
+        limit=20,
+        device_id=None,
+        pc_name=None,
+        from_ts=None,
+        to_ts=None,
+        country=None,
+        os_name=None,
+        group_id=None,
+    ):
+        seen["group_id"] = group_id
+        return []
+
+    monkeypatch.setattr(db, "list_reports", fake_list)
+    resp = client.get("/reports?group_id=64b00000000000000000000c", headers=_auth_header())
+    assert resp.status_code == 200
+    assert seen["group_id"] == "64b00000000000000000000c"
+
+
+def test_export_reports_requires_jwt(monkeypatch):
+    _patch_db(monkeypatch)
+    resp = client.get("/reports/export")
+    assert resp.status_code == 401
+
+
+def test_export_reports_csv(monkeypatch):
+    _patch_db(monkeypatch)
+    sample = {
+        "_id": "1",
+        "pc_name": "Office-PC-3",
+        "device_id": "dev-2",
+        "os": {"system": "Windows", "hostname": "office"},
+        "private_ip": "192.168.1.5",
+        "resources": {"cpu_percent": 12.5, "ram_percent": 44.0},
+        "location": {"country": "Bangladesh", "country_code": "BD"},
+        "created_at": 1755000000.0,
+    }
+    monkeypatch.setattr(db, "list_reports", lambda *a, **kw: [sample])
+    resp = client.get("/reports/export", headers=_auth_header())
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert "attachment" in resp.headers["content-disposition"]
+    body = resp.text
+    assert body.startswith("created_at,")
+    assert "pc_name" in body
+    assert "device_id" in body
+    assert "Office-PC-3" in body
+    assert "dev-2" in body
+
+
+def test_export_reports_flattens_nested_and_lists(monkeypatch):
+    _patch_db(monkeypatch)
+    sample = {
+        "_id": "1",
+        "pc_name": "mac",
+        "uptime": {"uptime_seconds": 3600.0, "by_day": {"2026-08-12": 3600.0}},
+        "mac_addresses": [{"interface": "en0", "mac": "aa:bb"}],
+        "disk": {"devices": [{"device": "disk0", "total": 100}]},
+        "created_at": 1755000000.0,
+    }
+    monkeypatch.setattr(db, "list_reports", lambda *a, **kw: [sample])
+    resp = client.get("/reports/export", headers=_auth_header())
+    lines = resp.text.strip().splitlines()
+    header = lines[0]
+    row = lines[1]
+    assert "uptime.uptime_seconds" in header
+    assert "mac_addresses" in header
+    assert "disk.devices" in header
+    assert '"interface"' in row  # list serialized as JSON
+
+
+def test_export_reports_includes_summary_columns(monkeypatch):
+    _patch_db(monkeypatch)
+    sample = {
+        "_id": "1",
+        "pc_name": "mac",
+        "uptime": {"by_day": {"2026-08-10": 86400.0, "2026-08-11": 43200.0}},
+        "network": {"bytes_sent": 1000, "bytes_recv": 2000},
+        "printers": {
+            "usb": [{"name": "p1", "port": "usb", "print_count": 5}, {"name": "p2", "port": "usb"}]
+        },
+        "health": {
+            "disks": [
+                {"name": "SSD", "media_type": "ssd", "health": "ok"},
+                {"name": "HDD", "media_type": "hdd", "health": "fail"},
+            ],
+            "battery": {"health_percent": 82, "cycle_count": 471, "condition": "Good"},
+        },
+        "disk": {"devices": [{"device": "disk0", "total": 100, "used": 50}]},
+        "created_at": 1755000000.0,
+    }
+    monkeypatch.setattr(db, "list_reports", lambda *a, **kw: [sample])
+    resp = client.get("/reports/export", headers=_auth_header())
+    body = resp.text
+    assert "summary.total_uptime_seconds" in body
+    assert "summary.network_total_bytes" in body
+    assert "summary.print_count_total" in body
+    assert "summary.battery_health_percent" in body
+    line = body.strip().splitlines()[1]
+    # total uptime 86400+43200 = 129600; prints 5; network 3000; disk 50%
+    assert "129600" in line
+    assert "3000" in line
+    assert ",5," in line or line.endswith(",5") or ",5,".replace(",5", ",5,") in line
 
 
 def test_get_report_not_found(monkeypatch):

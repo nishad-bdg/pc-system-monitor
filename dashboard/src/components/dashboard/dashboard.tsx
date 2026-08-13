@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {
@@ -15,6 +14,7 @@ import {
 } from "@/lib/api";
 import { SignOutButton } from "./sign-out-button";
 import { MachineDetail } from "./machine-detail";
+import { SidebarNav } from "@/components/sidebar-nav";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -80,29 +80,7 @@ export function Dashboard() {
             {machines.length} machine{machines.length === 1 ? "" : "s"} ·{" "}
             {reports.length} report{reports.length === 1 ? "" : "s"}
           </p>
-          <div className="mt-3 flex gap-2 text-xs">
-            <span className="rounded-md bg-blue-600 px-2 py-1 font-medium text-white">
-              Fleet
-            </span>
-            <Link
-              href="/reports"
-              className="rounded-md px-2 py-1 font-medium text-slate-300 hover:bg-slate-900 hover:text-white"
-            >
-              Reports
-            </Link>
-            <Link
-              href="/api-keys"
-              className="rounded-md px-2 py-1 font-medium text-slate-300 hover:bg-slate-900 hover:text-white"
-            >
-              API Keys
-            </Link>
-            <Link
-              href="/groups"
-              className="rounded-md px-2 py-1 font-medium text-slate-300 hover:bg-slate-900 hover:text-white"
-            >
-              Groups
-            </Link>
-          </div>
+          <SidebarNav current="fleet" />
         </div>
 
         <div className="px-3 pt-3">

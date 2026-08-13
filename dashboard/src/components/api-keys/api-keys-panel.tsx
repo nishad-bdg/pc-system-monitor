@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {
@@ -13,6 +12,7 @@ import {
   updateApiKey,
 } from "@/lib/api";
 import { SignOutButton } from "@/components/dashboard/sign-out-button";
+import { SidebarNav } from "@/components/sidebar-nav";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -130,23 +130,7 @@ export function ApiKeysPanel() {
           <p className="mt-1 text-xs text-slate-400">
             {keys.length} key{keys.length === 1 ? "" : "s"} for desktop agents
           </p>
-          <div className="mt-3 flex gap-2 text-xs">
-            <Link
-              href="/dashboard"
-              className="rounded-md px-2 py-1 font-medium text-slate-300 hover:bg-slate-900 hover:text-white"
-            >
-              Fleet
-            </Link>
-            <Link
-              href="/reports"
-              className="rounded-md px-2 py-1 font-medium text-slate-300 hover:bg-slate-900 hover:text-white"
-            >
-              Reports
-            </Link>
-            <span className="rounded-md bg-blue-600 px-2 py-1 font-medium text-white">
-              API Keys
-            </span>
-          </div>
+          <SidebarNav current="keys" />
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 py-4">

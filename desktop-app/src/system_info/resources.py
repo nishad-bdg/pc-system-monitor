@@ -1,3 +1,8 @@
+import json
+import os
+import platform
+import re
+import subprocess
 from dataclasses import dataclass
 
 import psutil
@@ -14,6 +19,8 @@ class SystemResources:
     ram_available: int
     ram_free: int
     ram_percent: float
+    ram_speed_mhz: int | None
+    ram_type: str | None
     swap_total: int
     swap_used: int
     swap_percent: float
@@ -30,6 +37,8 @@ class SystemResources:
             "ram_available": self.ram_available,
             "ram_free": self.ram_free,
             "ram_percent": self.ram_percent,
+            "ram_speed_mhz": self.ram_speed_mhz,
+            "ram_type": self.ram_type,
             "swap_total": self.swap_total,
             "swap_used": self.swap_used,
             "swap_percent": self.swap_percent,
@@ -57,6 +66,117 @@ def _collect_battery() -> dict | None:
     }
 
 
+def _run(cmd: list[str], timeout: float = 15.0) -> str:
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout or ""
+
+
+# Windows SMBIOSMemoryType codes -> DDR generation label
+_SMBIOS_MEMORY_TYPES = {
+    24: "DDR3",
+    26: "DDR4",
+    27: "DDR4E",
+    28: "LPDDR3",
+    29: "LPDDR4",
+    34: "DDR5",
+    35: "LPDDR5",
+}
+
+
+def _collect_macos_ram() -> tuple[int | None, str | None]:
+    """RAM speed (MHz) + type via `system_profiler SPMemoryDataType`."""
+    raw = _run(["system_profiler", "SPMemoryDataType", "-json"])
+    if not raw.strip():
+        return None, None
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None, None
+
+    speed: int | None = None
+    typ: str | None = None
+    for item in payload.get("SPMemoryDataType", []):
+        if not isinstance(item, dict):
+            continue
+        # Modern macOS (Apple Silicon): fields at the top level of each item.
+        raw_type_new = str(item.get("dimm_type") or "").strip()
+        if raw_type_new and typ is None:
+            typ = raw_type_new
+        # Intel macOS: slots list with per-DIMM speed + type.
+        for slot in item.get("SPSlotInfoList", []) or []:
+            if not isinstance(slot, dict):
+                continue
+            raw_speed = str(slot.get("spps_memory_speed") or "").strip()
+            match = re.search(r"(\d+(?:\.\d+)?)", raw_speed)
+            if match and speed is None:
+                speed = int(float(match.group(1)))
+            raw_type = str(slot.get("spps_memory_type") or "").strip()
+            if raw_type and typ is None:
+                typ = raw_type
+    return speed, typ
+
+
+def _collect_windows_ram() -> tuple[int | None, str | None]:
+    """RAM speed (MHz) + type via Win32_PhysicalMemory."""
+    raw = _run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            "Get-CimInstance Win32_PhysicalMemory | "
+            "Select-Object Speed, SMBIOSMemoryType | ConvertTo-Json",
+        ]
+    )
+    if not raw.strip():
+        return None, None
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None, None
+    if isinstance(payload, dict):
+        payload = [payload]
+
+    speed: int | None = None
+    typ: str | None = None
+    for mod in payload:
+        if not isinstance(mod, dict):
+            continue
+        try:
+            if speed is None and mod.get("Speed"):
+                speed = int(mod["Speed"])
+        except (TypeError, ValueError):
+            pass
+        if typ is None:
+            code = mod.get("SMBIOSMemoryType")
+            try:
+                code = int(code)
+            except (TypeError, ValueError):
+                code = None
+            if code in _SMBIOS_MEMORY_TYPES:
+                typ = _SMBIOS_MEMORY_TYPES[code]
+    return speed, typ
+
+
+def _collect_ram_speed() -> tuple[int | None, str | None]:
+    """Best-effort RAM speed (MHz) + type. Falls back to (None, None)."""
+    if os.name == "nt":
+        return _collect_windows_ram()
+    if platform.system() == "Darwin":
+        return _collect_macos_ram()
+    return None, None
+
+
 def collect_resources() -> SystemResources:
     """Collect CPU and memory stats via psutil (cross-platform mac/Windows)."""
     vm = psutil.virtual_memory()
@@ -66,6 +186,8 @@ def collect_resources() -> SystemResources:
         cpu_freq_mhz = freq.current if freq else None
     except (NotImplementedError, OSError):
         cpu_freq_mhz = None
+
+    ram_speed_mhz, ram_type = _collect_ram_speed()
 
     return SystemResources(
         cpu_count=psutil.cpu_count(logical=True) or 0,
@@ -77,6 +199,8 @@ def collect_resources() -> SystemResources:
         ram_available=vm.available,
         ram_free=vm.free,
         ram_percent=vm.percent,
+        ram_speed_mhz=ram_speed_mhz,
+        ram_type=ram_type,
         swap_total=sw.total,
         swap_used=sw.used,
         swap_percent=sw.percent,

@@ -20,6 +20,7 @@ import {
 } from "@/lib/api";
 import { SignOutButton } from "@/components/dashboard/sign-out-button";
 import { MachineDetail } from "@/components/dashboard/machine-detail";
+import { SidebarNav } from "@/components/sidebar-nav";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -171,29 +172,7 @@ export function ReportsBrowser() {
             {machines.length} PC{machines.length === 1 ? "" : "s"} · sorted by{" "}
             {applied.sort.replace("_", " ")}
           </p>
-          <div className="mt-3 flex gap-2 text-xs">
-            <Link
-              href="/dashboard"
-              className="rounded-md px-2 py-1 font-medium text-slate-300 hover:bg-slate-900 hover:text-white"
-            >
-              Fleet
-            </Link>
-            <span className="rounded-md bg-blue-600 px-2 py-1 font-medium text-white">
-              Reports
-            </span>
-            <Link
-              href="/api-keys"
-              className="rounded-md px-2 py-1 font-medium text-slate-300 hover:bg-slate-900 hover:text-white"
-            >
-              API Keys
-            </Link>
-            <Link
-              href="/groups"
-              className="rounded-md px-2 py-1 font-medium text-slate-300 hover:bg-slate-900 hover:text-white"
-            >
-              Groups
-            </Link>
-          </div>
+          <SidebarNav current="reports" />
         </div>
 
         <form

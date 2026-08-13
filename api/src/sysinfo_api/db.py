@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from functools import lru_cache
+import re
 
 from bson import ObjectId
 from pymongo import MongoClient
@@ -52,6 +53,7 @@ def list_reports(
     to_ts: float | None = None,
     country: str | None = None,
     os_name: str | None = None,
+    group_id: str | None = None,
 ) -> list[dict]:
     records: list[dict] = []
     clauses: list[dict] = []
@@ -79,6 +81,10 @@ def list_reports(
         )
     if os_name:
         clauses.append({"os.system": {"$regex": os_name, "$options": "i"}})
+    if group_id:
+        group_clause = _group_filter(group_id)
+        if group_clause:
+            clauses.append(group_clause)
 
     if not clauses:
         query: dict = {}
@@ -243,6 +249,59 @@ def create_group(name: str) -> ObjectId | None:
         return result.inserted_id
     except (ConnectionFailure, PyMongoError):
         return None
+
+
+def get_group(group_id: str) -> dict | None:
+    """Return a group by id (with _id stringified), or None."""
+    try:
+        doc = _groups().find_one({"_id": ObjectId(group_id)})
+    except (ConnectionFailure, PyMongoError, ValueError):
+        return None
+    if doc:
+        doc["_id"] = str(doc["_id"])
+    return doc
+
+
+def _group_filter(group_id: str) -> dict | None:
+    """Build a MongoDB $or filter matching reports whose machine belongs to a group.
+
+    Machine keys look like id:<device_id> / mac:<normalized> / name:<name>.
+    """
+    group = get_group(group_id)
+    if not group:
+        return None
+    keys = group.get("machine_keys") or []
+    if not keys:
+        return None
+    ors: list[dict] = []
+    for key in keys:
+        if key.startswith("id:"):
+            ors.append({"device_id": key[3:]})
+        elif key.startswith("mac:"):
+            mac = key[3:]
+            regex = {"$regex": re.escape(mac), "$options": "i"}
+            ors.append(
+                {
+                    "$or": [
+                        {"mac_address": regex},
+                        {"mac_addresses.mac": regex},
+                    ]
+                }
+            )
+        elif key.startswith("name:"):
+            name = key[5:]
+            regex = {"$regex": re.escape(name), "$options": "i"}
+            ors.append(
+                {
+                    "$or": [
+                        {"pc_name": regex},
+                        {"os.hostname": regex},
+                    ]
+                }
+            )
+    if not ors:
+        return None
+    return {"$or": ors} if len(ors) > 1 else ors[0]
 
 
 def list_groups() -> list[dict]:

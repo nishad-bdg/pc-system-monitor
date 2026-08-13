@@ -36,6 +36,8 @@ export interface Report {
     ram_available?: number;
     ram_free?: number;
     ram_percent?: number;
+    ram_speed_mhz?: number | null;
+    ram_type?: string | null;
     swap_total?: number;
     swap_used?: number;
     swap_percent?: number;
@@ -154,6 +156,7 @@ export async function fetchReports(
     toTs?: number;
     country?: string;
     os?: string;
+    groupId?: string;
   },
 ): Promise<ReportsResponse> {
   const params = new URLSearchParams({ limit: String(limit) });
@@ -163,12 +166,44 @@ export async function fetchReports(
   if (filters?.toTs != null) params.set("to_ts", String(filters.toTs));
   if (filters?.country) params.set("country", filters.country);
   if (filters?.os) params.set("os", filters.os);
+  if (filters?.groupId) params.set("group_id", filters.groupId);
   const res = await fetch(`${apiUrl}/reports?${params}`, {
     headers: { Authorization: `Bearer ${apiToken}` },
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`API error ${res.status}`);
   return res.json();
+}
+
+/** Export matching reports as a CSV blob (from /reports/export). */
+export async function exportReportsCsv(
+  apiUrl: string,
+  apiToken: string,
+  filters?: {
+    deviceId?: string;
+    pcName?: string;
+    fromTs?: number;
+    toTs?: number;
+    country?: string;
+    os?: string;
+    groupId?: string;
+  },
+  limit = 10000,
+): Promise<Blob> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (filters?.deviceId) params.set("device_id", filters.deviceId);
+  if (filters?.pcName) params.set("pc_name", filters.pcName);
+  if (filters?.fromTs != null) params.set("from_ts", String(filters.fromTs));
+  if (filters?.toTs != null) params.set("to_ts", String(filters.toTs));
+  if (filters?.country) params.set("country", filters.country);
+  if (filters?.os) params.set("os", filters.os);
+  if (filters?.groupId) params.set("group_id", filters.groupId);
+  const res = await fetch(`${apiUrl}/reports/export?${params}`, {
+    headers: { Authorization: `Bearer ${apiToken}` },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.blob();
 }
 
 /** Encode machine key for URL path segment. */
