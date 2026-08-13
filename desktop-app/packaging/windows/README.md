@@ -12,6 +12,22 @@ release manifest URL** (not live `git pull`).
 
 ## 1. Build the exe
 
+**Option A — GitHub Actions (no Windows machine needed).**
+
+The repo ships a workflow (`.github/workflows/windows-release.yml`) that builds the
+exe, compiles the installer with Inno Setup, and creates a GitHub Release with
+`system-info.exe`, `SystemInfoSetup-<version>.exe`, and `release-manifest.json`.
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0   # version taken from the tag
+# or: GitHub -> Actions -> Windows Release -> Run workflow (enter version)
+```
+
+Point `SYSTEM_INFO_UPDATE_URL` at:
+`https://github.com/<owner>/<repo>/releases/download/v<version>/release-manifest.json`
+
+**Option B — local Windows machine.**
+
 ```powershell
 cd desktop-app
 .\packaging\windows\build.ps1

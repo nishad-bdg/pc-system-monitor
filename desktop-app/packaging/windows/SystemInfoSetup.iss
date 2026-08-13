@@ -11,7 +11,9 @@
 ;   - Creates Task Scheduler job SystemInfoReport every hour
 
 #define MyAppName "System Info Reporter"
-#define MyAppVersion "0.1.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.1.0"
+#endif
 #define MyAppPublisher "RGM"
 #define MyAppExeName "system-info.exe"
 

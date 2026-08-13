@@ -1,0 +1,114 @@
+# Builds the Windows exe + Inno Setup installer and publishes a GitHub Release
+# (exe, installer, and the auto-update manifest).
+#
+# Trigger:
+#   - Manual:  Actions -> "Windows Release" -> Run workflow (set version, e.g. 0.2.0)
+#   - Tag push: git tag v0.2.0 && git push origin v0.2.0   (version taken from tag)
+#
+# PCs with SYSTEM_INFO_UPDATE_URL pointing at
+#   https://github.com/<owner>/<repo>/releases/download/v<version>/release-manifest.json
+# will auto-update on their next hourly run.
+name: Windows Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (e.g. 0.2.0). Leave default when pushing a tag."
+        required: false
+        default: "0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $v = "${{ github.event.inputs.version }}".Trim().TrimStart('v')
+          } else {
+            $tag = "${{ github.ref_name }}"
+            $v = if ($tag -like "v*") { $tag.Substring(1) } else { $tag }
+          }
+          if (-not $v) { $v = "0.1.0" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.0.0
+
+      - name: Stamp version
+        shell: pwsh
+        run: |
+          Set-Content -NoNewline -Path desktop-app/src/system_info/version.py `
+            -Value '__version__ = "${{ steps.ver.outputs.version }}"' -Encoding utf8
+
+      - name: Build exe (PyInstaller)
+        shell: pwsh
+        working-directory: desktop-app
+        run: .\packaging\windows\build.ps1
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          winget install --id JRSoftware.InnoSetup -e `
+            --accept-source-agreements --accept-package-agreements `
+            --disable-interactivity --silent
+          $candidates = @(
+            "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
+            "C:\Program Files\Inno Setup 6\ISCC.exe"
+          )
+          $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "ISCC.exe not found after winget install" }
+          Add-Content $env:GITHUB_PATH (Split-Path $iscc)
+
+      - name: Compile installer (Inno Setup)
+        shell: pwsh
+        working-directory: desktop-app
+        run: iscc "/DMyAppVersion=${{ steps.ver.outputs.version }}" packaging\windows\SystemInfoSetup.iss
+
+      - name: Compute SHA256
+        id: sha
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash -Algorithm SHA256 desktop-app\dist\system-info.exe).Hash.ToLower()
+          "sha=$h" >> $env:GITHUB_OUTPUT
+
+      - name: Write release manifest
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $manifest = [ordered]@{
+            version = $v
+            windows = [ordered]@{
+              url    = "https://github.com/${{ github.repository }}/releases/download/v$v/system-info.exe"
+              sha256 = "${{ steps.sha.outputs.sha }}"
+            }
+          }
+          $manifest | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 release-manifest.json
+          Get-Content release-manifest.json
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          gh release create "v$v" `
+            "desktop-app\dist\system-info.exe" `
+            "desktop-app\dist\installer\SystemInfoSetup-$v.exe" `
+            "release-manifest.json" `
+            --repo "${{ github.repository }}" `
+            --title "System Info $v" `
+            --notes "Windows build $v (exe + installer + auto-update manifest)."
