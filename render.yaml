@@ -3,7 +3,7 @@ services:
   - type: web
     name: sysinfo-api
     runtime: docker
-    repo: https://github.com/OWNER/REPO
+    repo: https://github.com/nishad-bdg/pc-system-monitor
     plan: free
     region: singapore
     dockerContext: ./api
@@ -29,7 +29,7 @@ services:
   - type: web
     name: sysinfo-dashboard
     runtime: docker
-    repo: https://github.com/OWNER/REPO
+    repo: https://github.com/nishad-bdg/pc-system-monitor
     plan: free
     region: singapore
     dockerContext: ./dashboard
