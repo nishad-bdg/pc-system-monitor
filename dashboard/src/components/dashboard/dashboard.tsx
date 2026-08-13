@@ -13,6 +13,7 @@ import {
   groupOf,
 } from "@/lib/api";
 import { SignOutButton } from "./sign-out-button";
+import { ChangePasswordButton } from "./change-password-button";
 import { MachineDetail } from "./machine-detail";
 import { SidebarNav } from "@/components/sidebar-nav";
 
@@ -162,16 +163,19 @@ export function Dashboard() {
         </nav>
 
         <div className="border-t border-slate-800 p-3">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => refetch()}
-              className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
-              disabled={isFetching}
-            >
-              {isFetching ? "Refreshing…" : "Refresh"}
-            </button>
-            <SignOutButton />
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => refetch()}
+                className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                disabled={isFetching}
+              >
+                {isFetching ? "Refreshing…" : "Refresh"}
+              </button>
+              <SignOutButton />
+            </div>
+            <ChangePasswordButton />
           </div>
         </div>
       </aside>

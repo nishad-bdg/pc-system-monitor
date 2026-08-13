@@ -30,6 +30,8 @@ docs/          Specs/plans (superpowers)
 
 - **Desktop → API:** `Authorization: Bearer sk-...` (API key). Create via `POST /api-keys` (admin JWT) or the dashboard `/api-keys` page. Full secret shown only once at create time (auto-generated `sk-`); can rename / toggle active / delete.
 - **Dashboard → API:** NextAuth Credentials → `POST /auth/token` → JWT stored on session as `apiToken`. If the API is restarted and the stored JWT is rejected (401 on `/reports`), **sign out and back in** to refresh the token.
+- **Refresh tokens:** `POST /auth/token` also returns `refresh_token` (opaque, 30 days, stored hashed in Mongo `refresh_tokens` collection). `POST /auth/refresh` rotates it for a new access + refresh pair (old one revoked). `POST /auth/revoke` revokes a refresh token. The dashboard (`auth.ts`) stores the refresh token in the NextAuth JWT and silently calls `/auth/refresh` ~60s before the access token expires — no manual sign-in needed unless the refresh token itself is invalidated.
+- **Password change:** `POST /auth/change-password` (JWT) takes `current_password` + `new_password` (min 6 chars); verifies current, updates the hash, and revokes **all** refresh tokens so other sessions must re-login. UI: "Change password" button in the Fleet sidebar footer (`change-password-button.tsx`, modal).
 
 ## Data flow
 
@@ -249,6 +251,16 @@ cd dashboard && pnpm build
 ```
 
 After pulling API changes: restart `uv run sysinfo-api`, then run desktop with a valid API key and refresh the dashboard.
+
+---
+
+## Render deployment
+
+See `docs/render-deploy.md` + `render.yaml` (blueprint) + `api/Dockerfile` + `dashboard/Dockerfile`.
+
+- **API** (`api/Dockerfile`): `python:3.14-slim`, `uv sync --frozen`, uvicorn on `0.0.0.0:$PORT`. Requires MongoDB Atlas URI via `SYSTEM_INFO_MONGO_URI`.
+- **Dashboard** (`dashboard/Dockerfile`): multi-stage `node:24` + pnpm; `NEXT_PUBLIC_API_URL` is a build arg (baked at build time). Runtime env: `API_URL`, `NEXT_PUBLIC_API_URL`, `AUTH_SECRET`, `NEXTAUTH_URL`.
+- Both images tested locally with Docker (API `/health` responds, dashboard `/login` → 200).
 
 ---
 

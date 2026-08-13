@@ -9,10 +9,12 @@ MONGO_COLLECTION = "reports"
 MONGO_USERS = "users"
 MONGO_API_KEYS = "api_keys"
 MONGO_GROUPS = "groups"
+MONGO_REFRESH_TOKENS = "refresh_tokens"
 
 JWT_SECRET = os.getenv("JWT_SECRET", "dev-only-secret-change-me-32bytes-min")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
+JWT_REFRESH_EXPIRE_DAYS = int(os.getenv("JWT_REFRESH_EXPIRE_DAYS", "30"))
 
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")

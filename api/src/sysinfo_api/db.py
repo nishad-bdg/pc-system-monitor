@@ -172,6 +172,24 @@ def delete_user(user_id: str) -> bool:
         return False
 
 
+def update_user_password(user_id: str, password_hash: str) -> bool:
+    try:
+        result = _users().update_one(
+            {"_id": ObjectId(user_id)}, {"$set": {"password_hash": password_hash}}
+        )
+        return result.matched_count == 1
+    except Exception:
+        return False
+
+
+def get_user_password_hash(user_id: str) -> str | None:
+    try:
+        doc = _users().find_one({"_id": ObjectId(user_id)}, {"password_hash": 1})
+        return doc.get("password_hash") if doc else None
+    except Exception:
+        return None
+
+
 def create_api_key(name: str, key_hash: str, prefix: str) -> ObjectId | None:
     try:
         result = _api_keys().insert_one(
@@ -339,6 +357,70 @@ def delete_group(group_id: str) -> bool:
         return result.deleted_count == 1
     except Exception:
         return False
+
+
+# ---- refresh tokens ----
+
+def _refresh_tokens():
+    return _db()[config.MONGO_REFRESH_TOKENS]
+
+
+def save_refresh_token(token_hash: str, user_id: str, expires_at) -> bool:
+    """Persist a (hashed) refresh token. Returns True on success."""
+    try:
+        _refresh_tokens().insert_one(
+            {
+                "token_hash": token_hash,
+                "user_id": user_id,
+                "expires_at": expires_at,
+                "revoked": False,
+                "created_at": datetime.now(UTC).timestamp(),
+            }
+        )
+        return True
+    except (ConnectionFailure, PyMongoError):
+        return False
+
+
+def find_refresh_token(token_hash: str) -> dict | None:
+    """Look up a refresh token by its hash. None if missing / Mongo down."""
+    try:
+        doc = _refresh_tokens().find_one({"token_hash": token_hash})
+    except (ConnectionFailure, PyMongoError):
+        return None
+    if doc:
+        doc["_id"] = str(doc["_id"])
+    return doc
+
+
+def revoke_refresh_token(token_hash: str) -> bool:
+    """Mark a refresh token as revoked (logout / rotation)."""
+    try:
+        result = _refresh_tokens().update_one(
+            {"token_hash": token_hash}, {"$set": {"revoked": True}}
+        )
+        return result.matched_count == 1
+    except (ConnectionFailure, PyMongoError):
+        return False
+
+
+def revoke_all_refresh_tokens_for_user(user_id: str) -> bool:
+    """Revoke every refresh token belonging to a user (e.g. password change)."""
+    try:
+        _refresh_tokens().update_many(
+            {"user_id": user_id}, {"$set": {"revoked": True}}
+        )
+        return True
+    except (ConnectionFailure, PyMongoError):
+        return False
+
+
+def get_refresh_store() -> list | None:
+    """Return all refresh tokens (test/audit helper). None when Mongo is down."""
+    try:
+        return list(_refresh_tokens().find({}))
+    except (ConnectionFailure, PyMongoError):
+        return None
 
 
 def ping() -> bool:

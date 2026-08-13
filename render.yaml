@@ -1,0 +1,53 @@
+services:
+  # ---- FastAPI backend ----
+  - type: web
+    name: sysinfo-api
+    runtime: docker
+    repo: https://github.com/OWNER/REPO
+    plan: free
+    region: singapore
+    dockerContext: ./api
+    dockerfilePath: ./api/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: SYSTEM_INFO_MONGO_URI
+        value: mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/
+      - key: SYSTEM_INFO_MONGO_DB
+        value: system_info
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRE_MINUTES
+        value: 60
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        value: change-me-on-render
+      - key: CORS_ORIGINS
+        value: https://sysinfo-dashboard.onrender.com
+
+  # ---- Next.js admin dashboard ----
+  - type: web
+    name: sysinfo-dashboard
+    runtime: docker
+    repo: https://github.com/OWNER/REPO
+    plan: free
+    region: singapore
+    dockerContext: ./dashboard
+    dockerfilePath: ./dashboard/Dockerfile
+    healthCheckPath: /login
+    buildFilter:
+      paths:
+        - dashboard/**
+        - render.yaml
+    build:
+      dockerBuildArgs:
+        NEXT_PUBLIC_API_URL: https://sysinfo-api.onrender.com
+    envVars:
+      - key: API_URL
+        value: https://sysinfo-api.onrender.com
+      - key: NEXT_PUBLIC_API_URL
+        value: https://sysinfo-api.onrender.com
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: NEXTAUTH_URL
+        value: https://sysinfo-dashboard.onrender.com

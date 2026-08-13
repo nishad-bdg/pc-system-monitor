@@ -24,6 +24,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
 
 
@@ -48,6 +49,31 @@ def create_access_token(user_id: str, role: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=config.JWT_EXPIRE_MINUTES)
     payload = {"sub": user_id, "role": role, "exp": expire}
     return jwt.encode(payload, config.JWT_SECRET, algorithm=config.JWT_ALGORITHM)
+
+
+def create_refresh_token() -> str:
+    """Generate an opaque refresh token (kept hashed at rest in Mongo)."""
+    return secrets.token_urlsafe(48)
+
+
+def create_refresh_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def refresh_expires_at() -> datetime:
+    return datetime.now(timezone.utc) + timedelta(days=config.JWT_REFRESH_EXPIRE_DAYS)
+
+
+def issue_tokens(user_id: str, role: str) -> TokenResponse:
+    """Issue an access + refresh token pair, persisting the refresh token."""
+    refresh = create_refresh_token()
+    db.save_refresh_token(
+        create_refresh_token_hash(refresh), user_id, refresh_expires_at()
+    )
+    return TokenResponse(
+        access_token=create_access_token(user_id, role),
+        refresh_token=refresh,
+    )
 
 
 def decode_access_token(token: str) -> dict:

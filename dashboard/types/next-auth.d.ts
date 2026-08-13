@@ -10,11 +10,13 @@ declare module "next-auth" {
 
   interface User {
     apiToken?: string;
+    refreshToken?: string;
   }
 }
 
 declare module "next-auth/jwt" {
   interface JWT {
     apiToken?: string;
+    refreshToken?: string;
   }
 }

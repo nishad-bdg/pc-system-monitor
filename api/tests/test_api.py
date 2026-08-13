@@ -6,6 +6,9 @@ from sysinfo_api.main import app
 client = TestClient(app)
 
 
+_REFRESH_STORE: dict[str, dict] = {}
+
+
 def _patch_db(monkeypatch, user=None):
     user = user or {
         "_id": "64b000000000000000000001",
@@ -28,6 +31,40 @@ def _patch_db(monkeypatch, user=None):
     monkeypatch.setattr(db, "list_users", lambda: [dict(user)])
     monkeypatch.setattr(db, "list_api_keys", lambda: [])
     monkeypatch.setattr(db, "list_groups", lambda: [])
+
+    # Refresh-token store: in-memory, shared across tests in this module.
+    global _REFRESH_STORE
+    _REFRESH_STORE.clear()
+
+    def fake_save(token_hash, user_id, expires_at):
+        _REFRESH_STORE[token_hash] = {"token_hash": token_hash, "user_id": user_id, "expires_at": expires_at, "revoked": False}
+        return True
+
+    def fake_find(token_hash):
+        rec = _REFRESH_STORE.get(token_hash)
+        return dict(rec) if rec else None
+
+    def fake_revoke(token_hash):
+        if token_hash in _REFRESH_STORE:
+            _REFRESH_STORE[token_hash]["revoked"] = True
+            return True
+        return False
+
+    monkeypatch.setattr(db, "save_refresh_token", fake_save)
+    monkeypatch.setattr(db, "find_refresh_token", fake_find)
+    monkeypatch.setattr(db, "revoke_refresh_token", fake_revoke)
+    monkeypatch.setattr(db, "revoke_all_refresh_tokens_for_user", lambda uid: True)
+
+    def _current_store():
+        return _REFRESH_STORE
+
+    monkeypatch.setattr(db, "get_refresh_store", _current_store)
+
+    # Password helpers.
+    monkeypatch.setattr(db, "update_user_password", lambda uid, h: True)
+    monkeypatch.setattr(
+        db, "get_user_password_hash", lambda uid: user["password_hash"] if user else None
+    )
 
 
 def _auth_header(sub="64b000000000000000000001", role="admin"):
@@ -66,7 +103,9 @@ def test_login_success(monkeypatch):
     })
     resp = client.post("/auth/token", data={"username": "admin", "password": "secret"})
     assert resp.status_code == 200
-    assert "access_token" in resp.json()
+    body = resp.json()
+    assert "access_token" in body
+    assert "refresh_token" in body
 
 
 def test_login_wrong_password(monkeypatch):
@@ -77,6 +116,127 @@ def test_login_wrong_password(monkeypatch):
         "password_hash": security.hash_password("secret"),
     })
     resp = client.post("/auth/token", data={"username": "admin", "password": "nope"})
+    assert resp.status_code == 401
+
+
+def test_refresh_success(monkeypatch):
+    import hashlib
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "admin",
+        "role": "admin",
+        "password_hash": security.hash_password("secret"),
+    })
+    login = client.post("/auth/token", data={"username": "admin", "password": "secret"}).json()
+    first_refresh = login["refresh_token"]
+    first_hash = hashlib.sha256(first_refresh.encode()).hexdigest()
+
+    resp = client.post("/auth/refresh", json={"refresh_token": first_refresh})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "access_token" in body
+    assert "refresh_token" in body
+    # Rotation: the old token is now revoked.
+    from sysinfo_api import db as d
+    assert d.get_refresh_store()[first_hash]["revoked"] is True
+
+
+def test_refresh_invalid_token(monkeypatch):
+    _patch_db(monkeypatch)
+    resp = client.post("/auth/refresh", json={"refresh_token": "not-a-real-token"})
+    assert resp.status_code == 401
+
+
+def test_refresh_revoked_token(monkeypatch):
+    import hashlib
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "admin",
+        "role": "admin",
+        "password_hash": security.hash_password("secret"),
+    })
+    login = client.post("/auth/token", data={"username": "admin", "password": "secret"}).json()
+    refresh = login["refresh_token"]
+    # Revoke it, then try to use it.
+    client.post("/auth/revoke", json={"refresh_token": refresh}, headers=_auth_header())
+    resp = client.post("/auth/refresh", json={"refresh_token": refresh})
+    assert resp.status_code == 401
+
+
+def test_revoke(monkeypatch):
+    import hashlib
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "admin",
+        "role": "admin",
+        "password_hash": security.hash_password("secret"),
+    })
+    login = client.post("/auth/token", data={"username": "admin", "password": "secret"}).json()
+    refresh = login["refresh_token"]
+    resp = client.post("/auth/revoke", json={"refresh_token": refresh}, headers=_auth_header())
+    assert resp.status_code == 200
+    from sysinfo_api import db as d
+    store = d.get_refresh_store()
+    h = hashlib.sha256(refresh.encode()).hexdigest()
+    assert store[h]["revoked"] is True
+
+
+# ---- password change ----
+
+def test_change_password_success(monkeypatch):
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "admin",
+        "role": "admin",
+        "password_hash": security.hash_password("oldpass"),
+    })
+    resp = client.post("/auth/change-password", json={
+        "current_password": "oldpass",
+        "new_password": "newpass99",
+    }, headers=_auth_header())
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+
+
+def test_change_password_wrong_current(monkeypatch):
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "admin",
+        "role": "admin",
+        "password_hash": security.hash_password("oldpass"),
+    })
+    resp = client.post("/auth/change-password", json={
+        "current_password": "wrong",
+        "new_password": "newpass99",
+    }, headers=_auth_header())
+    assert resp.status_code == 401
+
+
+def test_change_password_short(monkeypatch):
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "admin",
+        "role": "admin",
+        "password_hash": security.hash_password("oldpass"),
+    })
+    resp = client.post("/auth/change-password", json={
+        "current_password": "oldpass",
+        "new_password": "abc",
+    }, headers=_auth_header())
+    assert resp.status_code == 400
+
+
+def test_change_password_requires_auth(monkeypatch):
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "admin",
+        "role": "admin",
+        "password_hash": security.hash_password("oldpass"),
+    })
+    resp = client.post("/auth/change-password", json={
+        "current_password": "oldpass",
+        "new_password": "newpass99",
+    })
     assert resp.status_code == 401
 
 
