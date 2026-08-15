@@ -2,30 +2,44 @@
 # PyInstaller spec — build on Windows:
 #   pyinstaller --noconfirm packaging/windows/system-info.spec
 
-import sys
 from pathlib import Path
 
 block_cipher = None
 root = Path(SPECPATH).resolve().parents[1]
 src = root / "src"
 
-hiddenimports = ["system_info", "pystray", "pystray._win32", "PIL", "PIL.Image", "PIL.ImageDraw"]
+datas = []
+binaries = []
+hiddenimports = ["system_info"]
 try:
-    from PyInstaller.utils.hooks import collect_submodules
+    from PyInstaller.utils.hooks import collect_all
 
-    hiddenimports = ["system_info"] + collect_submodules("pystray") + [
-        "PIL",
-        "PIL.Image",
-        "PIL.ImageDraw",
-    ]
+    for pkg in ("pystray", "PIL", "websocket"):
+        pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
+        datas += pkg_datas
+        binaries += pkg_binaries
+        hiddenimports += pkg_hidden
 except Exception:
     pass
+
+hiddenimports += [
+    "pystray",
+    "pystray._win32",
+    "pystray._util",
+    "pystray._util.win32",
+    "PIL",
+    "PIL.Image",
+    "PIL.ImageDraw",
+    "PIL._imaging",
+    "websocket",
+]
+hiddenimports = list(dict.fromkeys(hiddenimports))
 
 a = Analysis(
     [str(src / "system_info" / "__main__.py")],
     pathex=[str(src)],
-    binaries=[],
-    datas=[],
+    binaries=binaries,
+    datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -48,7 +62,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,

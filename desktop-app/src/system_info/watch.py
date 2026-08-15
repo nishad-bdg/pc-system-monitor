@@ -190,21 +190,7 @@ class WatchLoop:
         agent.start()
         self._agent_ws = agent
 
-        tray = _tray_icon(self)
-        if tray is not None:
-            # Blocking until the user picks Exit (which stops tray + loop).
-            try:
-                tray.run(setup=_show_tray)
-            except TypeError:
-                tray.visible = True
-                tray.run()
-            except Exception:
-                pass
-            self._stop.set()
-            return
-
-        # No tray (non-pointer environment / headless): wait indefinitely.
-        self._stop.wait()
+        _run_tray_or_wait(self, _tray_icon(self))
 
     def stop(self) -> None:
         self._stop.set()
@@ -302,6 +288,37 @@ class WatchLoop:
             )
 
 
+def _run_tray_or_wait(loop: "WatchLoop", tray) -> None:
+    """Block on the tray icon, or on the stop event if the tray cannot run.
+
+    A missing/broken tray used to either hide the process (headless wait with
+    no icon) or *exit* if `Icon.run` raised — both look like "not running"
+    after install. Keep the heartbeat loop alive and write crash.log instead.
+    """
+    from .win_runtime import log_watch_error
+
+    if tray is None:
+        log_watch_error(
+            "system tray could not be created; watcher stays running without an icon"
+        )
+        loop._stop.wait()
+        return
+    try:
+        try:
+            tray.run(setup=_show_tray)
+        except TypeError:
+            tray.visible = True
+            tray.run()
+    except Exception as exc:
+        log_watch_error(
+            "system tray failed; watcher stays running without an icon",
+            exc,
+        )
+        loop._stop.wait()
+        return
+    loop._stop.set()
+
+
 def _show_tray(icon) -> None:
     """Make the notify icon visible and announce the product on first show."""
     icon.visible = True
@@ -317,14 +334,19 @@ def _tray_icon(loop: "WatchLoop"):
     try:
         import pystray
         from PIL import Image, ImageDraw
-    except Exception:
+    except Exception as exc:
+        from .win_runtime import log_watch_error
+
+        log_watch_error("pystray/PIL import failed; tray unavailable", exc)
         return None
 
     def _make_image(size: int = 64):
+        # Integer coords only — some Pillow builds reject floats in ellipse().
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
         d.ellipse((4, 4, size - 4, size - 4), fill=(37, 99, 235, 255))
-        d.ellipse((size / 2 - 8, size / 2 - 8, size / 2 + 8, size / 2 + 8), fill=(255, 255, 255, 255))
+        mid = size // 2
+        d.ellipse((mid - 8, mid - 8, mid + 8, mid + 8), fill=(255, 255, 255, 255))
         return img
 
     def _on_exit(icon, item):
@@ -368,7 +390,9 @@ def _tray_icon(loop: "WatchLoop"):
             PRODUCT_NAME,
             menu=pystray.Menu(
                 pystray.MenuItem(f"{PRODUCT_NAME} — online", lambda: None, enabled=False),
-                pystray.MenuItem("Check for updates…", _on_check_update),
+                pystray.MenuItem(
+                    "Check for updates…", _on_check_update, default=True
+                ),
                 pystray.MenuItem("Restart", _on_restart),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Exit", _on_exit),
@@ -378,7 +402,10 @@ def _tray_icon(loop: "WatchLoop"):
         # Keep a reference to the icon so the update thread can notify it.
         loop._tray_icon = icon
         return icon
-    except Exception:
+    except Exception as exc:
+        from .win_runtime import log_watch_error
+
+        log_watch_error("pystray.Icon() failed; tray unavailable", exc)
         return None
 
 

@@ -48,13 +48,15 @@ jobs:
         uses: astral-sh/setup-uv@v10.0.0
 
       - name: Stamp version
-        shell: pwsh
+        shell: python
         run: |
-          $v = "${{ steps.ver.outputs.version }}"
-          @"
-          __version__ = "$v"
-          PRODUCT_NAME = "System Info Reporter"
-          "@ | Set-Content -Path desktop-app/src/system_info/version.py -Encoding utf8NoBOM
+          from pathlib import Path
+          v = "${{ steps.ver.outputs.version }}"
+          Path("desktop-app/src/system_info/version.py").write_text(
+              f'__version__ = "{v}"\nPRODUCT_NAME = "System Info Reporter"\n',
+              encoding="ascii",
+              newline="\n",
+          )
 
       - name: Build exe (PyInstaller)
         shell: pwsh

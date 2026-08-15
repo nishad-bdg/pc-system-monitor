@@ -557,6 +557,24 @@ def test_frozen_windows_run_starts_watch(monkeypatch):
     assert called.get("watch") is True
 
 
+def test_frozen_windows_run_skips_when_watcher_already_running(monkeypatch):
+    called = {}
+
+    monkeypatch.setattr(cli.os, "name", "nt")
+    monkeypatch.setattr("system_info.config.is_frozen", lambda: True)
+    monkeypatch.setattr(cli, "register_startup", lambda: True)
+    monkeypatch.setattr("system_info.win_runtime.acquire_watch_mutex", lambda: False)
+    monkeypatch.setattr("system_info.win_runtime.set_app_user_model_id", lambda: None)
+    monkeypatch.setattr(
+        "system_info.watch.run_watch",
+        lambda args: called.setdefault("watch", True) or 0,
+    )
+
+    args = cli.build_parser().parse_args(["--watch"])
+    assert cli.run(args) == 0
+    assert "watch" not in called
+
+
 def _capture_json(monkeypatch, args):
     import io
     from contextlib import redirect_stdout

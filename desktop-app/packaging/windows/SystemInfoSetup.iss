@@ -8,7 +8,9 @@
 ;   - Copies system-info.exe
 ;   - Asks for API URL, API key, optional PC name + update manifest URL
 ;   - Writes %APPDATA%\system-info\config.env
-;   - Offers a finish-page checkbox to start the app (system tray) now
+;   - Always launches --watch after files are copied (tray). A finish-page
+;     checkbox can start it again if the first launch was blocked (AV, etc.);
+;     a process mutex prevents two watchers.
 ;   - Creates Start Menu (and optional Desktop) shortcuts to start it later
 ;   - On first run the app self-registers an HKCU Run entry so --watch starts at logon
 
@@ -53,8 +55,9 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameter
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Run]
-; Finish-page checkbox so the user can start the app (tray) right after install.
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--watch"; Description: "Start {#MyAppName} now"; Flags: nowait postinstall skipifsilent
+; Finish-page retry if the post-install launch was blocked (antivirus, etc.).
+; Checked by default; a named mutex in the exe makes a second start a no-op.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--watch"; Description: "Start {#MyAppName} now"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [Code]
 var
@@ -65,7 +68,7 @@ begin
   ConfigPage := CreateInputQueryPage(wpSelectDir,
     'API configuration',
     'The reporter needs your API endpoint and key.',
-    'These values are stored in %APPDATA%\system-info\config.env and used by the scheduled task.');
+    'These values are stored in %APPDATA%\system-info\config.env and used by System Info Reporter.');
   ConfigPage.Add('API URL:', False);
   ConfigPage.Add('API key (sk-...):', False);
   ConfigPage.Add('PC name (Windows only, optional):', False);
@@ -119,12 +122,19 @@ procedure LaunchWatcher;
 var
   ExePath: string;
   PID: Integer;
+  I: Integer;
 begin
-  { Start the always-on watcher (used for silent installs). Interactive
-    installs use the [Run] finish-page checkbox instead of this so the user
-    can choose. SW_SHOWNORMAL lets the tray icon appear. }
+  { Always start --watch after files + config.env are in place. Interactive
+    installs used to wait for the skippable [Run] checkbox, so unchecking it
+    (or a failed CreateProcess) left no tray. SW_SHOWNORMAL lets the icon
+    appear. Retry a few times in case antivirus still has the new exe locked. }
   ExePath := ExpandConstant('{app}\{#MyAppExeName}');
-  Exec(ExePath, '--watch', ExpandConstant('{app}'), SW_SHOWNORMAL, ewNoWait, PID);
+  for I := 1 to 3 do
+  begin
+    if Exec(ExePath, '--watch', ExpandConstant('{app}'), SW_SHOWNORMAL, ewNoWait, PID) then
+      Exit;
+    Sleep(1000);
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -132,10 +142,7 @@ begin
   if CurStep = ssPostInstall then
   begin
     WriteConfigFile;
-    { Interactive installs start via the [Run] checkbox on the finish page.
-      Silent installs have no finish page, so launch the tray watcher here. }
-    if WizardSilent then
-      LaunchWatcher;
+    LaunchWatcher;
   end;
 end;
 

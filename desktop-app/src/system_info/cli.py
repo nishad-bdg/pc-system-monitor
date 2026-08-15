@@ -112,6 +112,11 @@ def run(args: argparse.Namespace) -> int:
 
     if args.watch or _default_to_watch(args):
         from .watch import run_watch
+        from .win_runtime import acquire_watch_mutex, set_app_user_model_id
+
+        set_app_user_model_id()
+        if not acquire_watch_mutex():
+            return 0
 
         return run_watch(args)
 
@@ -571,6 +576,9 @@ def _print(
 
 
 def main() -> int:
+    from .win_runtime import install_crash_handler
+
+    install_crash_handler()
     args = build_parser().parse_args()
     return run(args)
 

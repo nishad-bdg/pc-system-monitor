@@ -198,10 +198,11 @@ def test_tray_icon_shows_product_name(monkeypatch):
             self.items = items
 
     class FakeMenuItem:
-        def __init__(self, text, action, enabled=True):
+        def __init__(self, text, action, enabled=True, default=False):
             self.text = text
             self.action = action
             self.enabled = enabled
+            self.default = default
 
     class FakeIcon:
         def __init__(self, name, image, title, menu=None):
@@ -224,6 +225,11 @@ def test_tray_icon_shows_product_name(monkeypatch):
     labels = [getattr(item, "text", None) for item in created["menu"].items]
     assert f"{PRODUCT_NAME} — online" in labels
     assert "Exit" in labels
+    update_item = next(
+        item for item in created["menu"].items
+        if getattr(item, "text", None) == "Check for updates…"
+    )
+    assert update_item.default is True
 
 
 def test_watch_product_name_survives_missing_version_attr():
@@ -280,3 +286,69 @@ def test_full_report_leaves_watcher_running_when_no_update(monkeypatch):
     monkeypatch.setattr(loop, "_stop_for_update", lambda: stopped.append(True))
     loop.full_report()
     assert stopped == []
+
+
+def test_run_tray_or_wait_sets_stop_when_run_returns(monkeypatch):
+    from system_info.watch import WatchLoop, _run_tray_or_wait, _show_tray
+
+    seen = {}
+
+    class Tray:
+        visible = False
+
+        def run(self, setup=None):
+            seen["setup"] = setup
+            if setup:
+                setup(self)
+
+    loop = WatchLoop(_args())
+    _run_tray_or_wait(loop, Tray())
+    assert seen["setup"] is _show_tray
+    assert loop._stop.is_set()
+
+
+def test_run_tray_or_wait_falls_back_when_setup_unsupported():
+    from system_info.watch import WatchLoop, _run_tray_or_wait
+
+    class Tray:
+        visible = False
+
+        def run(self):
+            self.visible = True
+
+    loop = WatchLoop(_args())
+    _run_tray_or_wait(loop, Tray())
+    assert loop._stop.is_set()
+
+
+def test_run_tray_or_wait_keeps_running_when_tray_raises(monkeypatch, tmp_path):
+    from system_info.watch import WatchLoop, _run_tray_or_wait
+
+    waited = []
+
+    class Tray:
+        def run(self, setup=None):
+            raise RuntimeError("win32 notify icon failed")
+
+    loop = WatchLoop(_args())
+    monkeypatch.setattr(loop._stop, "wait", lambda: waited.append(True))
+    monkeypatch.setattr(
+        "system_info.win_runtime.crash_log_path", lambda: tmp_path / "crash.log"
+    )
+    monkeypatch.setattr("system_info.win_runtime.user_config_dir", lambda: tmp_path)
+    _run_tray_or_wait(loop, Tray())
+    assert waited == [True]
+    assert not loop._stop.is_set()
+    assert (tmp_path / "crash.log").is_file()
+
+
+def test_run_tray_or_wait_without_icon_waits(monkeypatch, tmp_path):
+    from system_info.watch import WatchLoop, _run_tray_or_wait
+
+    waited = []
+    loop = WatchLoop(_args())
+    monkeypatch.setattr(loop._stop, "wait", lambda: waited.append(True))
+    monkeypatch.setattr("system_info.win_runtime.user_config_dir", lambda: tmp_path)
+    _run_tray_or_wait(loop, None)
+    assert waited == [True]
+    assert not loop._stop.is_set()
