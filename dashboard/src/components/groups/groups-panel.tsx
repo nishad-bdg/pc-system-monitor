@@ -38,7 +38,7 @@ type ModalState =
 export function GroupsPanel() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
-  const isUser = session?.user?.role === "user";
+  const canManage = session?.user?.role === "super_admin";
   const queryClient = useQueryClient();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -266,7 +266,7 @@ export function GroupsPanel() {
       }
       sidebar={
         <div className="px-2 py-3">
-          {!isUser && (
+          {canManage && (
             <button
               type="button"
               onClick={() => setModal({ kind: "create", name: "" })}
@@ -335,7 +335,7 @@ export function GroupsPanel() {
                 </p>
               </div>
               <div className="flex gap-2">
-                {!isUser && (
+                {canManage && (
                   <>
                     <button
                       type="button"
@@ -391,7 +391,7 @@ export function GroupsPanel() {
             </div>
           )}
 
-          {selected && !isUser && (
+          {selected && canManage && (
             <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="border-b border-slate-200 px-5 py-4">
                 <h3 className="text-sm font-semibold text-slate-900">
@@ -495,7 +495,7 @@ export function GroupsPanel() {
             </section>
           )}
 
-          {selected && !isUser && (
+          {selected && canManage && (
             <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-5 py-4">
                 <div>
@@ -612,7 +612,7 @@ export function GroupsPanel() {
             </section>
           )}
 
-          {selected && isUser && (
+          {selected && !canManage && (
             <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="border-b border-slate-200 px-5 py-4">
                 <h3 className="text-sm font-semibold text-slate-900">

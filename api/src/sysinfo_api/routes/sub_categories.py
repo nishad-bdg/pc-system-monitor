@@ -41,11 +41,11 @@ def _to_out(doc: dict) -> dict:
 def _user_visible_sub_categories(user: dict) -> list[dict]:
     """Sub-categories the caller may see.
 
-    Admin/super_admin: all. `user`: only those linked to at least one of the
-    user's assigned groups.
+    Super_admin: all. `admin`/`user`: only those linked to at least one of the
+    caller's assigned groups.
     """
     all_subs = [_to_out(d) for d in db.list_sub_categories()]
-    if user.get("role") == security.ROLE_USER:
+    if user.get("role") != security.ROLE_SUPER_ADMIN:
         allowed = set(user.get("groups") or [])
         return [s for s in all_subs if set(s["group_ids"]) & allowed]
     return all_subs
@@ -57,7 +57,7 @@ def list_sub_categories(user: security.CurrentUser) -> list[dict]:
 
 
 @router.post("", status_code=201, response_model=SubCategoryOut)
-def create_sub_category(payload: SubCategoryCreate, user: security.AdminOrSuperUser) -> dict:
+def create_sub_category(payload: SubCategoryCreate, user: security.SuperAdminUser) -> dict:
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=422, detail="Sub-category name is required")
@@ -78,7 +78,7 @@ def create_sub_category(payload: SubCategoryCreate, user: security.AdminOrSuperU
 
 @router.patch("/{sub_id}", response_model=SubCategoryOut)
 def update_sub_category(
-    sub_id: str, payload: SubCategoryUpdate, user: security.AdminOrSuperUser
+    sub_id: str, payload: SubCategoryUpdate, user: security.SuperAdminUser
 ) -> dict:
     name = payload.name.strip() if payload.name is not None else None
     if name == "":
@@ -102,7 +102,7 @@ def update_sub_category(
 
 
 @router.delete("/{sub_id}", status_code=204)
-def delete_sub_category(sub_id: str, user: security.AdminOrSuperUser) -> None:
+def delete_sub_category(sub_id: str, user: security.SuperAdminUser) -> None:
     if db.delete_sub_category(sub_id):
         return None
     raise HTTPException(status_code=404, detail="Sub-category not found")

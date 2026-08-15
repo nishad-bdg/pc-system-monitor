@@ -37,6 +37,13 @@ async def heartbeat(body: Heartbeat, api_key: security.ApiKey) -> dict:
     ok = db.touch_machine(body.device_id, body.pc_name or None, seen_at=seen)
     if not ok:
         raise HTTPException(status_code=503, detail="MongoDB unavailable")
+    # A key linked to a group auto-assigns the PC to that group (one bucket).
+    group_id = api_key.get("group_id")
+    if group_id:
+        keys = [f"id:{body.device_id}"]
+        if body.pc_name:
+            keys.append(f"name:{body.pc_name}")
+        db.assign_machine_keys_to_group(group_id, keys)
     # Push presence to open dashboards immediately (Messenger-style online).
     await realtime.broadcast_presence(
         body.device_id, online=True, last_seen=seen, pc_name=body.pc_name

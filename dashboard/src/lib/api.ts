@@ -149,6 +149,7 @@ export interface ApiKey {
   name: string;
   prefix: string;
   active: boolean;
+  group_id?: string | null;
   created_at?: number | null;
 }
 
@@ -650,10 +651,11 @@ export function createApiKey(
   apiUrl: string,
   apiToken: string,
   name: string,
+  groupId?: string | null,
 ): Promise<ApiKeyCreated> {
   return apiRequest(apiUrl, apiToken, "/api-keys", {
     method: "POST",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, group_id: groupId ?? null }),
   });
 }
 
@@ -661,11 +663,16 @@ export function updateApiKey(
   apiUrl: string,
   apiToken: string,
   id: string,
-  changes: { name?: string; active?: boolean },
+  changes: { name?: string; active?: boolean; groupId?: string | null },
 ): Promise<ApiKey> {
+  const body: Record<string, unknown> = { ...changes };
+  if ("groupId" in changes) {
+    body.group_id = changes.groupId ?? "";
+  }
+  delete body.groupId;
   return apiRequest(apiUrl, apiToken, `/api-keys/${id}`, {
     method: "PATCH",
-    body: JSON.stringify(changes),
+    body: JSON.stringify(body),
   });
 }
 

@@ -39,15 +39,15 @@ docs/          Specs/plans (superpowers)
 | Role | Users mgmt | API keys | Groups | Reports |
 |------|-----------|----------|--------|---------|
 | `super_admin` (seed default) | ✅ CRUD | ✅ | ✅ CRUD | ✅ all |
-| `admin` | ❌ | ❌ | ✅ CRUD | ✅ all |
+| `admin` | ❌ | ❌ | 🔍 (read-only) | ✅ all |
 | `user` | ❌ | ❌ | 🔍 own only | ✅ own groups only |
 
 - Seed `ADMIN_USERNAME`/`ADMIN_PASSWORD` is auto-created (and legacy `admin` promoted) to `super_admin` on startup.
 - **Users page** (`/users`, super admin only): create users with a role + a set of groups (multi-select). One user can belong to **multiple groups** and then sees every PC in each assigned group. **A non-`super_admin` user must be assigned at least one group** (enforced in the UI — submit disabled + inline hint — and server-side, `POST /users` and `PATCH /users/{id}` return 422 if the effective role isn't super_admin and the group list is empty); only `super_admin` can be created/edited group-less. `PATCH /users/{id}` edits role/groups/password (can't change your own role); deleting yourself is blocked.
 - **Group scoping is enforced server-side**: for a `user`, `GET /reports`, `/reports/export`, and `/reports/{id}` are filtered to the user's groups; `GET /groups` returns only their groups. `admin`/`super_admin` are unrestricted.
-- **Sub-categories**: a many-to-many refinement of groups. A sub-category can belong to **many groups** (group doc holds `subcategory_ids`; sub-category holds `group_ids`) and holds its own `machine_keys`. A PC sits in **exactly one bucket** — a main group **or** one sub-category. Assigning a machine key to either bucket removes it from ALL other groups and sub-categories (enforced server-side via `remove_machine_keys_from_groups`/`remove_machine_keys_from_sub_categories`). Group scoping (filters + `user` role) automatically includes the sub-categories linked to a group, so a sub-category's PCs show up under every parent group. `GET /reports`/`/reports/export` accept `sub_category_id`; `GET /sub-categories` returns all for admin, only those linked to the user's groups otherwise; CRUD is `admin`/`super_admin` only.
+- **Sub-categories**: a many-to-many refinement of groups. A sub-category can belong to **many groups** (group doc holds `subcategory_ids`; sub-category holds `group_ids`) and holds its own `machine_keys`. A PC sits in **exactly one bucket** — a main group **or** one sub-category. Assigning a machine key to either bucket removes it from ALL other groups and sub-categories (enforced server-side via `remove_machine_keys_from_groups`/`remove_machine_keys_from_sub_categories`). Group scoping (filters + `user` role) automatically includes the sub-categories linked to a group, so a sub-category's PCs show up under every parent group. `GET /reports`/`/reports/export` accept `sub_category_id`; `GET /sub-categories` returns all for admin, only those linked to the user's groups otherwise; CRUD is `super_admin` only (groups CRUD is likewise `super_admin` only).
 - **API keys** (`/api-keys` page + routes) are **super admin only** (403 otherwise).
-- **Dashboard:** session carries `role` + `groups` (fetched from `/auth/me` at login); sidebar hides API Keys/Users unless `super_admin`; Groups page is read-only for `user`.
+- **Dashboard:** session carries `role` + `groups` (fetched from `/auth/me` at login); sidebar hides API Keys/Users unless `super_admin`; Groups page is read-only for `admin`/`user` (only `super_admin` can create/rename/delete groups/sub-categories or assign PCs).
 - A `user` with no groups assigned sees no reports (empty fleet).
 
 ## Data flow
@@ -212,7 +212,7 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
 - `POST /reports` — API key; stores `source_key` prefix.
 - `GET /reports/{id}` — JWT.
 - `GET /reports/export` — JWT; same filters as `/reports` (incl. `group_id`, `sub_category_id`, `disk_health`, `battery`, `battery_health_min`); streams CSV with **every report field flattened** (`a.b.c` columns, arrays as JSON).
-- `GET/POST/PATCH/DELETE /api-keys` — admin JWT; `PATCH` renames / toggles active; secret shown only at create.
+- `GET/POST/PATCH/DELETE /api-keys` — admin JWT; `PATCH` renames / toggles active; secret shown only at create. **A key can optionally be linked to a group (`group_id`)**; reports and heartbeats sent with that key auto-assign the PC's machine keys to the group (one-bucket exclusivity, `db.assign_machine_keys_to_group`). Clearing the link on PATCH is expressed with `group_id: ""`.
 - `GET/POST/PATCH/DELETE /groups` — admin JWT; a machine key belongs to **one bucket only** (assigning removes it from other groups AND sub-categories).
 - `GET/POST/PATCH/DELETE /sub-categories` — admin JWT; create/update take `group_ids` (many-to-many); `PATCH` machine_keys remove the keys from all groups and other sub-categories (one-bucket).
 - `POST /print-jobs` — API key; batch `{device_id, pc_name, jobs:[...]}` → Mongo `print_jobs` + WS `print.job`. `GET /print-jobs`, `GET /print-jobs/summary` — JWT (see Print Activity below).
@@ -254,7 +254,7 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 | `/dashboard` | **Fleet** — sidebar PC list + live detail for selected machine |
 | `/reports` | **Reports browser** — filters + one row per PC |
 | `/reports/[key]` | PC detail from reports (encoded machine key) |
-| `/api-keys` | Manage desktop API keys (create/copy/rename/toggle/delete) — **super admin only** |
+| `/api-keys` | Manage desktop API keys (create/copy/rename/toggle/delete) — **super admin only**; optionally link a key to a group (auto-assignment) |
 | `/groups` | Create/rename/delete groups, assign PCs (one bucket per PC); manage **sub-categories** (many-to-many group membership); read-only for `user` role |
 | `/users` | Manage dashboard users (role + groups) — **super admin only** |
 | `/reports/export` | **Report export** — date presets + filters, CSV download |

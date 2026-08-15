@@ -33,6 +33,10 @@ async def create_report(report: Report, api_key: ApiKey) -> JSONResponse:
     report_id = db.save_report(document)
     if report_id is None:
         raise HTTPException(status_code=503, detail="MongoDB unavailable")
+    # A key linked to a group auto-assigns the PC to that group (one bucket).
+    group_id = api_key.get("group_id")
+    if group_id:
+        db.assign_machine_keys_to_group(group_id, _machine_keys(report))
     # Annotate online state and push to connected dashboards (incl. printers).
     annotate_online(document)
     if report.device_id:
@@ -49,10 +53,10 @@ async def create_report(report: Report, api_key: ApiKey) -> JSONResponse:
 
 
 def _user_group_ids(user: dict) -> list[str] | None:
-    """Group ids to scope a user-role request to, or None (no restriction)."""
-    if user.get("role") == security.ROLE_USER:
-        return user.get("groups") or []
-    return None
+    """Group ids to scope a non-super-admin request to, or None (no restriction)."""
+    if user.get("role") == security.ROLE_SUPER_ADMIN:
+        return None
+    return user.get("groups") or []
 
 
 @router.get("")
@@ -185,7 +189,7 @@ def get_report(report_id: str, user: CurrentUser = None) -> dict:
     doc = db.get_report(report_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Report not found")
-    if user.get("role") == security.ROLE_USER and not _report_belongs_to_groups(
+    if user.get("role") != security.ROLE_SUPER_ADMIN and not _report_belongs_to_groups(
         doc, user.get("groups") or []
     ):
         raise HTTPException(status_code=403, detail="Report is outside your groups")

@@ -17,7 +17,7 @@ router = APIRouter(prefix="/print-jobs", tags=["print-jobs"])
 
 
 def _user_group_ids(user: dict) -> list[str] | None:
-    if user.get("role") == security.ROLE_USER:
+    if user.get("role") != security.ROLE_SUPER_ADMIN:
         return user.get("groups") or []
     return None
 

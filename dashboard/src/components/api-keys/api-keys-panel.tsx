@@ -8,7 +8,9 @@ import {
   createApiKey,
   deleteApiKey,
   fetchApiKeys,
+  fetchGroups,
   fmtRelative,
+  Group,
   regenerateApiKey,
   updateApiKey,
 } from "@/lib/api";
@@ -21,10 +23,10 @@ const inputClass =
   "w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2";
 
 type ModalState =
-  | { kind: "create"; name: string; error?: string }
+  | { kind: "create"; name: string; groupId: string; error?: string }
   | { kind: "created"; name: string; key: string; copied: boolean }
   | { kind: "regenerated"; name: string; key: string; copied: boolean }
-  | { kind: "rename"; key: ApiKey; name: string; error?: string }
+  | { kind: "rename"; key: ApiKey; name: string; groupId: string; error?: string }
   | { kind: "delete"; key: ApiKey }
   | null;
 
@@ -45,11 +47,18 @@ export function ApiKeysPanel() {
     refetchInterval: 30_000,
   });
 
+  const { data: groups = [] } = useQuery({
+    queryKey: ["groups"],
+    queryFn: () => fetchGroups(API_URL, apiToken ?? ""),
+    enabled: !!apiToken,
+  });
+
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["api-keys"] });
 
   const createMut = useMutation({
-    mutationFn: (name: string) => createApiKey(API_URL, apiToken ?? "", name),
+    mutationFn: (v: { name: string; groupId: string }) =>
+      createApiKey(API_URL, apiToken ?? "", v.name, v.groupId || null),
     onSuccess: (res) => {
       invalidate();
       setModal({ kind: "created", name: res.name, key: res.api_key, copied: false });
@@ -59,7 +68,7 @@ export function ApiKeysPanel() {
   });
 
   const updateMut = useMutation({
-    mutationFn: (changes: { id: string; name?: string; active?: boolean }) =>
+    mutationFn: (changes: { id: string; name?: string; active?: boolean; groupId?: string | null }) =>
       updateApiKey(API_URL, apiToken ?? "", changes.id, changes),
     onSuccess: () => {
       invalidate();
@@ -105,7 +114,7 @@ export function ApiKeysPanel() {
     if (modal?.kind !== "create") return;
     const name = modal.name.trim();
     if (!name) return;
-    createMut.mutate(name);
+    createMut.mutate({ name, groupId: modal.groupId });
   }
 
   function onRenameSubmit(e: FormEvent) {
@@ -113,7 +122,7 @@ export function ApiKeysPanel() {
     if (modal?.kind !== "rename") return;
     const name = modal.name.trim();
     if (!name) return;
-    updateMut.mutate({ id: modal.key.id, name });
+    updateMut.mutate({ id: modal.key.id, name, groupId: modal.groupId });
   }
 
   function toggleKey(key: ApiKey) {
@@ -128,6 +137,11 @@ export function ApiKeysPanel() {
     } catch {
       setStatus("Copy failed — select the key and copy manually.");
     }
+  }
+
+  function groupName(id: string | null | undefined): string {
+    if (!id) return "";
+    return groups.find((g) => g.id === id)?.name ?? id;
   }
 
   return (
@@ -183,7 +197,9 @@ export function ApiKeysPanel() {
             </div>
             <button
               type="button"
-              onClick={() => setModal({ kind: "create", name: "" })}
+              onClick={() =>
+                setModal({ kind: "create", name: "", groupId: "" })
+              }
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm shadow-blue-900/40 hover:bg-blue-500"
             >
               New API key
@@ -232,6 +248,7 @@ export function ApiKeysPanel() {
                   <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                     <th className="px-5 py-3">Name</th>
                     <th className="px-5 py-3">Prefix</th>
+                    <th className="px-5 py-3">Group</th>
                     <th className="px-5 py-3">Created</th>
                     <th className="px-5 py-3">Status</th>
                     <th className="px-5 py-3 text-right">Actions</th>
@@ -247,6 +264,15 @@ export function ApiKeysPanel() {
                         <code className="rounded-md bg-slate-100 px-2 py-1 font-mono text-xs text-slate-600">
                           {k.prefix}…
                         </code>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        {k.group_id ? (
+                          <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700">
+                            {groupName(k.group_id)}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
                       </td>
                       <td className="px-5 py-3.5 text-slate-500">
                         {k.created_at ? fmtRelative(k.created_at) : "—"}
@@ -283,7 +309,12 @@ export function ApiKeysPanel() {
                           <button
                             type="button"
                             onClick={() =>
-                              setModal({ kind: "rename", key: k, name: k.name })
+                              setModal({
+                                kind: "rename",
+                                key: k,
+                                name: k.name,
+                                groupId: k.group_id ?? "",
+                              })
                             }
                             className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
                           >
@@ -333,6 +364,29 @@ export function ApiKeysPanel() {
                 className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
               />
             </label>
+            <label className="mt-3 block text-xs font-medium text-slate-600">
+              Group (optional)
+              <select
+                value={modal.groupId}
+                onChange={(e) =>
+                  setModal({ ...modal, groupId: e.target.value, error: undefined })
+                }
+                className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+              >
+                <option value="">
+                  No group — no auto-assignment
+                </option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+              Reports and heartbeats sent with this key will automatically place
+              each PC into the selected group.
+            </p>
             {modal.error && (
               <p className="mt-2 text-xs text-red-600">{modal.error}</p>
             )}
@@ -478,6 +532,25 @@ export function ApiKeysPanel() {
                 }
                 className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
               />
+            </label>
+            <label className="mt-3 block text-xs font-medium text-slate-600">
+              Group (optional)
+              <select
+                value={modal.groupId}
+                onChange={(e) =>
+                  setModal({ ...modal, groupId: e.target.value, error: undefined })
+                }
+                className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+              >
+                <option value="">
+                  No group — no auto-assignment
+                </option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
             </label>
             {modal.error && (
               <p className="mt-2 text-xs text-red-600">{modal.error}</p>

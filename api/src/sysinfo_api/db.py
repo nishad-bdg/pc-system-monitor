@@ -165,10 +165,9 @@ def list_reports(
         group_clause = _group_filter(group_id)
         if group_clause:
             clauses.append(group_clause)
-    if group_ids:
+    if group_ids is not None:
         group_clause = _groups_filter(group_ids)
-        if group_clause:
-            clauses.append(group_clause)
+        clauses.append(group_clause)
     if sub_category_id:
         sub_clause = _sub_category_filter(sub_category_id)
         if sub_clause:
@@ -310,7 +309,9 @@ def get_user_password_hash(user_id: str) -> str | None:
         return None
 
 
-def create_api_key(name: str, key_hash: str, prefix: str) -> ObjectId | None:
+def create_api_key(
+    name: str, key_hash: str, prefix: str, group_id: str | None = None
+) -> ObjectId | None:
     try:
         result = _api_keys().insert_one(
             {
@@ -318,6 +319,7 @@ def create_api_key(name: str, key_hash: str, prefix: str) -> ObjectId | None:
                 "key_hash": key_hash,
                 "prefix": prefix,
                 "active": True,
+                "group_id": group_id,
                 "created_at": datetime.now(UTC).timestamp(),
             }
         )
@@ -332,6 +334,7 @@ def update_api_key(
     active: bool | None = None,
     key_hash: str | None = None,
     prefix: str | None = None,
+    group_id: str | None = None,
 ) -> bool:
     """Update an API key's name/active flag or rotate its secret hash."""
     try:
@@ -344,6 +347,9 @@ def update_api_key(
             changes["key_hash"] = key_hash
         if prefix is not None:
             changes["prefix"] = prefix
+        if group_id is not None:
+            # "" explicitly clears the link; None means "no change".
+            changes["group_id"] = group_id or None
         if not changes:
             return True
         result = _api_keys().update_one({"_id": ObjectId(key_id)}, {"$set": changes})
@@ -455,14 +461,19 @@ def _group_filter(group_id: str) -> dict | None:
 
 
 def _groups_filter(group_ids: list[str]) -> dict | None:
-    """Combine multiple group filters into one $or across all the groups."""
+    """Combine multiple group filters into one $or across all the groups.
+
+    Returns an impossible match (nothing) when no group yields machine keys —
+    a scoped user must never fall back to an unrestricted query. An empty
+    list (user with no groups) likewise matches nothing.
+    """
     ors: list[dict] = []
     for gid in group_ids:
         clause = _group_filter(gid)
         if clause:
             ors.append(clause)
     if not ors:
-        return None
+        return {"_id": {"$exists": False}}
     return {"$or": ors} if len(ors) > 1 else ors[0]
 
 
@@ -648,6 +659,27 @@ def remove_machine_keys_from_groups(
             update_group(group["_id"], machine_keys=keep)
 
 
+def assign_machine_keys_to_group(group_id: str, keys: list[str]) -> bool:
+    """Move the given machine keys into a group (one-bucket exclusivity).
+
+    Puts the keys in the target group's `machine_keys` and removes them from
+    every other group and from all sub-categories. Returns False when the
+    group doesn't exist.
+    """
+    target = get_group(group_id)
+    if target is None:
+        return False
+    keys = [k for k in keys if k]
+    if not keys:
+        return True
+    existing = set(target.get("machine_keys") or [])
+    remove_machine_keys_from_groups(keys, except_group_id=group_id)
+    remove_machine_keys_from_sub_categories(keys)
+    return update_group(
+        group_id, machine_keys=list(existing.union(keys))
+    )
+
+
 # ---- refresh tokens ----
 
 def _refresh_tokens():
@@ -754,10 +786,9 @@ def list_print_jobs(
         if to_ts is not None:
             completed["$lte"] = to_ts
         clauses.append({"completed_at": completed})
-    if group_ids:
+    if group_ids is not None:
         group_clause = _groups_filter(group_ids)
-        if group_clause:
-            clauses.append(group_clause)
+        clauses.append(group_clause)
 
     if not clauses:
         query: dict = {}
@@ -789,10 +820,9 @@ def print_jobs_hourly_counts(
         return results
     start = time.time() - hours * 3600
     match: dict = {"created_at": {"$gte": start}}
-    if group_ids:
+    if group_ids is not None:
         group_clause = _groups_filter(group_ids)
-        if group_clause:
-            match["$and"] = [group_clause]
+        match["$and"] = [group_clause]
     try:
         pipeline = [
             {"$match": match},
