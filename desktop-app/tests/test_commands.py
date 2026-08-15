@@ -253,6 +253,46 @@ def test_ws_url_maps_scheme():
     assert sock2._ws_url() == "ws://127.0.0.1:8000/ws/agent"
 
 
+def test_ws_agent_replies_to_ping(monkeypatch):
+    import json as _json
+
+    sent = []
+
+    class FakeWs:
+        def __init__(self, inbox):
+            self.inbox = list(inbox)
+            self.closed = False
+
+        def send(self, data):
+            sent.append(_json.loads(data))
+
+        def recv(self):
+            if not self.inbox:
+                raise OSError("closed")
+            return self.inbox.pop(0)
+
+        def close(self):
+            self.closed = True
+
+    ping_msg = _json.dumps({"type": "ping", "ping_id": "p-1", "ts": 1})
+    fake_ws = FakeWs([ping_msg])
+
+    def fake_create_connection(url, subprotocols=None, timeout=5, enable_multithread=False):
+        return fake_ws
+
+    import websocket as _ws_module
+
+    monkeypatch.setattr(_ws_module, "create_connection", fake_create_connection)
+    monkeypatch.setattr(_ws_module, "WebSocket", lambda: None)
+
+    sock = commands.WatchCommandSocket("https://x", "sk-key", "d1")
+    sock._session()
+
+    assert sent[0]["type"] == "hello"
+    pong = [m for m in sent if m.get("type") == "pong"][-1]
+    assert pong["ping_id"] == "p-1"
+
+
 def test_ws_agent_session_executes_and_acks(monkeypatch):
     import json as _json
 

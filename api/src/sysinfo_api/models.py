@@ -57,3 +57,7 @@ class CommandBroadcast(BaseModel):
 class CommandAck(BaseModel):
     status: str  # "done" | "failed"
     error: str | None = None
+
+
+class DevicePing(BaseModel):
+    device_id: str

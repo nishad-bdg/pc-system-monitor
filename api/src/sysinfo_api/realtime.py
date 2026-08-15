@@ -13,8 +13,10 @@ The presence cache mirrors the `machines` collection in memory so that:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
+import uuid
 from typing import Set
 
 from starlette.websockets import WebSocket
@@ -27,6 +29,9 @@ _presence: dict[str, dict] = {}
 # device_id -> list of connected desktop-agent sockets (API-key authed /ws/agent).
 # Commands (restart/shutdown) are pushed to these instantly.
 _agent_clients: dict[str, list[WebSocket]] = {}
+
+# ping_id -> Future resolved when the agent replies with pong.
+_pending_pings: dict[str, asyncio.Future] = {}
 
 
 def connect_agent(device_id: str, ws: WebSocket) -> None:
@@ -62,6 +67,57 @@ def agent_sockets(device_id: str) -> list[WebSocket]:
 def connected_agent_device_ids() -> list[str]:
     """Every device_id with at least one live desktop-agent socket."""
     return [dev for dev, sockets in _agent_clients.items() if sockets]
+
+
+def resolve_pong(ping_id: str) -> None:
+    """Unblock a waiting admin ping when the agent replies."""
+    fut = _pending_pings.get((ping_id or "").strip())
+    if fut is not None and not fut.done():
+        fut.set_result(True)
+
+
+async def ping_agent(device_id: str, timeout: float = 3.0) -> dict:
+    """Probe a live agent socket. Returns connected + round-trip ms."""
+    device_id = (device_id or "").strip()
+    sockets = agent_sockets(device_id)
+    if not device_id or not sockets:
+        return {"connected": False, "rtt_ms": None, "reason": "offline"}
+
+    ping_id = uuid.uuid4().hex
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future = loop.create_future()
+    _pending_pings[ping_id] = fut
+    started = time.perf_counter()
+    payload = json.dumps({"type": "ping", "ping_id": ping_id, "ts": time.time()})
+    try:
+        sent = False
+        stale: list[WebSocket] = []
+        for ws in sockets:
+            try:
+                await ws.send_text(payload)
+                sent = True
+            except Exception:
+                stale.append(ws)
+        for ws in stale:
+            remaining = disconnect_agent(device_id, ws)
+            if remaining == 0:
+                await broadcast_presence(
+                    device_id, online=False, last_seen=time.time()
+                )
+        if not sent:
+            return {"connected": False, "rtt_ms": None, "reason": "offline"}
+        await asyncio.wait_for(fut, timeout)
+        rtt_ms = max(0, int(round((time.perf_counter() - started) * 1000)))
+        await broadcast_presence(device_id, online=True, last_seen=time.time())
+        return {"connected": True, "rtt_ms": rtt_ms, "reason": None}
+    except asyncio.TimeoutError:
+        # Socket is registered but this agent build may not speak ping/pong.
+        if agent_sockets(device_id):
+            await broadcast_presence(device_id, online=True, last_seen=time.time())
+            return {"connected": True, "rtt_ms": None, "reason": "no_pong"}
+        return {"connected": False, "rtt_ms": None, "reason": "timeout"}
+    finally:
+        _pending_pings.pop(ping_id, None)
 
 
 async def push_command_to_agent(command: dict) -> None:

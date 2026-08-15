@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { createPortal } from "react-dom";
-import { sendCommand } from "@/lib/api";
+import { pingDevice, sendCommand } from "@/lib/api";
 
 const ADMIN_ROLES = new Set(["admin", "super_admin"]);
 
@@ -22,7 +22,7 @@ const ACTION_LABELS: Record<ActionType, { button: string; title: string; body: s
   },
 };
 
-/** Remote Restart / Shutdown controls (admin + super_admin, Windows PCs only). */
+/** Remote Ping / Restart / Shutdown (admin + super_admin). Ping works on any OS. */
 export function RemoteActions({
   apiUrl,
   deviceId,
@@ -43,11 +43,35 @@ export function RemoteActions({
   const [confirmAction, setConfirmAction] = useState<ActionType | null>(null);
 
   const isWindows = (osSystem ?? "").toLowerCase().startsWith("win");
-  if (!deviceId || !ADMIN_ROLES.has(role) || !isWindows) return null;
+  if (!deviceId || !ADMIN_ROLES.has(role)) return null;
 
   const openConfirm = (action: ActionType) => {
     setMessage(null);
     setConfirmAction(action);
+  };
+
+  const runPing = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await pingDevice(apiUrl, apiToken, deviceId);
+      if (res.connected) {
+        const latency = res.rtt_ms != null ? ` (${res.rtt_ms} ms)` : "";
+        setMessage({ ok: true, text: `${pcName} is connected${latency}.` });
+      } else {
+        setMessage({
+          ok: false,
+          text: `${pcName} is not connected right now.`,
+        });
+      }
+    } catch (err) {
+      setMessage({
+        ok: false,
+        text: err instanceof Error ? err.message : "Could not ping this PC",
+      });
+    } finally {
+      setBusy(false);
+    }
   };
 
   const run = async (action: ActionType) => {
@@ -76,22 +100,34 @@ export function RemoteActions({
       <div className="flex items-center gap-2">
         <button
           type="button"
-          disabled={busy || !!pending}
-          onClick={() => openConfirm("restart")}
-          className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+          disabled={busy}
+          onClick={runPing}
+          className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
         >
-          {pending === "restart" ? "Restart sent…" : "Restart"}
+          {busy && !pending ? "Pinging…" : "Ping"}
         </button>
-        <button
-          type="button"
-          disabled={busy || !!pending}
-          onClick={() => openConfirm("shutdown")}
-          className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
-        >
-          {pending === "shutdown" ? "Shutdown sent…" : "Shut down"}
-        </button>
+        {isWindows && (
+          <>
+            <button
+              type="button"
+              disabled={busy || !!pending}
+              onClick={() => openConfirm("restart")}
+              className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+            >
+              {pending === "restart" ? "Restart sent…" : "Restart"}
+            </button>
+            <button
+              type="button"
+              disabled={busy || !!pending}
+              onClick={() => openConfirm("shutdown")}
+              className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
+            >
+              {pending === "shutdown" ? "Shutdown sent…" : "Shut down"}
+            </button>
+          </>
+        )}
       </div>
-      {busy && <p className="text-xs text-slate-400">Sending command…</p>}
+      {busy && <p className="text-xs text-slate-400">{pending ? "Sending command…" : "Pinging…"}</p>}
       {!busy && message && (
         <p
           className={`text-xs ${

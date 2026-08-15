@@ -241,6 +241,15 @@ class WatchCommandSocket(threading.Thread):
                     msg = json.loads(raw)
                 except (ValueError, TypeError):
                     continue
+                if (msg or {}).get("type") == "ping":
+                    try:
+                        ws.send(json.dumps({
+                            "type": "pong",
+                            "ping_id": msg.get("ping_id"),
+                        }))
+                    except Exception:
+                        pass
+                    continue
                 if (msg or {}).get("type") == "command":
                     command = msg.get("command") or {}
                     command_type = str(command.get("type") or "").strip()

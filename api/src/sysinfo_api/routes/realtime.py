@@ -189,6 +189,9 @@ async def websocket_agent_endpoint(ws: WebSocket, token: str = Query(default="")
                 if command_id and status in (db.COMMAND_STATUS_DONE, db.COMMAND_STATUS_FAILED):
                     db.ack_command(command_id, status, error)
                 continue
+            if msg_type == "pong":
+                realtime.resolve_pong(str((msg or {}).get("ping_id") or ""))
+                continue
     except WebSocketDisconnect:
         pass
     except Exception:

@@ -52,6 +52,7 @@ def _patch_db(monkeypatch, user=None):
     _rt._clients.clear()
     _rt._presence.clear()
     _rt._agent_clients.clear()
+    _rt._pending_pings.clear()
 
     # Refresh-token store: in-memory, shared across tests in this module.
     global _REFRESH_STORE
@@ -1978,6 +1979,60 @@ def test_create_command_rejects_bad_type(monkeypatch):
     _patch_db(monkeypatch)
     resp = client.post("/commands", json={"device_id": "dev-1", "type": "boom"}, headers=_auth_header())
     assert resp.status_code == 422
+
+
+def test_ping_device_requires_admin(monkeypatch):
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "ops1",
+        "role": "user",
+        "groups": ["g1"],
+    })
+    resp = client.post(
+        "/commands/ping",
+        json={"device_id": "dev-1"},
+        headers=_auth_header(role="user"),
+    )
+    assert resp.status_code == 403
+
+
+def test_ping_device_offline(monkeypatch):
+    _patch_db(monkeypatch)
+    resp = client.post(
+        "/commands/ping",
+        json={"device_id": "dev-1"},
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["connected"] is False
+    assert body["rtt_ms"] is None
+
+
+def test_ping_device_connected(monkeypatch):
+    import json as _json
+
+    from sysinfo_api import realtime
+
+    _patch_db(monkeypatch)
+
+    class FakeAgentWs:
+        async def send_text(self, payload):
+            data = _json.loads(payload)
+            assert data["type"] == "ping"
+            realtime.resolve_pong(str(data.get("ping_id") or ""))
+
+    realtime._agent_clients["dev-1"] = [FakeAgentWs()]
+    resp = client.post(
+        "/commands/ping",
+        json={"device_id": "dev-1"},
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["connected"] is True
+    assert isinstance(body["rtt_ms"], int)
+    assert body["rtt_ms"] >= 0
 
 
 def test_ack_command_requires_api_key(monkeypatch):

@@ -953,6 +953,23 @@ export function sendCommand(
   });
 }
 
+export type DevicePingResult = {
+  connected: boolean;
+  rtt_ms: number | null;
+  reason?: string | null;
+};
+
+export function pingDevice(
+  apiUrl: string,
+  apiToken: string,
+  deviceId: string,
+): Promise<DevicePingResult> {
+  return apiRequest(apiUrl, apiToken, "/commands/ping", {
+    method: "POST",
+    body: JSON.stringify({ device_id: deviceId }),
+  });
+}
+
 export function fetchCommands(
   apiUrl: string,
   apiToken: string,

@@ -10,7 +10,7 @@ and is echoed back on the agent's next heartbeat poll as a fallback.
 from fastapi import APIRouter, HTTPException
 
 from .. import db, realtime, security
-from ..models import CommandAck, CommandBroadcast, CommandCreate
+from ..models import CommandAck, CommandBroadcast, CommandCreate, DevicePing
 from ..security import AdminOrSuperUser, ApiKey, CurrentUser, SuperAdminUser
 
 router = APIRouter(prefix="/commands", tags=["commands"])
@@ -52,6 +52,21 @@ async def create_command(
     # Push to any connected agent socket so the machine acts immediately.
     await realtime.push_command_to_agent(record)
     return _to_out(record)
+
+
+@router.post("/ping")
+async def ping_device(
+    body: DevicePing, user: AdminOrSuperUser = CurrentUser
+) -> dict:
+    """Live-check whether the desktop agent is connected (admin/super_admin).
+
+    Sends a ping over `/ws/agent` and waits briefly for pong. Does not enqueue
+    a persistent command. Offline or silent agents return connected=false.
+    """
+    device_id = (body.device_id or "").strip()
+    if not device_id:
+        raise HTTPException(status_code=422, detail="device_id is required")
+    return await realtime.ping_agent(device_id)
 
 
 @router.post("/broadcast", status_code=201)
