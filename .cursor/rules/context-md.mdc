@@ -1,0 +1,28 @@
+---
+description: Always read CONTEXT.md and keep it accurate
+alwaysApply: true
+---
+
+# CONTEXT.md is the source of truth
+
+Before changing product behavior, **read** [`CONTEXT.md`](../../CONTEXT.md).
+Treat it as current intended behavior, not optional background.
+
+## Check: is CONTEXT.md OK?
+
+- If the file and the code **disagree**, the **code + tests** win for what ships.
+- Flag the mismatch to the user in plain language.
+- **Update CONTEXT.md in the same change** whenever you add, remove, or alter
+  user-visible behavior (desktop, API, dashboard, installer, updates).
+
+## Do not
+
+- Invent features that are not in CONTEXT.md unless the user asked for them.
+- Leave CONTEXT.md describing old intervals, payloads, OS support, or install
+  flow after you change them.
+
+## After a Windows release stamp
+
+`desktop-app/src/system_info/version.py` must keep both `__version__` and
+`PRODUCT_NAME`. The GitHub Action must not overwrite that file with version
+only (that crash is `ImportError: cannot import name 'PRODUCT_NAME'`).
