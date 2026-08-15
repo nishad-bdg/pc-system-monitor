@@ -60,9 +60,12 @@ Wizard asks for:
 Writes `%APPDATA%\system-info\config.env` and launches `--watch` right after
 install so the PC shows as online immediately. `--watch` is an **always-on**
 background agent (messenger-style): while it is open it stays in the system tray
-with an **Exit** item, keeps the PC "online" (heartbeat ~5 min), flushes new
-print jobs, and sends a **full report hourly**. Closing it (tray → Exit) stops
-it — it does **not** exit on its own after sending data.
+with **Check for updates…**, **Restart** and **Exit** items, keeps the PC
+"online" (heartbeat ~5 min), flushes new print jobs, and sends a **full report
+hourly**. Closing it (tray → Exit) stops it — it does **not** exit on its own
+after sending data. Tray **Restart** spawns a fresh detached `--watch` process
+and stops the current one, so a staged update is applied by restarting the app
+or a wedged watcher is relaunched without a full login.
 
 After install, on the **first run** the app adds itself to the current user's
 **Startup** (HKCU `...\CurrentVersion\Run` → `SystemInfoReporter` →
@@ -72,7 +75,7 @@ fails with a `schtasks` error. A marker file
 (`%APPDATA%\system-info\startup-registered`) ensures this happens only once. Set
 `SYSTEM_INFO_NO_STARTUP=1` to skip self-registration (portable use).
 
-### Remote control (restart / shutdown)
+### Remote control (restart / shutdown / force-update)
 
 While `--watch` is running it holds a persistent WebSocket agent channel to the
 API (`/ws/agent`, authenticated with the same API key) so admin actions land
@@ -86,8 +89,15 @@ API (`/ws/agent`, authenticated with the same API key) so admin actions land
 - If the agent is offline the command stays `pending`; it is re-sent when the
   socket reconnects (`hello`) **and** falls back to the heartbeat poll response.
 
-Both actions are best-effort and run in whatever privileges the watcher has (the
-per-user Run-key process typically can't reboot unless the user is an admin).
+**Update all apps** (`super_admin` only, Fleet sidebar) broadcasts an `update`
+command to every connected agent at once. Each agent checks the release
+manifest, downloads a newer exe when one exists, and `apply-update-restart.cmd`
+waits for the process to exit, swaps the exe and relaunches `--watch` — so the
+updated binary comes back up on its own. Already-up-to-date agents just ack.
+
+Both reboot/shutdown actions are best-effort and run in whatever privileges the
+watcher has (the per-user Run-key process typically can't reboot unless the user
+is an admin).
 
 ## 4. Release updates (not git)
 

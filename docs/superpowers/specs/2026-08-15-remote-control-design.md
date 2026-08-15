@@ -35,7 +35,7 @@ acknowledged outcome visible in the dashboard.
 {
   _id: ObjectId,
   device_id: string,
-  type: "restart" | "shutdown",
+  type: "restart" | "shutdown" | "update",
   status: "pending" | "done" | "failed",
   error?: string,
   created_at: float (unix),
@@ -45,17 +45,40 @@ acknowledged outcome visible in the dashboard.
 
 `requested_by` (username) may be added later; not stored today.
 
+`restart`/`shutdown` reboot/power off the machine; `update` makes the desktop
+app **update itself and restart** (super-admin force-update, below).
+
 ### API
 
 - `POST /commands` — admin JWT. Body `{device_id, type}`; 422 for unknown `type`.
   Calls `realtime.push_command_to_agent(doc)` in-process; if the agent socket is
   connected the command executes immediately, else stays `pending`.
+- `POST /commands/broadcast` — **super_admin** JWT only. Body `{type}`; creates a
+  per-device command for every currently-connected agent socket and pushes each
+  immediately (used for force-update-all). Offline agents are skipped.
 - `GET /commands?device_id=&limit=` — admin JWT; newest first.
 - `POST /commands/{id}/ack` — API key (same as `/reports`); body
   `{status, error?}` → sets `status` + `acked_at`; 409 if already resolved.
 - `GET /heartbeat` — API key; response now includes `commands: [...]`
   (pending ones for that device — offline/HTTP fallback).
 - `GET /ws/agent` — API-key WebSocket agent channel (below).
+
+### Super-admin force-update flow
+
+1. Dashboard Fleet → **Update all apps** (shown only to `super_admin`).
+2. `POST /commands/broadcast {type:"update"}` → one `update` command per
+   connected device pushed over `/ws/agent` instantly.
+3. Each agent executes the `update` command (`commands.py`):
+   - `force_update_and_restart()` (`update.py`) checks the manifest; if a newer
+     build exists it downloads it, then `apply_update_and_restart()` writes a
+     detached batch (`apply-update-restart.cmd`) that **waits for the current
+     PID to exit**, swaps the exe, and relaunches `--watch` — so the *updated*
+     binary comes back up.
+   - The agent acks `done` over WS **and** HTTP, then `_stop_for_update()`
+     stops tray + loop so the process exits and the batch can swap the file.
+   - If already up to date, it acks without a restart (no `on_update_applied`).
+4. Each device also ack-persisted in Mongo, so a later dashboard query of
+   `/commands?device_id=` shows the per-PC outcome.
 
 ### Agent WebSocket (`/ws/agent`)
 
@@ -77,17 +100,26 @@ acknowledged outcome visible in the dashboard.
   "System Events" restart` (mac).
 - `shutdown_machine()` → `shutdown /s /t 5` (win) / `osascript ... shut down`
   (mac).
+- `update` command → `force_update_and_restart()` in `update.py`: manifest
+  check, download, `apply_update_and_restart()` (detached batch that swaps the
+  exe and relaunches `--watch` once the old PID exits). Non-frozen / non-Windows
+  builds ack `failed` ("frozen Windows only").
 - `execute_command(cmd) -> (ok: bool, error: str | None)` dispatches by type.
 - `ack_command(...)` HTTP POSTs the ack (Mongo updated even if the socket fell).
+- `handle_pending_commands(..., on_update_applied)` — heartbeat fallback; after
+  a *staged* update it invokes the callback so the watcher exits and the batch
+  takes over.
 - `WatchCommandSocket(threading.Thread)` holds the persistent agent socket:
   - `WS_RECONNECT_DELAY = 30` (backoff resets on successful message).
   - `_ws_url()` maps `https://…` → `wss://…`, `http://…` → `ws://…`.
   - On connect sends `hello`; executes incoming `command` frames; acks over WS
-    **and** HTTP.
-  - `recv` errors are swallowed so `run()` simply reconnects forever.
-- `watch.py::run_blocking()` starts the socket thread before the tray loop and
-  `watch.py::stop()` stops it. One-shot `--heartbeat` still handles the poll
-  fallback (`handle_pending_commands` via `cli.py`).
+    **and** HTTP. An `update` command that staged calls `on_update_applied`
+    (WS path) then exits the session so the process can die.
+- `watch.py::run_blocking()` starts the socket thread (with
+  `on_update_applied=self._stop_for_update`) before the tray loop and
+  `watch.py::stop()` stops it. `_stop_for_update()` stops the tray + loop so
+  the running exe is released for the updater batch. One-shot `--heartbeat`
+  handles the poll fallback without a restart (it exits on its own anyway).
 
 ### Dashboard (`dashboard/src/components/dashboard/remote-actions.tsx`)
 

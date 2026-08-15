@@ -82,6 +82,17 @@ def execute_command(command_type: str) -> tuple[bool, str | None]:
     if command_type == "shutdown":
         ok = shutdown_machine()
         return ok, None if ok else "shutdown not possible on this platform"
+    if command_type == "update":
+        # Stage a forced app update. ok=True means a newer build was staged
+        # and the app MUST restart (caller stops the watcher; the updater
+        # batch swaps the exe and relaunches --watch).
+        try:
+            from .update import force_update_and_restart
+
+            ok, message = force_update_and_restart(quiet=True)
+        except Exception:
+            return False, "update failed"
+        return ok, None if ok else message
     return False, f"unsupported command: {command_type}"
 
 
@@ -116,8 +127,14 @@ def handle_pending_commands(
     commands: list[dict] | None,
     api_url: str,
     api_key: str = "",
+    on_update_applied=None,
 ) -> None:
-    """Execute any pending remote commands and ack the outcome (HTTP fallback)."""
+    """Execute any pending remote commands and ack the outcome (HTTP fallback).
+
+    `on_update_applied` (callable, optional) is invoked after a previously
+    staged app update so a running watcher can exit and let the updater batch
+    swap the exe + relaunch.
+    """
     for cmd in commands or []:
         command_type = (cmd.get("type") or "").strip()
         command_id = str(cmd.get("id") or "").strip()
@@ -125,6 +142,8 @@ def handle_pending_commands(
             continue
         ok, error = execute_command(command_type)
         ack_command(command_id, "done" if ok else "failed", api_url, api_key, error)
+        if command_type == "update" and ok and on_update_applied:
+            on_update_applied()
 
 
 # ---- WebSocket agent (always-on watcher, immediate command delivery) ----
@@ -140,12 +159,20 @@ class WatchCommandSocket(threading.Thread):
     executes them and replies with `command.ack`. `stop()` closes the loop.
     """
 
-    def __init__(self, api_url: str, api_key: str, device_id: str, pc_name: str | None = None):
+    def __init__(
+        self,
+        api_url: str,
+        api_key: str,
+        device_id: str,
+        pc_name: str | None = None,
+        on_update_applied=None,
+    ):
         super().__init__(name="agent-ws", daemon=True)
         self.api_url = api_url
         self.api_key = api_key
         self.device_id = device_id
         self.pc_name = pc_name
+        self.on_update_applied = on_update_applied
         self._stop = threading.Event()
 
     def stop(self) -> None:
@@ -204,6 +231,12 @@ class WatchCommandSocket(threading.Thread):
                         except Exception:
                             ok, error = False, "command execution failed"
                         self._send_ack(ws, command_id, ok, error)
+                        # A staged app update needs the *running* process to
+                        # exit: the updater batch waits for this PID to vanish,
+                        # swaps the exe, then launches `--watch` on the new one.
+                        if command_type == "update" and ok and self.on_update_applied:
+                            self.on_update_applied()
+                            return
         finally:
             try:
                 ws.close()

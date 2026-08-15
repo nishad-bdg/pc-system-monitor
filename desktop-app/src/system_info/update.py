@@ -74,32 +74,24 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def apply_windows_update(manifest: dict) -> str | None:
-    """Download new exe beside the current one and write an updater batch.
-
-    Returns path to the pending updater script, or None on failure.
-    The batch replaces the running exe on the next scheduled run-friendly
-    restart (user or Task Scheduler).
-    """
-    if not is_frozen() or os.name != "nt":
-        return None
+def _download_new_exe(manifest: dict, *, expected: str = "") -> Path | None:
+    """Download the manifest's new exe to `system-info.new.<suffix>`, verifying
+    the optional sha256. Returns the pending path or None on failure."""
     windows = manifest.get("windows")
     if not isinstance(windows, dict):
         return None
     url = str(windows.get("url") or "")
-    expected = str(windows.get("sha256") or "").lower().strip()
+    expected = (expected or str(windows.get("sha256") or "")).lower().strip()
     if not url:
         return None
-
-    current = Path(sys.executable).resolve()
-    target_dir = install_dir()
     try:
         resp = requests.get(url, timeout=120, stream=True)
         resp.raise_for_status()
     except (requests.RequestException, OSError):
         return None
 
-    suffix = current.suffix or ".exe"
+    suffix = Path(sys.executable).suffix or ".exe"
+    target_dir = install_dir()
     pending = target_dir / f"system-info.new{suffix}"
     try:
         with pending.open("wb") as handle:
@@ -113,16 +105,95 @@ def apply_windows_update(manifest: dict) -> str | None:
                 return None
     except OSError:
         return None
+    return pending
 
+
+def apply_windows_update(manifest: dict) -> str | None:
+    """Download new exe beside the current one and write an updater batch.
+
+    Returns path to the pending updater script, or None on failure.
+    The batch replaces the running exe on the next scheduled run-friendly
+    restart (user or Task Scheduler).
+    """
+    if not is_frozen() or os.name != "nt":
+        return None
+    windows = manifest.get("windows")
+    if not isinstance(windows, dict):
+        return None
+    url = str(windows.get("url") or "")
+    if not url:
+        return None
+
+    pending = _download_new_exe(manifest)
+    if pending is None:
+        return None
+
+    current = Path(sys.executable).resolve()
+    target_dir = install_dir()
     # Batch: wait briefly, replace exe, delete pending, optional restart not required
     # for Task Scheduler — next 30m run uses the new binary.
     updater = target_dir / "apply-update.cmd"
-    backup = target_dir / f"system-info.prev{suffix}"
+    backup = target_dir / f"system-info.prev{current.suffix}"
     script = f"""@echo off
 ping 127.0.0.1 -n 3 >nul
 if exist "{backup}" del /f /q "{backup}"
 if exist "{current}" move /y "{current}" "{backup}"
 move /y "{pending}" "{current}"
+del /f /q "%~f0"
+"""
+    try:
+        updater.write_text(script, encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        import subprocess
+
+        flags = 0
+        if hasattr(subprocess, "DETACHED_PROCESS"):
+            flags |= subprocess.DETACHED_PROCESS
+        if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+            flags |= subprocess.CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen(
+            [os.environ.get("COMSPEC", "cmd.exe"), "/c", str(updater)],
+            creationflags=flags,
+            close_fds=True,
+        )
+    except OSError:
+        return str(updater)
+    return str(updater)
+
+
+def apply_update_and_restart(manifest: dict) -> str | None:
+    """Download a new exe and write a batch that swaps it in AND relaunches
+    `--watch` once this (old) process has fully exited.
+
+    Returns the updater script path, or None on failure. The caller should
+    stop the watcher promptly after this returns so the running exe is
+    released; the batch then replaces it and starts the updated app.
+    """
+    if not is_frozen() or os.name != "nt":
+        return None
+    pending = _download_new_exe(manifest)
+    if pending is None:
+        return None
+
+    current = Path(sys.executable).resolve()
+    target_dir = install_dir()
+    pid = os.getpid()
+    updater = target_dir / "apply-update-restart.cmd"
+    backup = target_dir / f"system-info.prev{current.suffix}"
+    script = f"""@echo off
+rem Wait for the current watcher (pid {pid}) to exit so the exe is unlocked.
+:wait
+tasklist /FI "PID eq {pid}" 2>nul | findstr "{pid}" >nul
+if not errorlevel 1 (
+  ping 127.0.0.1 -n 2 >nul
+  goto wait
+)
+if exist "{backup}" del /f /q "{backup}"
+if exist "{current}" move /y "{current}" "{backup}"
+move /y "{pending}" "{current}"
+start "" "{current}" --watch
 del /f /q "%~f0"
 """
     try:
@@ -156,3 +227,26 @@ def maybe_auto_update(quiet: bool = True) -> bool:
     if path and not quiet:
         print(f"[update] applying {manifest.get('version')} via {path}")
     return bool(path)
+
+
+def force_update_and_restart(quiet: bool = True) -> tuple[bool, str]:
+    """Check for a newer build, apply it and arrange a self-restart (remote
+    'update' command). Returns (did_apply, message).
+
+    When a newer build exists this downloads it, writes a batch that waits for
+    this process to exit, swaps the exe and relaunches `--watch` — so the
+    updated binary is what comes back up. The caller must stop the watcher
+    after this returns True. When already up to date, returns (False,
+    "up to date") and no restart should happen.
+    """
+    if not is_frozen() or os.name != "nt":
+        return False, "Update only works on frozen Windows builds"
+    manifest = check_for_update()
+    if not manifest:
+        return False, f"Already up to date (v{__version__})"
+    path = apply_update_and_restart(manifest)
+    if not path:
+        return False, "Could not stage the update"
+    if not quiet:
+        print(f"[update] forced update to {manifest.get('version')} staged via {path}")
+    return True, f"Update v{manifest.get('version')} staged — restarting app"

@@ -10,12 +10,12 @@ and is echoed back on the agent's next heartbeat poll as a fallback.
 from fastapi import APIRouter, HTTPException
 
 from .. import db, realtime, security
-from ..models import CommandAck, CommandCreate
-from ..security import AdminOrSuperUser, ApiKey, CurrentUser
+from ..models import CommandAck, CommandBroadcast, CommandCreate
+from ..security import AdminOrSuperUser, ApiKey, CurrentUser, SuperAdminUser
 
 router = APIRouter(prefix="/commands", tags=["commands"])
 
-COMMAND_TYPES = {"restart", "shutdown"}
+COMMAND_TYPES = {"restart", "shutdown", "update"}
 ACK_STATUSES = {db.COMMAND_STATUS_DONE, db.COMMAND_STATUS_FAILED}
 
 
@@ -52,6 +52,40 @@ async def create_command(
     # Push to any connected agent socket so the machine acts immediately.
     await realtime.push_command_to_agent(record)
     return _to_out(record)
+
+
+@router.post("/broadcast", status_code=201)
+async def broadcast_command(
+    body: CommandBroadcast, user: SuperAdminUser = CurrentUser
+) -> dict:
+    """Push a command to every currently-connected desktop agent (super_admin
+    only) — used e.g. to force-update all running apps at once.
+
+    Each connected device gets its own persisted command so acks are tracked
+    per device; offline agents are skipped (no socket to push to) and can be
+    targeted individually.
+    """
+    command_type = (body.type or "").strip()
+    if not command_type:
+        raise HTTPException(status_code=422, detail="type is required")
+    if command_type not in COMMAND_TYPES:
+        raise HTTPException(status_code=422, detail="Unsupported command type")
+    device_ids = realtime.connected_agent_device_ids()
+    sent: list[dict] = []
+    for device_id in device_ids:
+        command_id = db.create_command(device_id, command_type, user.get("_id", ""))
+        if command_id is None:
+            continue
+        record = db.get_command(str(command_id))
+        if record is None:
+            continue
+        await realtime.push_command_to_agent(record)
+        sent.append({
+            "device_id": device_id,
+            "command_id": str(command_id),
+            "type": command_type,
+        })
+    return {"total": len(sent), "sent": sent, "connected": len(device_ids)}
 
 
 @router.get("")

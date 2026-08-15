@@ -54,6 +54,11 @@ def agent_sockets(device_id: str) -> list[WebSocket]:
     return list(_agent_clients.get(device_id) or [])
 
 
+def connected_agent_device_ids() -> list[str]:
+    """Every device_id with at least one live desktop-agent socket."""
+    return [dev for dev, sockets in _agent_clients.items() if sockets]
+
+
 async def push_command_to_agent(command: dict) -> None:
     """Push a command to every connected desktop agent of a device (if any).
 

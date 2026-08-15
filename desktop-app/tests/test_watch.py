@@ -1,4 +1,6 @@
 import argparse
+import os
+import sys
 
 import pytest
 
@@ -123,3 +125,63 @@ def test_handle_update_request_handles_exceptions(monkeypatch):
 
     assert "failed" in message.lower()
     assert "update failed" in title
+
+
+def test_restart_command_non_frozen(monkeypatch):
+    import sys as _sys
+
+    monkeypatch.setattr("system_info.config.is_frozen", lambda: False)
+    loop = WatchLoop(_args(pc_name="PC"))
+    cmd = loop.restart_command()
+    assert cmd[:3] == [_sys.executable, "-m", "system_info"]
+    assert cmd[3] == "--watch"
+    assert "--pc-name" in cmd and cmd[cmd.index("--pc-name") + 1] == "PC"
+
+
+def test_restart_command_frozen(monkeypatch):
+    monkeypatch.setattr("system_info.config.is_frozen", lambda: True)
+    loop = WatchLoop(_args(pc_name=""))
+    cmd = loop.restart_command()
+    assert cmd == [os.path.abspath(sys.executable), "--watch"]
+
+
+def test_restart_command_never_leaks_credentials(monkeypatch):
+    monkeypatch.setattr("system_info.config.is_frozen", lambda: False)
+    loop = WatchLoop(_args(api_url="http://x", api_key="sk-secret", pc_name="PC"))
+    cmd = " ".join(loop.restart_command())
+    assert "sk-secret" not in cmd
+    assert "http://x" not in cmd
+
+
+def test_restart_command_omits_empty_pc_name():
+    loop = WatchLoop(_args())
+    cmd = loop.restart_command()
+    assert "--pc-name" not in cmd
+
+
+def test_handle_restart_spawns_detached(monkeypatch):
+    import subprocess
+
+    spawned = {}
+
+    def fake_popen(cmd, **kwargs):
+        spawned["cmd"] = cmd
+        spawned["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    loop = WatchLoop(_args(pc_name="PC-7"))
+    assert loop.handle_restart() is True
+    assert "--watch" in spawned["cmd"]
+    assert spawned["kwargs"]["start_new_session"] is True
+
+
+def test_handle_restart_failure_reports_false(monkeypatch):
+    import subprocess
+
+    def boom(*a, **k):
+        raise OSError("no")
+
+    monkeypatch.setattr(subprocess, "Popen", boom)
+    loop = WatchLoop(_args())
+    assert loop.handle_restart() is False

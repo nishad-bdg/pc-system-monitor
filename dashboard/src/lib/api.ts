@@ -962,3 +962,14 @@ export function fetchCommands(
   if (deviceId) params.set("device_id", deviceId);
   return apiRequest(apiUrl, apiToken, `/commands?${params}`);
 }
+
+export function broadcastCommand(
+  apiUrl: string,
+  apiToken: string,
+  type = "update",
+): Promise<{ total: number; sent: Command[]; connected: number }> {
+  return apiRequest(apiUrl, apiToken, "/commands/broadcast", {
+    method: "POST",
+    body: JSON.stringify({ type }),
+  });
+}

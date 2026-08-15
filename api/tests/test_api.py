@@ -2060,6 +2060,85 @@ def test_get_commands_list(monkeypatch):
     assert resp.json()["commands"][0]["type"] == "restart"
 
 
+def test_broadcast_command_requires_super_admin(monkeypatch):
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "admin",
+        "role": "admin",
+        "groups": [],
+    })
+    resp = client.post(
+        "/commands/broadcast",
+        json={"type": "update"},
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 403
+
+
+def test_broadcast_command_pushes_to_all_connected(monkeypatch):
+    from sysinfo_api import realtime
+
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "root",
+        "role": "super_admin",
+        "groups": [],
+    })
+    monkeypatch.setattr(realtime, "_agent_clients", {"dev-1": [object()], "dev-2": [object()]})
+    monkeypatch.setattr(realtime, "connected_agent_device_ids", lambda: ["dev-1", "dev-2"])
+
+    def fake_create(device_id, command_type, requested_by):
+        return f"64b0000000000000000{device_id[-1] * 5}"
+
+    monkeypatch.setattr(db, "create_command", fake_create)
+
+    def fake_get(cid):
+        return {
+            "_id": ObjectIdStr(cid),
+            "device_id": "dev-" + {"1": "1", "2": "2"}.get(str(cid)[-1], "1"),
+            "type": "update",
+            "status": "pending",
+            "created_at": 100.0,
+            "acked_at": None,
+        }
+
+    monkeypatch.setattr(db, "get_command", fake_get)
+    pushed = []
+
+    async def fake_push(command):
+        pushed.append(command.get("device_id"))
+
+    monkeypatch.setattr(realtime, "push_command_to_agent", fake_push)
+    resp = client.post(
+        "/commands/broadcast",
+        json={"type": "update"},
+        headers=_auth_header(role="super_admin"),
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["total"] == 2
+    assert body["connected"] == 2
+    assert sorted(pushed) == ["dev-1", "dev-2"]
+
+
+def test_broadcast_command_rejects_bad_type(monkeypatch):
+    from sysinfo_api import realtime
+
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "root",
+        "role": "super_admin",
+        "groups": [],
+    })
+    monkeypatch.setattr(realtime, "connected_agent_device_ids", lambda: [])
+    resp = client.post(
+        "/commands/broadcast",
+        json={"type": "boom"},
+        headers=_auth_header(role="super_admin"),
+    )
+    assert resp.status_code == 422
+
+
 # ---- agent websocket (immediate command push) ----
 
 def test_websocket_agent_requires_api_key(monkeypatch):

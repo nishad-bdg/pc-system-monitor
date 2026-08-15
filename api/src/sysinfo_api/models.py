@@ -49,6 +49,11 @@ class CommandCreate(BaseModel):
     type: str = "restart"
 
 
+class CommandBroadcast(BaseModel):
+    """Send a command to every currently-connected desktop agent at once."""
+    type: str = "update"
+
+
 class CommandAck(BaseModel):
     status: str  # "done" | "failed"
     error: str | None = None

@@ -150,6 +150,69 @@ def test_execute_command_unsupported(monkeypatch):
     assert "unsupported" in error
 
 
+def test_execute_command_update_stages_and_restarts(monkeypatch):
+    import system_info.update as update_mod
+
+    monkeypatch.setattr("system_info.update.is_frozen", lambda: True)
+    monkeypatch.setattr("system_info.commands.os.name", "nt")
+    monkeypatch.setattr(update_mod, "check_for_update", lambda *a, **k: {"version": "9.9.9", "windows": {"url": "http://x/new.exe"}})
+    monkeypatch.setattr(update_mod, "apply_update_and_restart", lambda manifest: "/tmp/apply-update-restart.cmd")
+
+    ok, error = commands.execute_command("update")
+    assert ok is True
+    assert error is None
+
+
+def test_execute_command_update_up_to_date(monkeypatch):
+    import system_info.update as update_mod
+
+    monkeypatch.setattr("system_info.update.is_frozen", lambda: True)
+    monkeypatch.setattr("system_info.commands.os.name", "nt")
+    monkeypatch.setattr(update_mod, "check_for_update", lambda *a, **k: None)
+
+    ok, error = commands.execute_command("update")
+    assert ok is False
+    assert "up to date" in error
+
+
+def test_execute_command_update_non_frozen(monkeypatch):
+    import system_info.update as update_mod
+
+    monkeypatch.setattr("system_info.update.is_frozen", lambda: False)
+    monkeypatch.setattr("system_info.commands.os.name", "nt")
+
+    ok, error = commands.execute_command("update")
+    assert ok is False
+    assert "frozen" in error
+
+
+def test_handle_pending_commands_update_triggers_restart(monkeypatch):
+    import system_info.update as update_mod
+
+    monkeypatch.setattr("system_info.update.is_frozen", lambda: True)
+    monkeypatch.setattr("system_info.commands.os.name", "nt")
+    monkeypatch.setattr(update_mod, "check_for_update", lambda *a, **k: {"version": "9.9.9", "windows": {"url": "http://x/new.exe"}})
+    monkeypatch.setattr(update_mod, "apply_update_and_restart", lambda manifest: "/tmp/apply-update-restart.cmd")
+
+    acks = []
+
+    def fake_ack(cid, status, url, key="", error=None):
+        acks.append((cid, status))
+        return True
+
+    monkeypatch.setattr(commands, "ack_command", fake_ack)
+    restarted = {"called": False}
+
+    commands.handle_pending_commands(
+        [{"id": "cmd-u", "type": "update"}],
+        "http://x",
+        "sk-key",
+        on_update_applied=lambda: restarted.update(called=True),
+    )
+    assert acks == [("cmd-u", "done")]
+    assert restarted["called"] is True
+
+
 def test_ws_url_maps_scheme():
     sock = commands.WatchCommandSocket("https://api.example.com/", "sk", "d1")
     assert sock._ws_url() == "wss://api.example.com/ws/agent"
@@ -215,3 +278,58 @@ def test_ws_agent_session_executes_and_acks(monkeypatch):
     assert ack["command_id"] == "cmd-9"
     assert ack["status"] == "done"
     assert fake_ws.closed is True
+
+
+def test_ws_agent_update_triggers_restart_callback(monkeypatch):
+    import json as _json
+
+    import system_info.update as update_mod
+
+    monkeypatch.setattr("system_info.update.is_frozen", lambda: True)
+    monkeypatch.setattr("system_info.commands.os.name", "nt")
+    monkeypatch.setattr(update_mod, "check_for_update", lambda *a, **k: {"version": "9.9.9", "windows": {"url": "http://x/new.exe"}})
+    monkeypatch.setattr(update_mod, "apply_update_and_restart", lambda manifest: "/tmp/apply-update-restart.cmd")
+
+    sent = []
+
+    class FakeWs:
+        def __init__(self, inbox):
+            self.inbox = list(inbox)
+            self.closed = False
+
+        def send(self, data):
+            sent.append(_json.loads(data))
+
+        def recv(self):
+            if not self.inbox:
+                raise OSError("closed")
+            return self.inbox.pop(0)
+
+        def close(self):
+            self.closed = True
+
+    command_msg = _json.dumps(
+        {"type": "command", "command": {"id": "cmd-u", "type": "update"}, "ts": 1}
+    )
+    monkeypatch.setattr(commands, "ack_command", lambda *a, **k: True)
+
+    fake_ws = FakeWs([command_msg])
+
+    def fake_create_connection(url, subprotocols=None, timeout=5, enable_multithread=False):
+        return fake_ws
+
+    import websocket as _ws_module
+
+    monkeypatch.setattr(_ws_module, "create_connection", fake_create_connection)
+    monkeypatch.setattr(_ws_module, "WebSocket", lambda: None)
+
+    restarted = {"called": False}
+    sock = commands.WatchCommandSocket(
+        "https://x", "sk-key", "d1", on_update_applied=lambda: restarted.update(called=True)
+    )
+    sock._session()
+
+    ack = [m for m in sent if m.get("type") == "command.ack"][-1]
+    assert ack["status"] == "done"
+    assert ack["command_id"] == "cmd-u"
+    assert restarted["called"] is True

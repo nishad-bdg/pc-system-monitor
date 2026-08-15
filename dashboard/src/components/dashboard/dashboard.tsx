@@ -17,6 +17,7 @@ import { DashboardShell } from "./shell";
 import { MachineDetail } from "./machine-detail";
 import { StatusDot } from "./status-dot";
 import { PrintingBadge } from "./printing-badge";
+import { UpdateAppsButton } from "./update-apps-button";
 import { useRealtime } from "../realtime-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -187,14 +188,19 @@ export function Dashboard() {
         </>
       }
       sidebarFooter={
-        <button
-          type="button"
-          onClick={() => refreshAll()}
-          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
-          disabled={isFetching}
-        >
-          {isFetching ? "Refreshing…" : "Refresh"}
-        </button>
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => refreshAll()}
+            className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+            disabled={isFetching}
+          >
+            {isFetching ? "Refreshing…" : "Refresh"}
+          </button>
+          {session?.user?.role === "super_admin" && (
+            <UpdateAppsButton apiUrl={API_URL} apiToken={apiToken ?? ""} />
+          )}
+        </div>
       }
       header={
         <div className="border-b border-slate-200 bg-white/80 px-6 py-4 backdrop-blur">

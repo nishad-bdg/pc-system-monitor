@@ -219,10 +219,10 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
 - `GET/POST/PATCH/DELETE /groups` — admin JWT; a machine key belongs to **one bucket only** (assigning removes it from other groups AND sub-categories).
 - `GET/POST/PATCH/DELETE /sub-categories` — admin JWT; create/update take `group_ids` (many-to-many); `PATCH` machine_keys remove the keys from all groups and other sub-categories (one-bucket).
 - `POST /print-jobs` — API key; batch `{device_id, pc_name, jobs:[...]}` → Mongo `print_jobs` + WS `print.job`. `GET /print-jobs`, `GET /print-jobs/summary` — JWT (see Print Activity below).
-- `POST /commands` — admin JWT; `{device_id, type: "restart" | "shutdown"}` → Mongo `commands` collection + push to the agent over `/ws/agent`. `GET /commands?device_id=&limit=` — admin JWT, newest first. `POST /commands/{id}/ack` — **API key**; sets `status` + `acked_at` (409 if already resolved). See **Remote control** below.
+- `POST /commands` — admin JWT; `{device_id, type: "restart" | "shutdown" | "update"}` → Mongo `commands` collection + push to the agent over `/ws/agent`. `POST /commands/broadcast` — **super_admin** only; pushes one `update` command to every connected agent socket at once (force-update all apps). `GET /commands?device_id=&limit=` — admin JWT, newest first. `POST /commands/{id}/ack` — **API key**; sets `status` + `acked_at` (409 if already resolved). See **Remote control** below.
 - Auth, users, health — unchanged pattern.
 
-### Remote control (Restart / Shutdown)
+### Remote control (Restart / Shutdown / Update app)
 
 - Admin triggers it from the dashboard detail header (**Restart** / **Shut down**
   buttons, `admin`/`super_admin` only, show only when the machine has a
@@ -244,6 +244,18 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
   re-sent on agent `hello` at reconnect **and** echoed in the `commands` field of
   the heartbeat poll response (`GET/POST /heartbeat`), which the one-shot
   `--heartbeat` and self-healing `--watch` both process.
+- **Force-update all apps (`update` command):** the Fleet sidebar **Update all
+  apps** button (`super_admin` only) calls `POST /commands/broadcast {type:
+  "update"}` → a per-device command is pushed to **every connected agent
+  socket** at once. Each agent runs `update.py::force_update_and_restart()`:
+  if a newer build exists it downloads it and `apply_update_and_restart()` writes
+  a detached `apply-update-restart.cmd` that **waits for the old PID to exit,
+  swaps the exe and relaunches `--watch`** — so the updated binary comes back
+  up. The agent acks `done` then `_stop_for_update()` stops tray + loop, letting
+  the batch swap the (now-unlocked) exe. Already-up-to-date agents ack `done`
+  but don't restart. Non-frozen/dev builds ack `failed`. Offline agents are
+  skipped by the broadcast; per-device `POST /commands {type:"update"}` targets
+  one PC.
 - Broadcasting is in-process (per uvicorn worker), same caveat as print/WS
   events.
 
@@ -291,7 +303,7 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 
 ### Fleet (`/dashboard`)
 
-- Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports. Each PC row and the detail header show a **green (online) / red (offline)** status dot; data updates live via WebSocket.
+- Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports. Each PC row and the detail header show a **green (online) / red (offline)** status dot; data updates live via WebSocket. For `super_admin` the sidebar footer also shows an **Update all apps** button that pushes a `update` broadcast to every connected desktop app at once.
 - Detail tabs (`machine-detail.tsx`): **Summary (default) / Overview / Printers / Uptime / Storage / Health / Emails**.
   - **Summary:** total uptime + session, network total + bandwidth, full CPU spec (model/arch/cores/clock + **brand**), full RAM spec (total/available/free/swap + **bus speed** `ram_speed_mhz` + `ram_type`), storage health (SSD/HDD badge + brand, SMART, Healthy/Failing), battery health (condition, health %, cycle count), internet security, printers + total prints.
   - **Overview:** CPU/RAM/swap tiles, compact UptimeState (session + days tracked) + DiskState (devices/used/free), location/machine, Battery stat card (laptops only), Network bandwidth chart, Printers, Security card.
@@ -338,14 +350,17 @@ See `desktop-app/packaging/windows/README.md`.
   No scheduled task is created — startup is handled by the admin-free HKCU Run
   key (below) to avoid elevation/`schtasks` failures during install.
 - **Always-on watcher (`--watch`, messenger-style):** a single persistent
-  background process (system-tray icon with **Check for updates…** and **Exit**)
-  that keeps the PC "online" (heartbeat ~ every 5 min), flushes new print jobs,
-  and sends a **full report hourly**. It stays open until the user exits it from
-  the tray — it does **not** exit after sending data. The tray **Check for
-  updates…** item checks the manifest on a background thread, stages the new exe
-  via the updater batch when newer, and shows a tray notification ("already up
-  to date" / "update ready — restart to apply" / failure). This replaces the old
-  hourly `SystemInfoReport` + every-5-min `SystemInfoHeartbeat` scheduled tasks
+  background process (system-tray icon with **Check for updates…**, **Restart**
+  and **Exit**) that keeps the PC "online" (heartbeat ~ every 5 min), flushes
+  new print jobs, and sends a **full report hourly**. It stays open until the
+  user exits it from the tray — it does **not** exit after sending data. Tray
+  **Restart** spawns a fresh detached `--watch` process and stops the current
+  one (same `DETACHED_PROCESS` pattern as the updater); used to apply a staged
+  update or recover from a wedged state. The tray **Check for updates…** item
+  checks the manifest on a background thread, stages the new exe via the updater
+  batch when newer, and shows a tray notification ("already up to date" /
+  "update ready — restart to apply" / failure). This replaces the old hourly
+  `SystemInfoReport` + every-5-min `SystemInfoHeartbeat` scheduled tasks
   (one-shot `--heartbeat` still works for manual/portable use).
 - **Auto-start on logon:** on the **first run** after install the app registers a
   `SystemInfoReporter` value under HKCU `...\CurrentVersion\Run` pointing to

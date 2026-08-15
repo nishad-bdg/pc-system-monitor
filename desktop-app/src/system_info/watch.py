@@ -16,6 +16,8 @@ Timing:
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 import threading
 import time
 
@@ -82,6 +84,7 @@ class WatchLoop:
                     response.get("commands"),
                     self.args.api_url,
                     self.args.api_key,
+                    on_update_applied=self._stop_for_update,
                 )
             except Exception:
                 pass
@@ -91,6 +94,23 @@ class WatchLoop:
         except Exception:
             pass
         return bool(response)
+
+    def _stop_for_update(self) -> None:
+        """A forced update was staged: stop this process and let it die.
+
+        `apply_update_and_restart` already spawned a detached batch that waits
+        for THIS pid to vanish, swaps the exe, and relaunches `--watch` on the
+        new binary. So all that remains is to release the running exe: stop the
+        tray (unblocks run_blocking) + the loop/agent, and the process exits.
+        No replacement is spawned here — the updater batch does that.
+        """
+        icon = getattr(self, "_tray_icon", None)
+        if icon is not None:
+            try:
+                icon.stop()
+            except Exception:
+                pass
+        self.stop()
 
     def full_report(self) -> None:
         full_args = watch_args(self.args, no_save=True)
@@ -137,13 +157,20 @@ class WatchLoop:
         self._worker.start()
 
         # Immediate command delivery: keep a /ws/agent socket open so remote
-        # restart/shutdown commands arrive instantly instead of waiting for the
-        # next heartbeat poll.
+        # restart/shutdown/update commands arrive instantly instead of waiting
+        # for the next heartbeat poll. A staged update exits the whole watcher
+        # so the updater batch can swap the exe and relaunch --watch.
         from .commands import WatchCommandSocket
 
         pc_name = resolve_pc_name(self.args.pc_name)
         device_id = get_or_create_device_id(pc_name)
-        agent = WatchCommandSocket(self.args.api_url, self.args.api_key, device_id, pc_name)
+        agent = WatchCommandSocket(
+            self.args.api_url,
+            self.args.api_key,
+            device_id,
+            pc_name,
+            on_update_applied=self._stop_for_update,
+        )
         agent.start()
         self._agent_ws = agent
 
@@ -174,6 +201,50 @@ class WatchLoop:
         from .version import __version__
 
         return __version__
+
+    def restart_command(self) -> list[str]:
+        """argv that re-launches this same watcher (used by the tray Restart).
+
+        API URL/key/update URL are NOT re-passed on the command line: the child
+        inherits the SYSTEM_INFO_* env vars already loaded from config.env, so
+        nothing secret leaks into the process list. Only a CLI-given --pc-name
+        is forwarded.
+        """
+        from .config import is_frozen
+
+        if is_frozen():
+            cmd = [os.path.abspath(sys.executable)]
+        else:
+            cmd = [sys.executable, "-m", "system_info"]
+        cmd.append("--watch")
+        if self.args.pc_name:
+            cmd += ["--pc-name", str(self.args.pc_name)]
+        return cmd
+
+    def handle_restart(self) -> bool:
+        """Spawn a fresh copy of this watcher, detached (tray "Restart").
+
+        Returns True when the new process was started; the caller should then
+        stop this instance so the replacement becomes the sole live watcher.
+        Reuses the same detached-process flags as the Windows updater.
+        """
+        import subprocess
+
+        kwargs: dict = {"close_fds": True}
+        if os.name == "nt":
+            flags = 0
+            if hasattr(subprocess, "DETACHED_PROCESS"):
+                flags |= subprocess.DETACHED_PROCESS
+            if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+                flags |= subprocess.CREATE_NEW_PROCESS_GROUP
+            kwargs["creationflags"] = flags
+        else:
+            kwargs["start_new_session"] = True
+        try:
+            subprocess.Popen(self.restart_command(), **kwargs)
+        except OSError:
+            return False
+        return True
 
     def handle_update_request(self) -> tuple[str, str]:
         """Run a manual update check (tray "Check for updates…").
@@ -210,7 +281,7 @@ class WatchLoop:
 
 
 def _tray_icon(loop: "WatchLoop"):
-    """Build a pystray system-tray icon with Check-update + Exit items."""
+    """Build a pystray system-tray icon with Check-update, Restart + Exit items."""
     try:
         import pystray
         from PIL import Image, ImageDraw
@@ -247,6 +318,14 @@ def _tray_icon(loop: "WatchLoop"):
 
         threading.Thread(target=_work, daemon=True).start()
 
+    def _on_restart(icon, item):
+        if loop.handle_restart():
+            # Replacement process is up; stop this instance (tray + loop + WS).
+            icon.stop()
+            loop.stop()
+        else:
+            _notify(icon, "Could not restart the app. Try Exit instead.", "System Info — restart failed")
+
     try:
         icon = pystray.Icon(
             "SystemInfo",
@@ -255,6 +334,7 @@ def _tray_icon(loop: "WatchLoop"):
             menu=pystray.Menu(
                 pystray.MenuItem("System Info — online", lambda: None, enabled=False),
                 pystray.MenuItem("Check for updates…", _on_check_update),
+                pystray.MenuItem("Restart", _on_restart),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Exit", _on_exit),
             ),
