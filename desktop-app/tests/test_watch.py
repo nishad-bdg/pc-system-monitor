@@ -1,5 +1,7 @@
 import argparse
 
+import pytest
+
 from system_info.watch import HEARTBEAT_INTERVAL, HOUR_INTERVAL, WatchLoop
 
 
@@ -81,3 +83,43 @@ def test_should_full_report_hourly_aligned():
 def test_heartbeat_and_full_report_intervals_are_sane():
     assert HEARTBEAT_INTERVAL <= 300
     assert HOUR_INTERVAL == 3600
+
+
+@pytest.mark.parametrize(
+    "manifest, staged, expected_fragment",
+    [
+        (None, None, "Already up to date"),
+        ({"version": "9.9.9"}, "/x/apply-update.cmd", "staged"),
+        ({"version": "9.9.9"}, None, "could not be applied"),
+    ],
+)
+def test_handle_update_request(monkeypatch, manifest, staged, expected_fragment):
+    import system_info.update as update_mod
+
+    monkeypatch.setattr(update_mod, "check_for_update", lambda *a, **k: manifest)
+    monkeypatch.setattr(update_mod, "apply_windows_update", lambda *a, **k: staged)
+
+    loop = WatchLoop(_args())
+    message, title = loop.handle_update_request()
+
+    assert expected_fragment in message
+    if not manifest:
+        assert "no update" in title
+    elif staged:
+        assert "restart the app to apply" in message.lower()
+        assert "update ready" in title
+
+
+def test_handle_update_request_handles_exceptions(monkeypatch):
+    import system_info.update as update_mod
+
+    def boom(*a, **k):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(update_mod, "check_for_update", boom)
+
+    loop = WatchLoop(_args())
+    message, title = loop.handle_update_request()
+
+    assert "failed" in message.lower()
+    assert "update failed" in title

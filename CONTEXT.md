@@ -311,12 +311,15 @@ See `desktop-app/packaging/windows/README.md`.
   **SystemInfoWatch** Task Scheduler job (runs `--watch` at every logon), and
   launches `--watch` right after install so the PC is online immediately.
 - **Always-on watcher (`--watch`, messenger-style):** a single persistent
-  background process (system-tray icon with **Exit**) that keeps the PC "online"
-  (heartbeat ~ every 5 min), flushes new print jobs, and sends a **full report
-  hourly**. It stays open until the user exits it from the tray — it does **not**
-  exit after sending data. This replaces the old hourly `SystemInfoReport` +
-  every-5-min `SystemInfoHeartbeat` scheduled tasks (one-shot `--heartbeat`
-  still works for manual/portable use).
+  background process (system-tray icon with **Check for updates…** and **Exit**)
+  that keeps the PC "online" (heartbeat ~ every 5 min), flushes new print jobs,
+  and sends a **full report hourly**. It stays open until the user exits it from
+  the tray — it does **not** exit after sending data. The tray **Check for
+  updates…** item checks the manifest on a background thread, stages the new exe
+  via the updater batch when newer, and shows a tray notification ("already up
+  to date" / "update ready — restart to apply" / failure). This replaces the old
+  hourly `SystemInfoReport` + every-5-min `SystemInfoHeartbeat` scheduled tasks
+  (one-shot `--heartbeat` still works for manual/portable use).
 - **Auto-start on logon:** on the **first run** after install the app registers a
   `SystemInfoReporter` value under HKCU `...\CurrentVersion\Run` pointing to
   `system-info.exe --watch`, so the watcher restarts at login even without the

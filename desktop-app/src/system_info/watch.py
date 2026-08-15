@@ -169,7 +169,8 @@ class WatchLoop:
                     "System Info — update ready",
                 )
             return (
-                f"Could not stage v{new_version}. Check the update URL and try again.",
+                f"Update v{new_version} could not be applied on this platform. "
+                "Run the setup installer to upgrade.",
                 "System Info — update failed",
             )
         except Exception:
