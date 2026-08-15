@@ -110,7 +110,7 @@ def run(args: argparse.Namespace) -> int:
     if os.getenv("SYSTEM_INFO_NO_STARTUP") != "1":
         register_startup()
 
-    if args.watch:
+    if args.watch or _default_to_watch(args):
         from .watch import run_watch
 
         return run_watch(args)
@@ -221,6 +221,26 @@ def specific(args: argparse.Namespace) -> bool:
         or args.emails
         or args.os
     )
+
+
+def _default_to_watch(args: argparse.Namespace) -> bool:
+    """Frozen Windows builds with no one-shot flags stay in the system tray."""
+    if getattr(args, "watch", False):
+        return False
+    from .config import is_frozen
+
+    if os.name != "nt" or not is_frozen():
+        return False
+    one_shot = (
+        args.heartbeat
+        or args.print_jobs
+        or args.check_update
+        or args.auto_update
+        or args.version
+        or args.json
+        or specific(args)
+    )
+    return not one_shot
 
 
 def collect_all(args: argparse.Namespace) -> dict:

@@ -22,6 +22,7 @@ import threading
 import time
 
 from .device import get_or_create_device_id, resolve_pc_name
+from .version import PRODUCT_NAME
 from . import cli
 
 HEARTBEAT_INTERVAL = 60  # seconds — must stay well under the 300s online timeout
@@ -186,6 +187,9 @@ class WatchLoop:
         if tray is not None:
             # Blocking until the user picks Exit (which stops tray + loop).
             try:
+                tray.run(setup=_show_tray)
+            except TypeError:
+                tray.visible = True
                 tray.run()
             except Exception:
                 pass
@@ -267,25 +271,35 @@ class WatchLoop:
             if not manifest:
                 return (
                     f"Already up to date (v{self._current_version()}).",
-                    "System Info — no update",
+                    f"{PRODUCT_NAME} — no update",
                 )
             new_version = str(manifest.get("version") or "unknown")
             staged = apply_windows_update(manifest)
             if staged:
                 return (
                     f"Update v{new_version} staged. Restart the app to apply.",
-                    "System Info — update ready",
+                    f"{PRODUCT_NAME} — update ready",
                 )
             return (
                 f"Update v{new_version} could not be applied on this platform. "
                 "Run the setup installer to upgrade.",
-                "System Info — update failed",
+                f"{PRODUCT_NAME} — update failed",
             )
         except Exception:
             return (
                 "Update check failed. Verify %APPDATA%\\system-info\\config.env.",
-                "System Info — update failed",
+                f"{PRODUCT_NAME} — update failed",
             )
+
+
+def _show_tray(icon) -> None:
+    """Make the notify icon visible and announce the product on first show."""
+    icon.visible = True
+    if hasattr(icon, "notify"):
+        try:
+            icon.notify(f"{PRODUCT_NAME} is running in the system tray.", PRODUCT_NAME)
+        except Exception:
+            pass
 
 
 def _tray_icon(loop: "WatchLoop"):
@@ -307,7 +321,7 @@ def _tray_icon(loop: "WatchLoop"):
         icon.stop()
         loop.stop()
 
-    def _notify(icon, message: str, title: str = "System Info"):
+    def _notify(icon, message: str, title: str = PRODUCT_NAME):
         if icon is not None and hasattr(icon, "notify"):
             try:
                 icon.notify(message, title)
@@ -332,21 +346,22 @@ def _tray_icon(loop: "WatchLoop"):
             icon.stop()
             loop.stop()
         else:
-            _notify(icon, "Could not restart the app. Try Exit instead.", "System Info — restart failed")
+            _notify(icon, "Could not restart the app. Try Exit instead.", f"{PRODUCT_NAME} — restart failed")
 
     try:
         icon = pystray.Icon(
-            "SystemInfo",
+            "SystemInfoReporter",
             _make_image(),
-            "System Info — online",
+            PRODUCT_NAME,
             menu=pystray.Menu(
-                pystray.MenuItem("System Info — online", lambda: None, enabled=False),
+                pystray.MenuItem(f"{PRODUCT_NAME} — online", lambda: None, enabled=False),
                 pystray.MenuItem("Check for updates…", _on_check_update),
                 pystray.MenuItem("Restart", _on_restart),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Exit", _on_exit),
             ),
         )
+        icon.visible = True
         # Keep a reference to the icon so the update thread can notify it.
         loop._tray_icon = icon
         return icon

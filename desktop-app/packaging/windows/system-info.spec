@@ -9,12 +9,24 @@ block_cipher = None
 root = Path(SPECPATH).resolve().parents[1]
 src = root / "src"
 
+hiddenimports = ["system_info", "pystray", "pystray._win32", "PIL", "PIL.Image", "PIL.ImageDraw"]
+try:
+    from PyInstaller.utils.hooks import collect_submodules
+
+    hiddenimports = ["system_info"] + collect_submodules("pystray") + [
+        "PIL",
+        "PIL.Image",
+        "PIL.ImageDraw",
+    ]
+except Exception:
+    pass
+
 a = Analysis(
     [str(src / "system_info" / "__main__.py")],
     pathex=[str(src)],
     binaries=[],
     datas=[],
-    hiddenimports=["system_info"],
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -39,7 +51,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

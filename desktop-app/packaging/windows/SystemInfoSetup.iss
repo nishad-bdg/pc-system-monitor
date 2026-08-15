@@ -45,7 +45,8 @@ Source: "..\..\dist\system-info.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "release-manifest.example.json"; DestDir: "{app}"; DestName: "release-manifest.example.json"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Run report now"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--watch"; Comment: "Run {#MyAppName} in the system tray"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--watch"; Comment: "Run {#MyAppName} in the system tray"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Code]

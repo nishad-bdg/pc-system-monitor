@@ -179,6 +179,69 @@ def test_handle_restart_spawns_detached(monkeypatch):
     assert spawned["kwargs"]["start_new_session"] is True
 
 
+def test_tray_icon_shows_product_name(monkeypatch):
+    import types
+
+    from system_info.version import PRODUCT_NAME
+    from system_info.watch import _tray_icon
+
+    created = {}
+
+    class FakeMenu:
+        SEPARATOR = object()
+
+        def __init__(self, *items):
+            self.items = items
+
+    class FakeMenuItem:
+        def __init__(self, text, action, enabled=True):
+            self.text = text
+            self.action = action
+            self.enabled = enabled
+
+    class FakeIcon:
+        def __init__(self, name, image, title, menu=None):
+            created["name"] = name
+            created["title"] = title
+            created["menu"] = menu
+            self.visible = False
+
+    fake_pystray = types.ModuleType("pystray")
+    fake_pystray.Icon = FakeIcon
+    fake_pystray.Menu = FakeMenu
+    fake_pystray.MenuItem = FakeMenuItem
+    monkeypatch.setitem(sys.modules, "pystray", fake_pystray)
+
+    icon = _tray_icon(WatchLoop(_args()))
+    assert icon is not None
+    assert icon.visible is True
+    assert created["name"] == "SystemInfoReporter"
+    assert created["title"] == PRODUCT_NAME
+    labels = [getattr(item, "text", None) for item in created["menu"].items]
+    assert f"{PRODUCT_NAME} — online" in labels
+    assert "Exit" in labels
+
+
+def test_show_tray_makes_icon_visible_and_notifies():
+    from system_info.version import PRODUCT_NAME
+    from system_info.watch import _show_tray
+
+    seen = {}
+
+    class FakeIcon:
+        visible = False
+
+        def notify(self, message, title):
+            seen["message"] = message
+            seen["title"] = title
+
+    icon = FakeIcon()
+    _show_tray(icon)
+    assert icon.visible is True
+    assert seen["title"] == PRODUCT_NAME
+    assert "system tray" in seen["message"].lower()
+
+
 def test_handle_restart_failure_reports_false(monkeypatch):
     import subprocess
 

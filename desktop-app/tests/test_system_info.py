@@ -491,6 +491,40 @@ def test_run_show_sys_only(monkeypatch):
     assert data["device_id"] == "device-1"
 
 
+def test_default_to_watch_frozen_windows_with_no_flags(monkeypatch):
+    monkeypatch.setattr(cli.os, "name", "nt")
+    monkeypatch.setattr("system_info.config.is_frozen", lambda: True)
+    args = cli.build_parser().parse_args([])
+    assert cli._default_to_watch(args) is True
+
+
+def test_default_to_watch_skips_one_shot_and_non_frozen(monkeypatch):
+    monkeypatch.setattr(cli.os, "name", "nt")
+    monkeypatch.setattr("system_info.config.is_frozen", lambda: True)
+    assert cli._default_to_watch(cli.build_parser().parse_args(["--sys"])) is False
+    assert cli._default_to_watch(cli.build_parser().parse_args(["--heartbeat"])) is False
+    assert cli._default_to_watch(cli.build_parser().parse_args(["--watch"])) is False
+
+    monkeypatch.setattr("system_info.config.is_frozen", lambda: False)
+    assert cli._default_to_watch(cli.build_parser().parse_args([])) is False
+
+
+def test_frozen_windows_run_starts_watch(monkeypatch):
+    called = {}
+    def fake_watch(args):
+        called["watch"] = True
+        return 0
+
+    monkeypatch.setattr(cli.os, "name", "nt")
+    monkeypatch.setattr("system_info.config.is_frozen", lambda: True)
+    monkeypatch.setattr(cli, "register_startup", lambda: True)
+    monkeypatch.setattr("system_info.watch.run_watch", fake_watch)
+
+    args = cli.build_parser().parse_args([])
+    assert cli.run(args) == 0
+    assert called.get("watch") is True
+
+
 def _capture_json(monkeypatch, args):
     import io
     from contextlib import redirect_stdout
