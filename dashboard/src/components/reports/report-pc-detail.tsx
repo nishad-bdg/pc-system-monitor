@@ -18,12 +18,14 @@ import {
 import { MachineDetail } from "@/components/dashboard/machine-detail";
 import { DashboardShell } from "@/components/dashboard/shell";
 import { StatusDot } from "@/components/dashboard/status-dot";
+import { useRealtime } from "@/components/realtime-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 export function ReportPcDetail({ encodedKey }: { encodedKey: string }) {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
+  const { isOnline, lastSeenFor } = useRealtime();
   const key = decodeMachineKey(encodedKey);
   const baseFilters = filtersForMachineKey(key);
 
@@ -57,7 +59,9 @@ export function ReportPcDetail({ encodedKey }: { encodedKey: string }) {
       sidebar={
         <div className="px-4 py-4 text-sm text-slate-300">
           <p className="flex items-center gap-2 font-medium text-white">
-            <StatusDot online={machine?.latest.online} />
+            <StatusDot
+              online={isOnline(machine?.deviceId) ?? machine?.latest.online}
+            />
             {machine?.name ?? "…"}
           </p>
           {machine && (
@@ -66,7 +70,12 @@ export function ReportPcDetail({ encodedKey }: { encodedKey: string }) {
               <li>RAM {fmtPercent(machine.latest.resources?.ram_percent)}</li>
               <li>Disk {fmtPercent(maxDiskPercent(machine.latest))}</li>
               <li>Net {fmtBytes(networkTotalBytes(machine.latest))}</li>
-              <li>Seen {fmtRelative(machine.latest.created_at)}</li>
+              <li>
+                Seen{" "}
+                {fmtRelative(
+                  lastSeenFor(machine.deviceId, machine.latest.created_at),
+                )}
+              </li>
             </ul>
           )}
         </div>

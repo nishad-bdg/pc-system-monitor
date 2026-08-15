@@ -29,9 +29,13 @@ import {
   Report,
 } from "@/lib/api";
 import { StatusDot } from "./status-dot";
+import { useRealtime } from "../realtime-provider";
 
 export function MachineDetail({ machine }: { machine: MachineSummary }) {
   const host = machine.latest;
+  const { isOnline, lastSeenFor } = useRealtime();
+  const liveOnline = isOnline(machine.deviceId) ?? host.online;
+  const liveLastSeen = lastSeenFor(machine.deviceId, host.last_seen);
   const [tab, setTab] = useState<
     | "summary"
     | "overview"
@@ -70,8 +74,8 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         <span className="flex items-baseline gap-1.5 text-xs">
           <span className="font-medium text-slate-500">Status</span>
           <span className="font-medium text-slate-800">
-            <StatusDot online={host.online} showLabel /> · Last seen{" "}
-            {fmtRelative(host.last_seen)}
+            <StatusDot online={liveOnline} showLabel /> · Last seen{" "}
+            {fmtRelative(liveLastSeen)}
           </span>
         </span>
         <IdentityItem label="Private IP" value={host.private_ip} />
@@ -1606,7 +1610,9 @@ function InfoBlock({
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
       <h2 className="text-sm font-medium text-slate-700">{title}</h2>
-      <p className="mt-1 text-sm leading-relaxed text-slate-500">{children}</p>
+      <div className="mt-1 text-sm leading-relaxed text-slate-500">
+        {children}
+      </div>
     </div>
   );
 }

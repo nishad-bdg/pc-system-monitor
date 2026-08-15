@@ -39,6 +39,12 @@ def _patch_db(monkeypatch, user=None):
     monkeypatch.setattr(db, "get_machine_seen_at", lambda device_id: 2_000_000_000.0)
     monkeypatch.setattr(db, "machines_seen_map", lambda: {})
 
+    # Reset in-process WebSocket presence cache so tests stay isolated.
+    from sysinfo_api import realtime as _rt
+
+    _rt._clients.clear()
+    _rt._presence.clear()
+
     # Refresh-token store: in-memory, shared across tests in this module.
     global _REFRESH_STORE
     _REFRESH_STORE.clear()
@@ -1064,6 +1070,22 @@ def test_heartbeat_ok(monkeypatch):
     assert touched["pc_name"] == "PC1"
 
 
+def test_heartbeat_updates_presence(monkeypatch):
+    from sysinfo_api import realtime
+
+    _patch_db(monkeypatch)
+    key = security.generate_api_key()
+    monkeypatch.setattr(db, "find_api_key_by_hash", lambda h: {"_id": "x", "prefix": key[:20], "active": True})
+    resp = client.post(
+        "/heartbeat",
+        json={"device_id": "dev-1", "pc_name": "PC1"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 200
+    snapshot = realtime.presence_snapshot()
+    assert any(e["device_id"] == "dev-1" and e["online"] is True for e in snapshot)
+
+
 def test_heartbeat_mongo_down(monkeypatch):
     _patch_db(monkeypatch)
     key = security.generate_api_key()
@@ -1108,7 +1130,11 @@ def test_create_report_broadcasts_printers(monkeypatch):
     async def fake_broadcast(report):
         sent.append(report)
 
+    async def fake_broadcast_presence(*args, **kwargs):
+        return None
+
     monkeypatch.setattr(realtime, "broadcast", fake_broadcast)
+    monkeypatch.setattr(realtime, "broadcast_presence", fake_broadcast_presence)
     resp = client.post(
         "/reports",
         json={

@@ -37,6 +37,13 @@ async def create_report(report: Report, api_key: ApiKey) -> JSONResponse:
     annotate_online(document)
     if report.device_id:
         db.touch_machine(report.device_id, report.pc_name, seen_at=document["created_at"])
+    if report.device_id:
+        await realtime.broadcast_presence(
+            report.device_id,
+            online=True,
+            last_seen=document["created_at"],
+            pc_name=report.pc_name,
+        )
     await realtime.broadcast(document)
     return JSONResponse(status_code=201, content={"id": str(report_id)})
 

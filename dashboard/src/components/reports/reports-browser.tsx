@@ -71,7 +71,7 @@ const defaultApplied: AppliedFilters = {
 export function ReportsBrowser() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
-  const { connected } = useRealtime();
+  const { connected, isOnline, lastSeenFor } = useRealtime();
 
   const [pcName, setPcName] = useState("");
   const [country, setCountry] = useState("");
@@ -397,6 +397,8 @@ export function ReportsBrowser() {
               const r = m.latest;
               const disk = maxDiskPercent(r);
               const net = networkTotalBytes(r);
+              const online = isOnline(m.deviceId) ?? r.online;
+              const lastSeen = lastSeenFor(m.deviceId, r.created_at);
               return (
                 <li key={m.key}>
                   <button
@@ -410,7 +412,7 @@ export function ReportsBrowser() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <span className="flex items-center gap-1.5 truncate text-sm font-medium">
-                        <StatusDot online={r.online} />
+                        <StatusDot online={online} />
                         {m.name}
                       </span>
                       <span
@@ -418,7 +420,7 @@ export function ReportsBrowser() {
                           active ? "text-blue-100" : "text-slate-500"
                         }`}
                       >
-                        {fmtRelative(r.created_at)}
+                        {fmtRelative(lastSeen)}
                       </span>
                     </div>
                     <div
@@ -466,7 +468,10 @@ export function ReportsBrowser() {
               <div>
                 <h2 className="text-xl font-semibold tracking-tight text-slate-900">
                 <span className="inline-flex items-center gap-2">
-                  <StatusDot online={selected.latest.online} showLabel />
+                  <StatusDot
+                    online={isOnline(selected.deviceId) ?? selected.latest.online}
+                    showLabel
+                  />
                   {selected.name}
                 </span>
               </h2>
@@ -474,7 +479,10 @@ export function ReportsBrowser() {
                   {selected.latest.os?.system ?? "—"}{" "}
                   {selected.latest.os?.release ?? ""}
                   <span className="mx-1.5 text-slate-300">·</span>
-                  Last seen {fmtRelative(selected.latest.created_at)}
+                  Last seen{" "}
+                  {fmtRelative(
+                    lastSeenFor(selected.deviceId, selected.latest.created_at),
+                  )}
                   <span className="mx-1.5 text-slate-300">·</span>
                   <Link
                     href={`/reports/${encodeMachineKey(selected.key)}`}

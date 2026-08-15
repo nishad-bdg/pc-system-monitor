@@ -31,12 +31,16 @@ def annotate_online(report: dict, seen_map: dict[str, float] | None = None) -> d
 
 
 @router.post("/heartbeat")
-def heartbeat(body: Heartbeat, api_key: security.ApiKey) -> dict:
+async def heartbeat(body: Heartbeat, api_key: security.ApiKey) -> dict:
     """Record that a desktop machine is alive (called ~every minute)."""
     seen = time.time()
     ok = db.touch_machine(body.device_id, body.pc_name or None, seen_at=seen)
     if not ok:
         raise HTTPException(status_code=503, detail="MongoDB unavailable")
+    # Push presence to open dashboards immediately (Messenger-style online).
+    await realtime.broadcast_presence(
+        body.device_id, online=True, last_seen=seen, pc_name=body.pc_name
+    )
     return {"status": "ok", "online": True, "last_seen": seen}
 
 
@@ -70,6 +74,10 @@ async def websocket_endpoint(ws: WebSocket, token: str = Query(default="")):
     realtime.connect(ws)
     try:
         await ws.send_json({"type": "hello", "role": user.get("role")})
+        # Seed the client with the current presence map so dots are right
+        # immediately (no waiting for the first report event).
+        for entry in realtime.presence_snapshot():
+            await ws.send_json({"type": "presence.changed", "presence": entry})
         while True:
             # We only broadcast server->client; wait for a (silent) client ping.
             await ws.receive_text()

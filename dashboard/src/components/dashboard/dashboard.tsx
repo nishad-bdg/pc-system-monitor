@@ -23,7 +23,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 export function Dashboard() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
-  const { connected } = useRealtime();
+  const { connected, isOnline, lastSeenFor } = useRealtime();
   const [filter, setFilter] = useState("");
   const [groupFilter, setGroupFilter] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -122,6 +122,8 @@ export function Dashboard() {
             {filtered.map((m) => {
               const active = m.key === selected?.key;
               const cpu = m.latest.resources?.cpu_percent;
+              const online = isOnline(m.deviceId) ?? m.latest.online;
+              const lastSeen = lastSeenFor(m.deviceId, m.latest.created_at);
               return (
                 <li key={m.key}>
                   <button
@@ -135,7 +137,7 @@ export function Dashboard() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <span className="flex items-center gap-1.5 truncate text-sm font-medium">
-                        <StatusDot online={m.latest.online} />
+                        <StatusDot online={online} />
                         {m.name}
                       </span>
                       <span
@@ -143,7 +145,7 @@ export function Dashboard() {
                           active ? "text-blue-100" : "text-slate-500"
                         }`}
                       >
-                        {fmtRelative(m.latest.created_at)}
+                        {fmtRelative(lastSeen)}
                       </span>
                     </div>
                     <div
@@ -191,14 +193,20 @@ export function Dashboard() {
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
                 <h2 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-slate-900">
-                  <StatusDot online={selected.latest.online} showLabel />
+                  <StatusDot
+                    online={isOnline(selected.deviceId) ?? selected.latest.online}
+                    showLabel
+                  />
                   {selected.name}
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
                   {selected.latest.os?.system ?? "—"}{" "}
                   {selected.latest.os?.release ?? ""}
                   <span className="mx-1.5 text-slate-300">·</span>
-                  Last seen {fmtRelative(selected.latest.created_at)}
+                  Last seen{" "}
+                  {fmtRelative(
+                    lastSeenFor(selected.deviceId, selected.latest.created_at),
+                  )}
                   {selected.deviceId ? (
                     <>
                       <span className="mx-1.5 text-slate-300">·</span>
