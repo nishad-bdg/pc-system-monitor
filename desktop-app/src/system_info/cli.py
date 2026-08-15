@@ -53,6 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-save", action="store_true", help="Do not save report to the API")
     parser.add_argument("--heartbeat", action="store_true", help="Only send a lightweight online heartbeat, then exit")
     parser.add_argument("--print-jobs", action="store_true", help="Flush newly completed print jobs to the API, then exit")
+    parser.add_argument("--watch", action="store_true", help="Run continuously in the background (messenger-style): heartbeats, print jobs, hourly reports and a tray Exit on Windows")
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="API base URL to save reports to")
     parser.add_argument("--api-key", default=DEFAULT_API_KEY, help="API key for authenticated save")
     parser.add_argument(
@@ -105,9 +106,14 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     # First-run auto-start: on Windows installs the app registers itself to
-    # run --heartbeat at every logon (skipped with SYSTEM_INFO_NO_STARTUP=1).
+    # run --watch at every logon (skipped with SYSTEM_INFO_NO_STARTUP=1).
     if os.getenv("SYSTEM_INFO_NO_STARTUP") != "1":
         register_startup()
+
+    if args.watch:
+        from .watch import run_watch
+
+        return run_watch(args)
 
     if args.check_update or args.auto_update:
         manifest = check_for_update()
@@ -155,70 +161,18 @@ def run(args: argparse.Namespace) -> int:
             print(f"[print] flushed {sent} new print job(s)")
         return 0
 
-    data: dict = {}
+    data = collect_all(args)
 
-    specific = (
-        args.ip
-        or args.geo
-        or args.sys
-        or args.disk
-        or args.printers
-        or args.network
-        or args.security
-        or args.health
-        or args.emails
-        or args.os
-    )
-    show_os = not specific or args.os
-    show_ip = not specific or args.ip
-    show_geo = not specific or args.geo
-    show_sys = not specific or args.sys
-    show_disk = not specific or args.disk
-    show_printers = not specific or args.printers
-    show_network = not specific or args.network
-    show_security = not specific or args.security
-    show_health = not specific or args.health
-    show_emails = not specific or args.emails
-
-    pc_name = resolve_pc_name(args.pc_name)
-    device_id = get_or_create_device_id(pc_name)
-    data["pc_name"] = pc_name
-    data["device_id"] = device_id
-
-    if show_os:
-        data["os"] = collect_os_info().to_dict()
-
-    public_ip = get_public_ip() if (show_ip or show_geo) else None
-    if show_ip:
-        data["private_ip"] = get_private_ip()
-        data["public_ip"] = public_ip
-        data["mac_address"] = get_mac_address()
-        data["mac_addresses"] = get_mac_addresses()
-
-    location = geo_locate(public_ip) if (show_geo and public_ip) else None
-    data["location"] = location.to_dict() if location else None
-
-    if show_sys:
-        data["resources"] = collect_resources().to_dict()
-        data["uptime"] = collect_uptime().to_dict()
-
-    if show_disk:
-        data["disk"] = collect_disk_info().to_dict()
-
-    if show_printers:
-        data["printers"] = collect_printers().to_dict()
-
-    if show_network:
-        data["network"] = collect_network_usage().to_dict()
-
-    if show_security:
-        data["security"] = collect_security_info().to_dict()
-
-    if show_health:
-        data["health"] = collect_health_info().to_dict()
-
-    if show_emails:
-        data["email_accounts"] = collect_email_accounts().to_dict()
+    show_os = args.os or not specific(args)
+    show_ip = args.ip or not specific(args)
+    show_geo = args.geo or not specific(args)
+    show_sys = args.sys or not specific(args)
+    show_disk = args.disk or not specific(args)
+    show_printers = args.printers or not specific(args)
+    show_network = args.network or not specific(args)
+    show_security = args.security or not specific(args)
+    show_health = args.health or not specific(args)
+    show_emails = args.emails or not specific(args)
 
     _print(
         data,
@@ -242,6 +196,69 @@ def run(args: argparse.Namespace) -> int:
         elif not saved_id and not args.json and args.api_key:
             print("\n[save] failed - check API URL and API key")
     return 0
+
+
+def specific(args: argparse.Namespace) -> bool:
+    return (
+        args.ip
+        or args.geo
+        or args.sys
+        or args.disk
+        or args.printers
+        or args.network
+        or args.security
+        or args.health
+        or args.emails
+        or args.os
+    )
+
+
+def collect_all(args: argparse.Namespace) -> dict:
+    """Gather the full data payload (all sections) — shared by one-shot and --watch runs."""
+    data: dict = {}
+
+    if args.os or not specific(args):
+        data["os"] = collect_os_info().to_dict()
+
+    show_ip = args.ip or not specific(args)
+    show_geo = args.geo or not specific(args)
+    public_ip = get_public_ip() if (show_ip or show_geo) else None
+    if show_ip:
+        data["private_ip"] = get_private_ip()
+        data["public_ip"] = public_ip
+        data["mac_address"] = get_mac_address()
+        data["mac_addresses"] = get_mac_addresses()
+
+    location = geo_locate(public_ip) if (show_geo and public_ip) else None
+    data["location"] = location.to_dict() if location else None
+
+    if args.sys or not specific(args):
+        data["resources"] = collect_resources().to_dict()
+        data["uptime"] = collect_uptime().to_dict()
+
+    if args.disk or not specific(args):
+        data["disk"] = collect_disk_info().to_dict()
+
+    if args.printers or not specific(args):
+        data["printers"] = collect_printers().to_dict()
+
+    if args.network or not specific(args):
+        data["network"] = collect_network_usage().to_dict()
+
+    if args.security or not specific(args):
+        data["security"] = collect_security_info().to_dict()
+
+    if args.health or not specific(args):
+        data["health"] = collect_health_info().to_dict()
+
+    if args.emails or not specific(args):
+        data["email_accounts"] = collect_email_accounts().to_dict()
+
+    pc_name = resolve_pc_name(args.pc_name)
+    device_id = get_or_create_device_id(pc_name)
+    data["pc_name"] = pc_name
+    data["device_id"] = device_id
+    return data
 
 
 def save_report(data: dict, api_url: str, api_key: str = "") -> str | None:

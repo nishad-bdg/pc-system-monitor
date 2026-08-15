@@ -73,7 +73,8 @@ Restart the API after model/query changes; old processes strip unknown fields (e
 ```bash
 uv run system-info --api-key sk-...          # full collect + save
 uv run system-info --no-save                 # print only
-uv run system-info --heartbeat               # lightweight online ping (scheduled every 5 min on Windows)
+uv run system-info --heartbeat               # lightweight online ping (one-shot)
+uv run system-info --watch                   # always-on daemon (Windows messenger-style, tray Exit)
 uv run system-info --pc-name Office-PC-3     # Windows custom name
 uv run system-info --printers | --disk | --network | --sys | --security | --health | --emails
 ```
@@ -82,7 +83,7 @@ Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`.
 
 ### Online / offline status
 
-- Each PC sends a **heartbeat** (`--heartbeat`) that POSTs `{device_id, pc_name}` to `POST /heartbeat` (API key). The Windows installer schedules this every 5 minutes (`SystemInfoHeartbeat` Task Scheduler job), on top of the hourly full report.
+- Each PC keeps its online status alive via heartbeats: the always-on Windows watcher (`--watch`) sends them roughly every 5 minutes (and `POST /heartbeat`); one-shot `--heartbeat` still works for manual/portable use.
 - The API tracks `last_seen` per `device_id` in a `machines` Mongo collection; a machine is **online** if `last_seen` is within `SYSTEM_INFO_ONLINE_TIMEOUT_SECONDS` (default 300s).
 - `GET /reports`, `GET /reports/{id}`, and `GET /reports/export` annotate every report with `online` (bool) + `last_seen`. Old reports without a `device_id` are marked offline.
 - The dashboard shows a **green (online) / red (offline)** dot next to each PC in the Fleet sidebar, Reports browser, and detail header.
@@ -234,7 +235,7 @@ Desktops report **completed print jobs** so the dashboard shows who is printing 
 - **Desktop (`print_jobs.py`):** collects new completed print jobs with a persistent watermark (no duplicates).
   - **Windows:** `Microsoft-Windows-PrintService/Operational` Event ID **307** ("document printed") via PowerShell; watermark = last `RecordId`; parse document/user/printer/pages from the localized message.
   - **macOS:** tails `/var/log/cups/page_log`; watermark = latest completion column; fields printer/user/job/pages/title.
-  - Every `--heartbeat` run (5-min on Windows) also flushes any new print jobs to the API, so activity shows within ~5 min. `system-info --print-jobs` flushes on demand.
+  - Every `--watch` cycle (5-min on Windows) also flushes any new print jobs to the API, so activity shows within ~5 min. `system-info --print-jobs` flushes on demand.
 - **API:** `POST /print-jobs` (API key, batch `{device_id, pc_name, jobs:[{printer,document,user,pages,completed_at}]}`) stores in the Mongo `print_jobs` collection and broadcasts a **`print.job`** WS event per job; `GET /print-jobs?limit=` (JWT, group-scoped for `user` role, newest first) and `GET /print-jobs/summary?hours=` (per-hour counts of the last N hours). `source_key` prefix stored like reports.
 - **Dashboard:** `/print-jobs` page (slate+blue, sidebar + detail like Reports) with a **per-hour bar chart** (last 24h), live **recent-prints feed**, per-PC counts, and stat cards (jobs / pages / printers). The WS `print.job` event refreshes it with no manual refresh.
 
@@ -304,15 +305,22 @@ Dashboard **Refresh** only reloads API data. It does **not** push collect comman
 See `desktop-app/packaging/windows/README.md`.
 
 - **Installer (Inno Setup):** installs exe under `%LOCALAPPDATA%\SystemInfo`, writes
-  `%APPDATA%\system-info\config.env` (API URL/key/PC name/update URL), creates
-  Task Scheduler jobs **SystemInfoReport** every hour and **SystemInfoHeartbeat**
-  every 5 minutes (`--heartbeat`, for live online status).
+  `%APPDATA%\system-info\config.env` (API URL/key/PC name/update URL), creates a
+  **SystemInfoWatch** Task Scheduler job (runs `--watch` at every logon), and
+  launches `--watch` right after install so the PC is online immediately.
+- **Always-on watcher (`--watch`, messenger-style):** a single persistent
+  background process (system-tray icon with **Exit**) that keeps the PC "online"
+  (heartbeat ~ every 5 min), flushes new print jobs, and sends a **full report
+  hourly**. It stays open until the user exits it from the tray — it does **not**
+  exit after sending data. This replaces the old hourly `SystemInfoReport` +
+  every-5-min `SystemInfoHeartbeat` scheduled tasks (one-shot `--heartbeat`
+  still works for manual/portable use).
 - **Auto-start on logon:** on the **first run** after install the app registers a
   `SystemInfoReporter` value under HKCU `...\CurrentVersion\Run` pointing to
-  `system-info.exe --heartbeat`, so a PC flips online at login (before the next
-  scheduled heartbeat). Idempotent via the `startup-registered` marker file in
+  `system-info.exe --watch`, so the watcher restarts at login even without the
+  scheduled task. Idempotent via the `startup-registered` marker file in
   `%APPDATA%\system-info`; set `SYSTEM_INFO_NO_STARTUP=1` to skip. Uninstall
-  removes the Run value + marker.
+  removes the Run value + marker + scheduled task.
 - **Updates:** host a JSON release manifest (`SYSTEM_INFO_UPDATE_URL`); app checks
   on each run and stages a new exe (not live `git pull`).
 

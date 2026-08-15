@@ -8,8 +8,8 @@
 ;   - Copies system-info.exe
 ;   - Asks for API URL, API key, optional PC name + update manifest URL
 ;   - Writes %APPDATA%\system-info\config.env
-;   - Creates Task Scheduler job SystemInfoReport every hour
-;   - Creates Task Scheduler job SystemInfoHeartbeat every 5 minutes (online status)
+;   - Creates Task Scheduler job SystemInfoWatch (runs --watch at every logon)
+;   - Launches --watch immediately so the PC is online right away
 
 #define MyAppName "System Info Reporter"
 #ifndef MyAppVersion
@@ -106,66 +106,39 @@ begin
   SaveStringToFile(Path, Content, False);
 end;
 
-procedure CreateScheduledTask;
+procedure CreateWatchTask;
 var
   ResultCode: Integer;
-  ExePath, ReportArgs: string;
+  ExePath, WatchArgs: string;
 begin
   ExePath := ExpandConstant('{app}\{#MyAppExeName}');
-  { Full report every hour, start 08:00, runs only while this user is logged on }
-  ReportArgs :=
-    '/Create /F /TN "SystemInfoReport" /SC HOURLY /ST 08:00 /IT ' +
-    '/TR "\"' + ExePath + '\"" ' +
+  WatchArgs :=
+    '/Create /F /TN "SystemInfoWatch" /SC ONLOGON /IT ' +
+    '/TR "\"' + ExePath + '\" --watch" ' +
     '/RL LIMITED';
-  Exec('schtasks.exe', ReportArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('schtasks.exe', WatchArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if ResultCode <> 0 then
   begin
     MsgBox(
-      'Could not create the scheduled task (SystemInfoReport).' + #13#10 +
-      'schtasks exit code: ' + IntToStr(ResultCode) + #13#10 +
-      'Run this manually as this user:' + #13#10 +
-      'schtasks /Create /F /TN SystemInfoReport /SC HOURLY /ST 08:00 /IT ' +
-      '/TR "\"' + ExePath + '\""' + #13#10 +
-      'The installer will continue, but reports will not run automatically.',
-      mbError, MB_OK);
-  end;
-end;
-
-{ Heartbeat: keep the PC marked "online" between hourly reports AND flush new
-  print jobs to the API (the --heartbeat run also syncs print jobs, so print
-  activity shows in the dashboard within ~5 minutes).
-  Runs every 5 minutes (only while the user is logged on). }
-procedure CreateHeartbeatTask;
-var
-  ResultCode: Integer;
-  ExePath, BeatArgs: string;
-begin
-  ExePath := ExpandConstant('{app}\{#MyAppExeName}');
-  BeatArgs :=
-    '/Create /F /TN "SystemInfoHeartbeat" /SC MINUTE /MO 5 /IT ' +
-    '/TR "\"' + ExePath + '\" --heartbeat" ' +
-    '/RL LIMITED';
-  Exec('schtasks.exe', BeatArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  if ResultCode <> 0 then
-  begin
-    MsgBox(
-      'Could not create the heartbeat task (SystemInfoHeartbeat).' + #13#10 +
+      'Could not create the watch task (SystemInfoWatch).' + #13#10 +
       'schtasks exit code: ' + IntToStr(ResultCode) + #13#10 +
       'Run manually: ' + #13#10 +
-      'schtasks /Create /F /TN SystemInfoHeartbeat /SC MINUTE /MO 5 /IT ' +
-      '/TR "\"' + ExePath + '\" --heartbeat"',
+      'schtasks /Create /F /TN SystemInfoWatch /SC ONLOGON /IT ' +
+      '/TR "\"' + ExePath + '\" --watch"',
       mbError, MB_OK);
   end;
 end;
 
-procedure RunReportNow;
+procedure LaunchWatcher;
 var
   ExePath: string;
   PID: Integer;
 begin
-  { Fire one report immediately after install (non-blocking, silent). }
+  { Start the always-on watcher right after install (non-blocking, silent).
+    Its first run also self-registers the HKCU Run entry so --watch starts at
+    every logon even without the scheduled task. }
   ExePath := ExpandConstant('{app}\{#MyAppExeName}');
-  Exec(ExePath, '', ExpandConstant('{app}'), SW_HIDE, ewNoWait, PID);
+  Exec(ExePath, '--watch', ExpandConstant('{app}'), SW_HIDE, ewNoWait, PID);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -173,9 +146,8 @@ begin
   if CurStep = ssPostInstall then
   begin
     WriteConfigFile;
-    CreateScheduledTask;
-    CreateHeartbeatTask;
-    RunReportNow;
+    CreateWatchTask;
+    LaunchWatcher;
   end;
 end;
 
@@ -185,10 +157,11 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
+    Exec('schtasks.exe', '/Delete /F /TN "SystemInfoWatch"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec('schtasks.exe', '/Delete /F /TN "SystemInfoReport"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec('schtasks.exe', '/Delete /F /TN "SystemInfoHeartbeat"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     { Remove the first-run auto-start (HKCU Run key + marker) so the app no
-      longer launches --heartbeat at every logon after uninstall. }
+      longer launches --watch at every logon after uninstall. }
     Exec('reg.exe', 'delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v SystemInfoReporter /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     DeleteFile(ExpandConstant('{userappdata}\system-info\startup-registered'));
   end;

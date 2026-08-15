@@ -1,8 +1,9 @@
 """Windows startup registration (auto-run at logon) for packaged builds.
 
 On the first run after install the app registers itself under the current
-user's Run key so `system-info.exe --heartbeat` runs once at every logon —
-the PC shows as online immediately, before the next scheduled heartbeat.
+user's Run key so the always-on watcher (`system-info.exe --watch`) starts at
+every logon and stays open — the PC stays online until the user exits it from
+the tray.
 
 A marker file in the app config directory records that registration already
 happened, so later runs skip it. The installer removes both the Run value and
@@ -35,9 +36,9 @@ def is_supported() -> bool:
 
 
 def startup_command() -> str:
-    """Command line stored in the Run key: '<exe>' --heartbeat."""
+    """Command line stored in the Run key: '<exe>' --watch (always-on daemon)."""
     exe = str(sys.executable)
-    return f'"{exe}" --heartbeat'
+    return f'"{exe}" --watch'
 
 
 def _marker_path() -> Path:

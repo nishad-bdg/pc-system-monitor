@@ -38,7 +38,7 @@ def fake_winreg(monkeypatch):
 
 def test_startup_command(fake_winreg):
     cmd = startup.startup_command()
-    assert cmd == '"C:\\SystemInfo\\system-info.exe" --heartbeat'
+    assert cmd == '"C:\\SystemInfo\\system-info.exe" --watch'
 
 
 def test_register_startup_first_run(monkeypatch, fake_winreg, tmp_path):
@@ -46,7 +46,7 @@ def test_register_startup_first_run(monkeypatch, fake_winreg, tmp_path):
     assert not startup.already_registered()
     assert startup.register_startup() is True
     assert fake_winreg["set"] == [
-        (startup.RUN_VALUE_NAME, '"C:\\SystemInfo\\system-info.exe" --heartbeat')
+        (startup.RUN_VALUE_NAME, '"C:\\SystemInfo\\system-info.exe" --watch')
     ]
     assert (tmp_path / startup.MARKER).is_file()
     assert startup.already_registered()
