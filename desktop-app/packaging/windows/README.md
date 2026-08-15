@@ -57,15 +57,17 @@ Wizard asks for:
 | PC name | optional Windows display name |
 | Update manifest URL | optional; **pre-filled with this repo's `releases/latest` manifest** so installed PCs auto-update. Clear it to disable auto-update. |
 
-Writes `%APPDATA%\system-info\config.env` and launches `--watch` right after
-install so the PC shows as online immediately. `--watch` is an **always-on**
+Writes `%APPDATA%\system-info\config.env` and **always launches `--watch`**
+right after files are copied (retries if antivirus still has the new exe
+locked). The finish-page checkbox starts it again if that first launch was
+blocked; a process mutex prevents two watchers. `--watch` is an **always-on**
 background agent (messenger-style): while it is open it stays in the system tray
 with **Check for updates…**, **Restart** and **Exit** items, keeps the PC
-"online" (heartbeat ~5 min), flushes new print jobs, and sends a **full report
-hourly**. Closing it (tray → Exit) stops it — it does **not** exit on its own
-after sending data. Tray **Restart** spawns a fresh detached `--watch` process
-and stops the current one, so a staged update is applied by restarting the app
-or a wedged watcher is relaunched without a full login.
+"online" (heartbeat every **60s**), flushes new print jobs, and sends a **full
+report hourly**. Closing it (tray → Exit) stops it — it does **not** exit on
+its own after sending data. Tray **Restart** spawns a fresh detached `--watch`
+process and stops the current one. Frozen crashes write
+`%APPDATA%\system-info\crash.log`.
 
 After install, on the **first run** the app adds itself to the current user's
 **Startup** (HKCU `...\CurrentVersion\Run` → `SystemInfoReporter` →
@@ -115,7 +117,9 @@ Publish a new `system-info.exe` (GitHub Release, S3, etc.) and a manifest JSON:
 
 Set `SYSTEM_INFO_UPDATE_URL` in `config.env` (installer field) to that JSON URL.
 
-On each scheduled run the app checks the manifest; if newer, it downloads and stages a replace via `apply-update.cmd`. The **next** hourly run uses the new binary.
+On each hourly run (and from the tray **Check for updates…** item) the app
+checks the manifest; if newer, it downloads, waits for this PID to exit, swaps
+the exe, and relaunches `--watch` so the tray comes back.
 
 Manual check:
 

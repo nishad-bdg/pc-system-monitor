@@ -77,9 +77,13 @@ uv run system-info --heartbeat               # lightweight online ping (one-shot
 uv run system-info --watch                   # always-on daemon (Windows messenger-style, tray Exit)
 uv run system-info --pc-name Office-PC-3     # Windows custom name
 uv run system-info --printers | --disk | --network | --sys | --security | --health | --emails
+uv run system-info --print-jobs              # flush new print jobs, then exit
+uv run system-info --check-update            # Windows: compare local version to SYSTEM_INFO_UPDATE_URL
+uv run system-info --auto-update             # Windows: download + swap exe and relaunch --watch
+uv run system-info --version
 ```
 
-Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`.
+Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`, `SYSTEM_INFO_UPDATE_URL`, `SYSTEM_INFO_NO_STARTUP=1` (skip HKCU Run registration), `SYSTEM_INFO_CONFIG` (explicit env file). Frozen Windows with no one-shot flags defaults to `--watch`.
 
 ### Online / offline status
 
@@ -143,10 +147,11 @@ Dashboard: if `expired` → **Expired**; else if `expiry_date` → **N days rema
 
 **Disk:** physical drives with media type + SMART status:
 
-`{ name, device, media_type: "ssd" | "hdd" | "unknown", smart_status, internal, health: "ok" | "warning" | "fail" | "unknown", size_bytes }`
+`{ name, device, media_type: "ssd" | "hdd" | "unknown", smart_status, brand, internal, health: "ok" | "warning" | "fail" | "unknown", size_bytes }`
 
-- Windows: `Get-PhysicalDisk` (FriendlyName/MediaType/HealthStatus/BusType/Size).
-- macOS: `system_profiler SPStorageDataType -json`, physical drives de-duplicated by bsd base (`disk3s1s1` → `disk3`), capacity taken from the largest volume entry.
+- Windows: `Get-PhysicalDisk` (FriendlyName/MediaType/HealthStatus/BusType/Manufacturer/Size). `internal` from BusType: USB/SD/MMC → external; SATA/SAS/NVMe/RAID/SCM → internal; unknown bus → `null`.
+- macOS: `system_profiler SPStorageDataType -json`, physical drives de-duplicated by bsd base (`disk3s1s1` → `disk3`), capacity taken from the largest volume entry. `brand` from the device name (e.g. APPLE).
+- Unknown Windows battery `condition` is `null` (not `"unknown"`).
 - The dashboard shows total storage (`size_bytes`, formatted) beside the drive name in the Summary + Health tabs.
 
 **Battery (laptop):**
@@ -354,25 +359,35 @@ Dashboard **Refresh** only reloads API data. It does **not** push collect comman
 
 ## Windows packaging (release updates)
 
-See `desktop-app/packaging/windows/README.md`.
+See `desktop-app/packaging/windows/README.md`. Current desktop version: **0.2.17**.
+
+Tag `v*` (or Actions → Windows Release) builds the exe + Inno installer and publishes a GitHub Release (`system-info.exe`, `SystemInfoSetup-<ver>.exe`, `release-manifest.json`). Render dashboard rebuilds only when `dashboard/**` or `render.yaml` change (`buildFilter`).
 
 - **Product:** tray / installer name is **System Info Reporter**. Frozen
   `version.py` **must** include both `__version__` and `PRODUCT_NAME`. The
   GitHub Action stamp used to write version only, which crashed `--watch`
-  (`ImportError: cannot import name 'PRODUCT_NAME'`). Current workflow writes
-  both. Watcher also falls back if `PRODUCT_NAME` is missing.
+  (`ImportError: cannot import name 'PRODUCT_NAME'`). That was the 0.2.15
+  Windows “starts then vanishes / no tray” bug. Current workflow stamps both
+  via Python (`ascii`, no BOM). Watcher also falls back if `PRODUCT_NAME` is
+  missing.
 - **Installer (Inno Setup):** installs exe under `%LOCALAPPDATA%\SystemInfo`,
-  writes `%APPDATA%\system-info\config.env`. Finish page checkbox **Start
-  System Info Reporter now** (tray); Start Menu shortcut always; optional
-  desktop shortcut. Silent installs still launch `--watch` with a normal
-  (not hidden) window so the tray icon can appear. No scheduled task —
-  startup is HKCU Run (below).
-- **PyInstaller:** `console=False`, hiddenimports include `pystray` + Pillow.
-  Frozen Windows with no one-shot flags defaults to `--watch` (double-click /
-  Start Menu shows the tray).
+  writes `%APPDATA%\system-info\config.env`, then **always** launches
+  `--watch` (`SW_SHOWNORMAL`, retries if the new exe is briefly locked). The
+  finish-page **Start System Info Reporter now** checkbox is a retry (checked
+  by default); a process mutex makes a second start a no-op. Start Menu
+  shortcut always; optional desktop shortcut. Silent installs use the same
+  post-install launch. No scheduled task — startup is HKCU Run (below).
+- **PyInstaller:** `console=False`, `upx=False`, `collect_all` for `pystray` +
+  Pillow + `websocket-client`, plus explicit `pystray._win32`. Frozen Windows
+  with no one-shot flags defaults to `--watch` (double-click / Start Menu
+  shows the tray).
 - **Always-on watcher (`--watch`):** persistent tray icon (**Check for
-  updates…**, **Restart**, **Exit**). Heartbeat + print flush every **60s**,
-  full report hourly. Stays open until tray Exit. Tray **Restart** spawns a
+  updates…** is the left-click default, plus **Restart**, **Exit**). Heartbeat
+  + print flush every **60s**, full report hourly. Stays open until tray Exit.
+  One named mutex (`Local\RGM.SystemInfoReporter.Watch`) so installer + Run
+  key + shortcuts cannot stack copies. If the tray backend fails, the
+  heartbeat loop **keeps running** and appends `%APPDATA%\system-info\crash.log`
+  (frozen crashes also MessageBox that path). Tray **Restart** spawns a
   detached `--watch` and stops this instance.
 - **Updates:** `SYSTEM_INFO_UPDATE_URL` JSON manifest. Hourly check, tray
   Check for updates, and remote `update` all use `apply_update_and_restart`:
