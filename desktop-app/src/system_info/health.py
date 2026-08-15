@@ -145,6 +145,20 @@ def _extract_brand(name: str, manufacturer: str | None = None) -> str | None:
 
 # ---- Windows ----
 
+_WINDOWS_EXTERNAL_BUS_TYPES = frozenset({"usb", "sd", "mmc"})
+_WINDOWS_INTERNAL_BUS_TYPES = frozenset({"sata", "sas", "nvme", "raid", "scm"})
+
+
+def _win_disk_internal(bus_type: object) -> bool | None:
+    """Classify a Get-PhysicalDisk BusType as internal, external, or unknown."""
+    bus = str(bus_type or "").strip().lower()
+    if bus in _WINDOWS_EXTERNAL_BUS_TYPES:
+        return False
+    if bus in _WINDOWS_INTERNAL_BUS_TYPES:
+        return True
+    return None
+
+
 def _collect_windows_disks() -> list[DiskHealth]:
     script = (
         "Get-PhysicalDisk -ErrorAction SilentlyContinue | "
@@ -195,7 +209,7 @@ def _collect_windows_disks() -> list[DiskHealth]:
                 media_type=_to_media_type(media_type),
                 brand=_extract_brand(name, str(item.get("Manufacturer") or "") or None),
                 smart_status=None,
-                internal=str(item.get("BusType") or "").lower() not in ("usb", "sas"),
+                internal=_win_disk_internal(item.get("BusType")),
                 health=health,
                 size_bytes=size_bytes,
             )
@@ -218,12 +232,50 @@ def _sanitize_windows_capacity(value: object) -> int | None:
     return number
 
 
+def _sanitize_windows_cycle_count(value: object) -> int | None:
+    """Return a non-negative cycle count, or None if missing/unsupported.
+
+    Zero is valid for a new battery. The ACPI uint32 sentinel (4294967295)
+    and negative values (e.g. powercfg -1) are treated as unknown.
+    """
+    if value is None:
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    if number < 0 or number >= _WINDOWS_ACPI_UNSUPPORTED:
+        return None
+    return number
+
+
 def _win_battery_health(full_int: int | None, designed_int: int | None) -> int | None:
     """Clamped 0..100 health % from full/design capacity, or None."""
     if full_int is None or not designed_int:
         return None
     health = int(round((full_int / designed_int) * 100))
     return max(0, min(100, health))
+
+
+def _battery_condition(health_percent: int | None) -> str | None:
+    if health_percent is None:
+        return None
+    if health_percent >= 80:
+        return "Good"
+    if health_percent >= 60:
+        return "Warning"
+    return "Poor"
+
+
+def _local_xml_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _find_xml_by_local_name(parent: ET.Element, name: str) -> ET.Element | None:
+    for elem in parent.iter():
+        if _local_xml_name(elem.tag) == name:
+            return elem
+    return None
 
 
 def _parse_battery_xml(path: Path) -> BatteryHealth | None:
@@ -246,32 +298,38 @@ def _parse_battery_xml(path: Path) -> BatteryHealth | None:
     except (OSError, ET.ParseError, ValueError):
         return None
     root = tree.getroot()
-    battery = root.find(".//Battery")
+    battery = _find_xml_by_local_name(root, "Battery")
     if battery is None:
         return None
 
-    def _int_field(tag: str) -> int | None:
-        for node in battery.iter(tag):
+    def _capacity_field(tag: str) -> int | None:
+        for node in battery.iter():
+            if _local_xml_name(node.tag) != tag:
+                continue
             value = _sanitize_windows_capacity((node.text or "").strip())
             if value is not None:
                 return value
         return None
 
-    full_int = _int_field("FullChargeCapacity")
-    designed_int = _int_field("DesignCapacity")
-    cycle_count = _int_field("CycleCount")
-    health_percent = _win_battery_health(full_int, designed_int)
+    def _cycle_field() -> int | None:
+        for node in battery.iter():
+            if _local_xml_name(node.tag) != "CycleCount":
+                continue
+            value = _sanitize_windows_cycle_count((node.text or "").strip())
+            if value is not None:
+                return value
+        return None
 
-    # Windows reports -1 for cycle count in some powercfg versions when the
-    # value is unknown; treat only the ACPI sentinel as missing.
-    if cycle_count is not None and cycle_count <= 0:
-        cycle_count = None
+    full_int = _capacity_field("FullChargeCapacity")
+    designed_int = _capacity_field("DesignCapacity")
+    cycle_count = _cycle_field()
+    health_percent = _win_battery_health(full_int, designed_int)
 
     if health_percent is None and full_int is None and cycle_count is None:
         return None
     return BatteryHealth(
         cycle_count=cycle_count,
-        condition="Good" if (health_percent or 0) >= 80 else "Warning",
+        condition=_battery_condition(health_percent),
         max_capacity_percent=health_percent,
         health_percent=health_percent,
     )
@@ -355,27 +413,14 @@ def _collect_windows_battery() -> BatteryHealth | None:
 
     full_int = _sanitize_windows_capacity(payload.get("FullChargedCapacity"))
     designed_int = _sanitize_windows_capacity(payload.get("DesignedCapacity"))
-
-    health_percent = None
-    if full_int is not None and designed_int:
-        health_percent = int(round((full_int / designed_int) * 100))
-        health_percent = max(0, min(100, health_percent))
-
-    cycle_count = None
-    try:
-        cycle = payload.get("CycleCount")
-        if cycle is not None:
-            cycle_count = int(cycle)
-            if cycle_count <= 0 or cycle_count >= _WINDOWS_ACPI_UNSUPPORTED:
-                cycle_count = None
-    except (TypeError, ValueError):
-        cycle_count = None
+    health_percent = _win_battery_health(full_int, designed_int)
+    cycle_count = _sanitize_windows_cycle_count(payload.get("CycleCount"))
 
     if health_percent is None and full_int is None and cycle_count is None:
         return None
     return BatteryHealth(
         cycle_count=cycle_count,
-        condition="Good" if (health_percent or 0) >= 80 else "Warning",
+        condition=_battery_condition(health_percent),
         max_capacity_percent=health_percent,
         health_percent=health_percent,
     )

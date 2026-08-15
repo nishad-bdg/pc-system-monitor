@@ -89,6 +89,7 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
             apiUrl={API_URL}
             deviceId={machine.deviceId}
             pcName={machine.name}
+            osSystem={host.os?.system}
           />
         </div>
       </div>

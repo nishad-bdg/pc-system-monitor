@@ -791,13 +791,15 @@ def test_health_windows_battery_cycle_only(monkeypatch):
     assert batt is not None
     assert batt.cycle_count == 88
     assert batt.health_percent is None
+    assert batt.condition is None
 
 
-def _write_battery_report_xml(tmp_path, battery_node):
+def _write_battery_report_xml(tmp_path, battery_node, xmlns=None):
     path = tmp_path / "battery-report.xml"
+    ns_attr = f' xmlns="{xmlns}"' if xmlns else ""
     path.write_text(
         '<?xml version="1.0" encoding="UTF-8"?>\n'
-        "<BatteryReport>\n"
+        f"<BatteryReport{ns_attr}>\n"
         "  <Created>2026-08-15T10:00:00</Created>\n"
         "  <Batteries>\n"
         f"{battery_node}\n"
@@ -806,6 +808,36 @@ def _write_battery_report_xml(tmp_path, battery_node):
         encoding="utf-8",
     )
     return path
+
+
+def _battery_xml_node(
+    design=None,
+    full=None,
+    cycle=None,
+):
+    parts = ["    <Battery>"]
+    if design is not None:
+        parts.append(f"      <DesignCapacity>{design}</DesignCapacity>")
+    if full is not None:
+        parts.append(f"      <FullChargeCapacity>{full}</FullChargeCapacity>")
+    if cycle is not None:
+        parts.append(f"      <CycleCount>{cycle}</CycleCount>")
+    parts.append("    </Battery>")
+    return "\n".join(parts)
+
+
+def _windows_disk_payload(bus_type, name="Test Disk"):
+    return [
+        {
+            "FriendlyName": name,
+            "DeviceId": "0",
+            "MediaType": "SSD",
+            "HealthStatus": "Healthy",
+            "BusType": bus_type,
+            "Manufacturer": "Acme",
+            "Size": 512000000000,
+        }
+    ]
 
 
 def test_health_windows_powercfg_xml_health_and_cycle(tmp_path):
@@ -880,3 +912,244 @@ def test_health_windows_powercfg_fallback_to_wmi(monkeypatch, tmp_path):
     assert batt is not None
     assert batt.cycle_count == 124
     assert batt.health_percent == 78
+
+
+def test_health_windows_powercfg_xml_without_namespace(tmp_path):
+    from system_info.health import _parse_battery_xml
+
+    path = _write_battery_report_xml(
+        tmp_path, _battery_xml_node(design=6500, full=5100, cycle=124)
+    )
+    batt = _parse_battery_xml(path)
+    assert batt is not None
+    assert batt.health_percent == 78
+    assert batt.cycle_count == 124
+    assert batt.condition == "Warning"
+
+
+def test_health_windows_powercfg_xml_with_default_namespace(tmp_path):
+    from system_info.health import _parse_battery_xml
+
+    path = _write_battery_report_xml(
+        tmp_path,
+        _battery_xml_node(design=6500, full=5100, cycle=124),
+        xmlns="http://schemas.microsoft.com/windows/2006/battery/batterySchema",
+    )
+    batt = _parse_battery_xml(path)
+    assert batt is not None
+    assert batt.health_percent == 78
+    assert batt.cycle_count == 124
+    assert batt.condition == "Warning"
+
+
+def test_health_windows_powercfg_xml_cycle_count_zero(tmp_path):
+    from system_info.health import _parse_battery_xml
+
+    path = _write_battery_report_xml(
+        tmp_path, _battery_xml_node(design=6500, full=6500, cycle=0)
+    )
+    batt = _parse_battery_xml(path)
+    assert batt is not None
+    assert batt.cycle_count == 0
+    assert batt.health_percent == 100
+    assert batt.condition == "Good"
+
+
+def test_health_windows_powercfg_xml_cycle_count_acpi_sentinel(tmp_path):
+    from system_info.health import _parse_battery_xml
+
+    path = _write_battery_report_xml(
+        tmp_path, _battery_xml_node(design=6500, full=5577, cycle=4294967295)
+    )
+    batt = _parse_battery_xml(path)
+    assert batt is not None
+    assert batt.cycle_count is None
+    assert batt.health_percent == 86
+    assert batt.condition == "Good"
+
+
+def test_health_windows_powercfg_xml_missing_capacity(tmp_path):
+    from system_info.health import _parse_battery_xml
+
+    path = _write_battery_report_xml(tmp_path, _battery_xml_node(cycle=12))
+    batt = _parse_battery_xml(path)
+    assert batt is not None
+    assert batt.cycle_count == 12
+    assert batt.health_percent is None
+    assert batt.max_capacity_percent is None
+    assert batt.condition is None
+
+
+def test_health_windows_powercfg_xml_unknown_health_condition_none(tmp_path):
+    from system_info.health import _parse_battery_xml
+
+    path = _write_battery_report_xml(tmp_path, _battery_xml_node(cycle=0))
+    batt = _parse_battery_xml(path)
+    assert batt is not None
+    assert batt.cycle_count == 0
+    assert batt.health_percent is None
+    assert batt.condition is None
+
+
+def test_health_windows_powercfg_xml_condition_good(tmp_path):
+    from system_info.health import _parse_battery_xml
+
+    path = _write_battery_report_xml(
+        tmp_path, _battery_xml_node(design=6500, full=5200, cycle=10)
+    )
+    batt = _parse_battery_xml(path)
+    assert batt is not None
+    assert batt.health_percent == 80
+    assert batt.condition == "Good"
+
+
+def test_health_windows_powercfg_xml_condition_warning(tmp_path):
+    from system_info.health import _parse_battery_xml
+
+    path = _write_battery_report_xml(
+        tmp_path, _battery_xml_node(design=6500, full=3900, cycle=200)
+    )
+    batt = _parse_battery_xml(path)
+    assert batt is not None
+    assert batt.health_percent == 60
+    assert batt.condition == "Warning"
+
+
+def test_health_windows_powercfg_xml_condition_poor(tmp_path):
+    from system_info.health import _parse_battery_xml
+
+    path = _write_battery_report_xml(
+        tmp_path, _battery_xml_node(design=6500, full=2599, cycle=400)
+    )
+    batt = _parse_battery_xml(path)
+    assert batt is not None
+    assert batt.health_percent == 40
+    assert batt.condition == "Poor"
+
+
+def test_health_windows_powercfg_xml_malformed_returns_none(tmp_path):
+    from system_info.health import _parse_battery_xml
+
+    path = tmp_path / "broken.xml"
+    path.write_text("<BatteryReport><Batteries></BatteryReport>", encoding="utf-8")
+    assert _parse_battery_xml(path) is None
+
+
+def test_health_windows_powercfg_xml_missing_file_returns_none(tmp_path):
+    from system_info.health import _parse_battery_xml
+
+    assert _parse_battery_xml(tmp_path / "does-not-exist.xml") is None
+
+
+def test_health_windows_wmi_cycle_count_zero(monkeypatch):
+    from system_info.health import _collect_windows_battery
+
+    monkeypatch.setattr(
+        "system_info.health._collect_windows_battery_powercfg", lambda: None
+    )
+    payload = {
+        "FullChargedCapacity": 6500,
+        "DesignedCapacity": 6500,
+        "CycleCount": 0,
+    }
+    monkeypatch.setattr(
+        "system_info.health._run",
+        lambda cmd, timeout=15.0: json.dumps(payload),
+    )
+    batt = _collect_windows_battery()
+    assert batt is not None
+    assert batt.cycle_count == 0
+    assert batt.health_percent == 100
+    assert batt.condition == "Good"
+
+
+def test_health_windows_wmi_cycle_count_acpi_sentinel(monkeypatch):
+    from system_info.health import _collect_windows_battery
+
+    monkeypatch.setattr(
+        "system_info.health._collect_windows_battery_powercfg", lambda: None
+    )
+    payload = {
+        "FullChargedCapacity": 5577,
+        "DesignedCapacity": 6500,
+        "CycleCount": 4294967295,
+    }
+    monkeypatch.setattr(
+        "system_info.health._run",
+        lambda cmd, timeout=15.0: json.dumps(payload),
+    )
+    batt = _collect_windows_battery()
+    assert batt is not None
+    assert batt.cycle_count is None
+    assert batt.health_percent == 86
+    assert batt.condition == "Good"
+
+
+def test_health_windows_wmi_missing_capacity_unknown_condition(monkeypatch):
+    from system_info.health import _collect_windows_battery
+
+    monkeypatch.setattr(
+        "system_info.health._collect_windows_battery_powercfg", lambda: None
+    )
+    payload = {
+        "FullChargedCapacity": None,
+        "DesignedCapacity": None,
+        "CycleCount": 12,
+    }
+    monkeypatch.setattr(
+        "system_info.health._run",
+        lambda cmd, timeout=15.0: json.dumps(payload),
+    )
+    batt = _collect_windows_battery()
+    assert batt is not None
+    assert batt.cycle_count == 12
+    assert batt.health_percent is None
+    assert batt.condition is None
+
+
+def test_health_battery_condition_helper():
+    from system_info.health import _battery_condition
+
+    assert _battery_condition(None) is None
+    assert _battery_condition(80) == "Good"
+    assert _battery_condition(100) == "Good"
+    assert _battery_condition(79) == "Warning"
+    assert _battery_condition(60) == "Warning"
+    assert _battery_condition(59) == "Poor"
+    assert _battery_condition(0) == "Poor"
+
+
+def test_health_windows_sas_disk_is_internal(monkeypatch):
+    from system_info.health import _collect_windows_disks
+
+    monkeypatch.setattr(
+        "system_info.health._run",
+        lambda cmd, timeout=15.0: json.dumps(_windows_disk_payload("SAS")),
+    )
+    disks = _collect_windows_disks()
+    assert len(disks) == 1
+    assert disks[0].internal is True
+
+
+def test_health_windows_usb_disk_is_external(monkeypatch):
+    from system_info.health import _collect_windows_disks
+
+    monkeypatch.setattr(
+        "system_info.health._run",
+        lambda cmd, timeout=15.0: json.dumps(_windows_disk_payload("USB")),
+    )
+    disks = _collect_windows_disks()
+    assert len(disks) == 1
+    assert disks[0].internal is False
+
+
+def test_health_windows_unknown_bus_type_internal_none(monkeypatch):
+    from system_info.health import _collect_windows_disks
+
+    monkeypatch.setattr(
+        "system_info.health._run",
+        lambda cmd, timeout=15.0: json.dumps(_windows_disk_payload("Unknown")),
+    )
+    disks = _collect_windows_disks()
+    assert len(disks) == 1
+    assert disks[0].internal is None

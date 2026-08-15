@@ -25,53 +25,73 @@ import requests
 REQUEST_TIMEOUT = 15
 
 
+def _windows_shutdown_exe() -> str:
+    root = os.environ.get("SystemRoot") or os.environ.get("WINDIR") or r"C:\Windows"
+    return os.path.join(root, "System32", "shutdown.exe")
+
+
 def _run_windows(args: list[str]) -> bool:
+    """Launch a detached Windows command with no console window.
+
+    CREATE_NO_WINDOW is required for the frozen tray app (no inherited
+    console handles); without it Popen can fail with WinError 6.
+    """
     try:
-        subprocess.Popen(
-            args,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        kwargs: dict = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "stdin": subprocess.DEVNULL,
+            "close_fds": True,
+        }
+        flags = 0
+        if hasattr(subprocess, "CREATE_NO_WINDOW"):
+            flags |= subprocess.CREATE_NO_WINDOW
+        if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+            flags |= subprocess.CREATE_NEW_PROCESS_GROUP
+        if flags:
+            kwargs["creationflags"] = flags
+        subprocess.Popen(args, **kwargs)
         return True
     except OSError:
         return False
 
 
 def restart_machine() -> bool:
-    """Reboot the machine (best-effort within the current privileges).
+    """Reboot the machine. Windows only (`shutdown.exe /r /t 5 /f`).
 
-    Windows: `shutdown /r` (works for any interactive user).
-    macOS: reboots the user session via `osascript` (System Events restart).
-    Returns True if the restart was *initiated*.
+    Returns True if the restart was *initiated*. Non-Windows platforms
+    return False without spawning a process.
     """
-    try:
-        if os.name == "nt":
-            return _run_windows(
-                ["shutdown", "/r", "/t", "5", "/c", "System Info: remote restart requested"]
-            )
-        script = 'tell application "System Events" to restart'
-        subprocess.run(["osascript", "-e", script], timeout=15, check=True)
-        return True
-    except Exception:
-        if os.getenv("SYSTEM_INFO_DEBUG"):
-            print("[cmd] restart failed")
+    if os.name != "nt":
         return False
+    return _run_windows(
+        [
+            _windows_shutdown_exe(),
+            "/r",
+            "/t",
+            "5",
+            "/f",
+            "/c",
+            "System Info: remote restart requested",
+        ]
+    )
 
 
 def shutdown_machine() -> bool:
-    """Shut the machine down (best-effort within the current privileges)."""
-    try:
-        if os.name == "nt":
-            return _run_windows(
-                ["shutdown", "/s", "/t", "5", "/c", "System Info: remote shutdown requested"]
-            )
-        script = 'tell application "System Events" to shut down'
-        subprocess.run(["osascript", "-e", script], timeout=15, check=True)
-        return True
-    except Exception:
-        if os.getenv("SYSTEM_INFO_DEBUG"):
-            print("[cmd] shutdown failed")
+    """Power off the machine. Windows only (`shutdown.exe /s /t 5 /f`)."""
+    if os.name != "nt":
         return False
+    return _run_windows(
+        [
+            _windows_shutdown_exe(),
+            "/s",
+            "/t",
+            "5",
+            "/f",
+            "/c",
+            "System Info: remote shutdown requested",
+        ]
+    )
 
 
 def execute_command(command_type: str) -> tuple[bool, str | None]:

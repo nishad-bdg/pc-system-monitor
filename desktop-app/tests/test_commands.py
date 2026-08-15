@@ -39,8 +39,27 @@ def test_ack_command_failure(monkeypatch):
     assert commands.ack_command("cmd-1", "failed", "http://x", "sk-key") is False
 
 
-def test_restart_windows(monkeypatch, os_name="nt"):
-    monkeypatch.setattr("system_info.commands.os.name", os_name)
+def test_restart_windows(monkeypatch):
+    monkeypatch.setattr("system_info.commands.os.name", "nt")
+    monkeypatch.setenv("SystemRoot", r"C:\Windows")
+    spawned = {}
+
+    def fake_popen(args, **kwargs):
+        spawned["args"] = args
+        spawned["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(commands.subprocess, "Popen", fake_popen)
+    assert commands.restart_machine() is True
+    assert spawned["args"][0].lower().endswith("shutdown.exe")
+    assert "/r" in spawned["args"]
+    assert "/t" in spawned["args"]
+    assert "/f" in spawned["args"]
+
+
+def test_shutdown_windows(monkeypatch):
+    monkeypatch.setattr("system_info.commands.os.name", "nt")
+    monkeypatch.setenv("SystemRoot", r"C:\Windows")
     spawned = {}
 
     def fake_popen(args, **kwargs):
@@ -48,33 +67,40 @@ def test_restart_windows(monkeypatch, os_name="nt"):
         return object()
 
     monkeypatch.setattr(commands.subprocess, "Popen", fake_popen)
-    assert commands.restart_machine() is True
-    assert "shutdown" in spawned["args"][0]
-    assert "/r" in spawned["args"]
+    assert commands.shutdown_machine() is True
+    assert spawned["args"][0].lower().endswith("shutdown.exe")
+    assert "/s" in spawned["args"]
+    assert "/f" in spawned["args"]
 
 
-def test_restart_macos(monkeypatch):
+def test_restart_non_windows_is_noop(monkeypatch):
     monkeypatch.setattr("system_info.commands.os.name", "posix")
-    ran = {}
+    called = {"popen": 0, "run": 0}
 
-    def fake_run(cmd, timeout=15, check=True):
-        ran["cmd"] = cmd
+    def fake_popen(*a, **k):
+        called["popen"] += 1
         return object()
 
+    def fake_run(*a, **k):
+        called["run"] += 1
+        return object()
+
+    monkeypatch.setattr(commands.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(commands.subprocess, "run", fake_run)
-    assert commands.restart_machine() is True
-    assert ran["cmd"][0] == "osascript"
+    assert commands.restart_machine() is False
+    assert commands.shutdown_machine() is False
+    assert called == {"popen": 0, "run": 0}
 
 
-def test_restart_failure(monkeypatch):
-    monkeypatch.setattr("system_info.commands.os.name", "posix")
-    monkeypatch.setattr("system_info.commands.os.getenv", lambda key, default=None: None)
+def test_restart_windows_popen_failure(monkeypatch):
+    monkeypatch.setattr("system_info.commands.os.name", "nt")
 
     def boom(*a, **k):
-        raise OSError("no gui")
+        raise OSError("nope")
 
-    monkeypatch.setattr(commands.subprocess, "run", boom)
+    monkeypatch.setattr(commands.subprocess, "Popen", boom)
     assert commands.restart_machine() is False
+    assert commands.shutdown_machine() is False
 
 
 def test_handle_pending_commands_acks_done(monkeypatch):
@@ -108,11 +134,6 @@ def test_handle_pending_commands_acks_failed(monkeypatch):
     monkeypatch.setattr(commands, "ack_command", fake_ack)
     monkeypatch.setattr("system_info.commands.os.name", "posix")
 
-    def boom(*a, **k):
-        raise OSError("nope")
-
-    monkeypatch.setattr(commands.subprocess, "run", boom)
-
     commands.handle_pending_commands(
         [{"id": "cmd-9", "type": "restart"}],
         "http://x",
@@ -139,9 +160,21 @@ def test_execute_command_supported_types(monkeypatch):
     )
 
     assert commands.execute_command("shutdown") == (True, None)
-    assert "shutdown" in spawned["args"][0] and "/s" in spawned["args"]
+    assert spawned["args"][0].lower().endswith("shutdown.exe")
+    assert "/s" in spawned["args"]
     assert commands.execute_command("restart") == (True, None)
-    assert "shutdown" in spawned["args"][0] and "/r" in spawned["args"]
+    assert spawned["args"][0].lower().endswith("shutdown.exe")
+    assert "/r" in spawned["args"]
+
+
+def test_execute_command_restart_shutdown_rejected_off_windows(monkeypatch):
+    monkeypatch.setattr("system_info.commands.os.name", "posix")
+    ok, error = commands.execute_command("restart")
+    assert ok is False
+    assert "platform" in error
+    ok, error = commands.execute_command("shutdown")
+    assert ok is False
+    assert "platform" in error
 
 
 def test_execute_command_unsupported(monkeypatch):

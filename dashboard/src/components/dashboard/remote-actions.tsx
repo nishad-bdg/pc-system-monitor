@@ -22,15 +22,17 @@ const ACTION_LABELS: Record<ActionType, { button: string; title: string; body: s
   },
 };
 
-/** Remote Restart / Shutdown controls (admin + super_admin only). */
+/** Remote Restart / Shutdown controls (admin + super_admin, Windows PCs only). */
 export function RemoteActions({
   apiUrl,
   deviceId,
   pcName,
+  osSystem,
 }: {
   apiUrl: string;
   deviceId: string | null;
   pcName: string;
+  osSystem?: string | null;
 }) {
   const { data: session } = useSession();
   const role = session?.user?.role ?? "";
@@ -40,7 +42,8 @@ export function RemoteActions({
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [confirmAction, setConfirmAction] = useState<ActionType | null>(null);
 
-  if (!deviceId || !ADMIN_ROLES.has(role)) return null;
+  const isWindows = (osSystem ?? "").toLowerCase().startsWith("win");
+  if (!deviceId || !ADMIN_ROLES.has(role) || !isWindows) return null;
 
   const openConfirm = (action: ActionType) => {
     setMessage(null);
