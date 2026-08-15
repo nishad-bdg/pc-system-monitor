@@ -4,6 +4,7 @@ import re
 import time
 
 from bson import ObjectId
+from bson.errors import InvalidId
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, DuplicateKeyError, PyMongoError
 
@@ -39,6 +40,14 @@ def _groups():
 
 def _machines():
     return _db()[config.MONGO_MACHINES]
+
+
+def _print_jobs():
+    return _db()[config.MONGO_PRINT_JOBS]
+
+
+def _sub_categories():
+    return _db()[config.MONGO_SUB_CATEGORIES]
 
 
 def touch_machine(device_id: str, pc_name: str | None = None, seen_at: float | None = None) -> bool:
@@ -96,6 +105,7 @@ def list_reports(
     os_name: str | None = None,
     group_id: str | None = None,
     group_ids: list[str] | None = None,
+    sub_category_id: str | None = None,
     disk_health: str | None = None,
     battery: str | None = None,
     battery_health_min: float | None = None,
@@ -159,6 +169,10 @@ def list_reports(
         group_clause = _groups_filter(group_ids)
         if group_clause:
             clauses.append(group_clause)
+    if sub_category_id:
+        sub_clause = _sub_category_filter(sub_category_id)
+        if sub_clause:
+            clauses.append(sub_clause)
 
     if not clauses:
         query: dict = {}
@@ -387,24 +401,14 @@ def get_group(group_id: str) -> dict | None:
     """Return a group by id (with _id stringified), or None."""
     try:
         doc = _groups().find_one({"_id": ObjectId(group_id)})
-    except (ConnectionFailure, PyMongoError, ValueError):
+    except (ConnectionFailure, PyMongoError, InvalidId):
         return None
     if doc:
         doc["_id"] = str(doc["_id"])
     return doc
 
 
-def _group_filter(group_id: str) -> dict | None:
-    """Build a MongoDB $or filter matching reports whose machine belongs to a group.
-
-    Machine keys look like id:<device_id> / mac:<normalized> / name:<name>.
-    """
-    group = get_group(group_id)
-    if not group:
-        return None
-    keys = group.get("machine_keys") or []
-    if not keys:
-        return None
+def _machine_keys_filter(keys: list[str]) -> dict | None:
     ors: list[dict] = []
     for key in keys:
         if key.startswith("id:"):
@@ -413,27 +417,41 @@ def _group_filter(group_id: str) -> dict | None:
             mac = key[3:]
             regex = {"$regex": re.escape(mac), "$options": "i"}
             ors.append(
-                {
-                    "$or": [
-                        {"mac_address": regex},
-                        {"mac_addresses.mac": regex},
-                    ]
-                }
+                {"$or": [{"mac_address": regex}, {"mac_addresses.mac": regex}]}
             )
         elif key.startswith("name:"):
             name = key[5:]
             regex = {"$regex": re.escape(name), "$options": "i"}
-            ors.append(
-                {
-                    "$or": [
-                        {"pc_name": regex},
-                        {"os.hostname": regex},
-                    ]
-                }
-            )
+            ors.append({"$or": [{"pc_name": regex}, {"os.hostname": regex}]})
     if not ors:
         return None
     return {"$or": ors} if len(ors) > 1 else ors[0]
+
+
+def _group_filter(group_id: str) -> dict | None:
+    """Build a MongoDB $or filter matching reports whose machine belongs to a group.
+
+    A group matches its own directly-assigned PCs (machine_keys) AND the
+    machine_keys of every sub-category linked to it (many-to-many: the same
+    sub-category can belong to several groups).
+    """
+    group = get_group(group_id)
+    if not group:
+        return None
+    clauses: list[dict] = []
+    own = _machine_keys_filter(group.get("machine_keys") or [])
+    if own:
+        clauses.append(own)
+    sub_ids = group.get("subcategory_ids") or []
+    for sub_id in sub_ids:
+        clause = _sub_category_filter(sub_id)
+        if clause:
+            clauses.append(clause)
+    if not clauses:
+        return None
+    if len(clauses) == 1:
+        return clauses[0]
+    return {"$or": clauses} if len(clauses) > 1 else clauses[0]
 
 
 def _groups_filter(group_ids: list[str]) -> dict | None:
@@ -483,6 +501,151 @@ def delete_group(group_id: str) -> bool:
         return result.deleted_count == 1
     except Exception:
         return False
+
+
+# ---- sub-categories ----
+# A sub-category is a many-to-many refinement of groups:
+#   - a sub-category can belong to MANY groups (group.subcategory_ids)
+#   - a sub-category can hold MANY PCs (sub.machine_keys), and a PC is in its
+#     main group OR exactly one sub-category (one bucket only).
+# It does NOT hold a single parent: it lives under whatever groups reference it.
+
+def create_sub_category(name: str, group_ids: list[str] | None = None) -> ObjectId | None:
+    try:
+        gids = _existing_group_ids(group_ids or [])
+        result = _sub_categories().insert_one(
+            {
+                "name": name,
+                "group_ids": gids,
+                "machine_keys": [],
+                "created_at": datetime.now(UTC).timestamp(),
+            }
+        )
+        # Reflect the linkage on each referenced group.
+        for gid in gids:
+            _groups().update_one(
+                {"_id": ObjectId(gid)},
+                {"$addToSet": {"subcategory_ids": str(result.inserted_id)}},
+            )
+        return result.inserted_id
+    except (DuplicateKeyError, ConnectionFailure, PyMongoError):
+        return None
+
+
+def _existing_group_ids(group_ids: list[str]) -> list[str]:
+    """Return only the group ids that actually exist (stringified)."""
+    out: list[str] = []
+    for gid in group_ids or []:
+        try:
+            if _groups().find_one({"_id": ObjectId(gid)}):
+                out.append(str(gid))
+        except Exception:
+            continue
+    return out
+
+
+def get_sub_category(sub_id: str) -> dict | None:
+    try:
+        doc = _sub_categories().find_one({"_id": ObjectId(sub_id)})
+    except (ConnectionFailure, PyMongoError, InvalidId):
+        return None
+    if doc:
+        doc["_id"] = str(doc["_id"])
+    return doc
+
+
+def list_sub_categories() -> list[dict]:
+    records: list[dict] = []
+    try:
+        cursor = _sub_categories().find()
+        for doc in cursor:
+            doc["_id"] = str(doc["_id"])
+            records.append(doc)
+    except (ConnectionFailure, PyMongoError):
+        return records
+    return records
+
+
+def update_sub_category(
+    sub_id: str,
+    name: str | None = None,
+    group_ids: list[str] | None = None,
+    machine_keys: list[str] | None = None,
+) -> bool:
+    """Update a sub-category. group_ids replaces the linkage (many-to-many)."""
+    try:
+        changes: dict = {}
+        if name is not None:
+            changes["name"] = name
+        if machine_keys is not None:
+            changes["machine_keys"] = machine_keys
+        if group_ids is not None:
+            # Normalize to existing groups only.
+            changes["group_ids"] = _existing_group_ids(group_ids)
+        if not changes:
+            return True
+        result = _sub_categories().update_one({"_id": ObjectId(sub_id)}, {"$set": changes})
+        if result.matched_count != 1:
+            return False
+        # Keep each group's subcategory_ids in sync with the new linkage.
+        if group_ids is not None:
+            # First remove this sub from every group, then (re)add to linked ones.
+            _groups().update_many(
+                {"subcategory_ids": sub_id},
+                {"$pull": {"subcategory_ids": sub_id}},
+            )
+            _groups().update_many(
+                {"_id": {"$in": [ObjectId(g) for g in changes["group_ids"]]}},
+                {"$addToSet": {"subcategory_ids": sub_id}},
+            )
+        return True
+    except (ConnectionFailure, PyMongoError, InvalidId):
+        return False
+
+
+def delete_sub_category(sub_id: str) -> bool:
+    try:
+        # Detach from any groups first.
+        _groups().update_many(
+            {"subcategory_ids": sub_id},
+            {"$pull": {"subcategory_ids": sub_id}},
+        )
+        result = _sub_categories().delete_one({"_id": ObjectId(sub_id)})
+        return result.deleted_count == 1
+    except Exception:
+        return False
+
+
+def _sub_category_filter(sub_id: str) -> dict | None:
+    """$or filter matching reports whose machine belongs to a sub-category."""
+    sub = get_sub_category(sub_id)
+    if not sub:
+        return None
+    return _machine_keys_filter(sub.get("machine_keys") or [])
+
+
+def remove_machine_keys_from_sub_categories(
+    keys: list[str], except_sub_id: str | None = None
+) -> None:
+    """Take the given machine keys out of every sub-category (except one)."""
+    for sub in list_sub_categories():
+        if except_sub_id is not None and sub["_id"] == except_sub_id:
+            continue
+        keep = [k for k in sub.get("machine_keys") or [] if k not in set(keys)]
+        if len(keep) != len(sub.get("machine_keys") or []):
+            update_sub_category(sub["_id"], machine_keys=keep)
+
+
+def remove_machine_keys_from_groups(
+    keys: list[str], except_group_id: str | None = None
+) -> None:
+    """Take the given machine keys out of every group (except one)."""
+    for group in list_groups():
+        if except_group_id is not None and group["_id"] == except_group_id:
+            continue
+        keep = [k for k in group.get("machine_keys") or [] if k not in set(keys)]
+        if len(keep) != len(group.get("machine_keys") or []):
+            update_group(group["_id"], machine_keys=keep)
 
 
 # ---- refresh tokens ----
@@ -556,3 +719,98 @@ def ping() -> bool:
         return True
     except (ConnectionFailure, PyMongoError):
         return False
+
+
+def save_print_jobs(documents: list[dict]) -> int:
+    """Insert print-job documents. Returns count inserted (0 on Mongo error)."""
+    if not documents:
+        return 0
+    try:
+        result = _print_jobs().insert_many(documents, ordered=False)
+        return len(result.inserted_ids)
+    except (ConnectionFailure, PyMongoError):
+        return 0
+
+
+def list_print_jobs(
+    limit: int = 50,
+    device_id: str | None = None,
+    pc_name: str | None = None,
+    from_ts: float | None = None,
+    to_ts: float | None = None,
+    group_ids: list[str] | None = None,
+) -> list[dict]:
+    """Most recent print-job events, newest first."""
+    records: list[dict] = []
+    clauses: list[dict] = []
+    if device_id:
+        clauses.append({"device_id": device_id})
+    if pc_name:
+        clauses.append({"pc_name": {"$regex": pc_name, "$options": "i"}})
+    if from_ts is not None or to_ts is not None:
+        completed: dict = {}
+        if from_ts is not None:
+            completed["$gte"] = from_ts
+        if to_ts is not None:
+            completed["$lte"] = to_ts
+        clauses.append({"completed_at": completed})
+    if group_ids:
+        group_clause = _groups_filter(group_ids)
+        if group_clause:
+            clauses.append(group_clause)
+
+    if not clauses:
+        query: dict = {}
+    elif len(clauses) == 1:
+        query = clauses[0]
+    else:
+        query = {"$and": clauses}
+    try:
+        cursor = _print_jobs().find(query).sort("created_at", -1).limit(max(1, min(limit, 500)))
+        for doc in cursor:
+            doc["_id"] = str(doc["_id"])
+            records.append(doc)
+    except (ConnectionFailure, PyMongoError):
+        return records
+    return records
+
+
+def print_jobs_hourly_counts(
+    hours: int = 24,
+    group_ids: list[str] | None = None,
+) -> list[dict]:
+    """Aggregate print jobs into hourly buckets over the last `hours` hours.
+
+    Buckets are keyed by local ISO hour string ("YYYY-MM-DDTHH:00"); entries
+    count every job (not pages) over the lookback. Oldest first.
+    """
+    results: list[dict] = []
+    if hours <= 0:
+        return results
+    start = time.time() - hours * 3600
+    match: dict = {"created_at": {"$gte": start}}
+    if group_ids:
+        group_clause = _groups_filter(group_ids)
+        if group_clause:
+            match["$and"] = [group_clause]
+    try:
+        pipeline = [
+            {"$match": match},
+            {
+                "$project": {
+                    "hour": {
+                        "$dateToString": {
+                            "format": "%Y-%m-%dT%H:00",
+                            "date": {"$toDate": {"$multiply": ["$created_at", 1000]}},
+                        }
+                    },
+                }
+            },
+            {"$group": {"_id": "$hour", "count": {"$sum": 1}}},
+            {"$sort": {"_id": 1}},
+        ]
+        for doc in _print_jobs().aggregate(pipeline):
+            results.append({"hour": doc["_id"], "count": doc.get("count", 0)})
+    except (ConnectionFailure, PyMongoError):
+        return results
+    return results

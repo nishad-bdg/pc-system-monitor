@@ -65,6 +65,7 @@ def get_reports(
     country: str | None = None,
     os: str | None = None,
     group_id: str | None = None,
+    sub_category_id: str | None = None,
     disk_health: str | None = None,
     battery: str | None = None,
     battery_health_min: float | None = None,
@@ -80,6 +81,7 @@ def get_reports(
         os_name=os or None,
         group_id=group_id or None,
         group_ids=_user_group_ids(user),
+        sub_category_id=sub_category_id or None,
         disk_health=disk_health or None,
         battery=battery or None,
         battery_health_min=battery_health_min,
@@ -100,6 +102,7 @@ def export_reports_csv(
     country: str | None = None,
     os: str | None = None,
     group_id: str | None = None,
+    sub_category_id: str | None = None,
     disk_health: str | None = None,
     battery: str | None = None,
     battery_health_min: float | None = None,
@@ -115,6 +118,7 @@ def export_reports_csv(
         os_name=os or None,
         group_id=group_id or None,
         group_ids=_user_group_ids(user),
+        sub_category_id=sub_category_id or None,
         disk_health=disk_health or None,
         battery=battery or None,
         battery_health_min=battery_health_min,
@@ -137,7 +141,11 @@ def export_reports_csv(
 
 
 def _report_belongs_to_groups(report: dict, group_ids: list[str]) -> bool:
-    """True if a report's machine identity matches any key in the given groups."""
+    """True if a report's machine identity matches any key in the given groups.
+
+    Also expands to sub-categories linked to those groups (a sub-category can
+    belong to several groups, many-to-many).
+    """
     if not group_ids:
         return False
     groups = [g for g in db.list_groups() if g["_id"] in set(group_ids)]
@@ -146,6 +154,10 @@ def _report_belongs_to_groups(report: dict, group_ids: list[str]) -> bool:
     allowed_keys: set[str] = set()
     for g in groups:
         allowed_keys.update(g.get("machine_keys") or [])
+        linked_sub_ids = g.get("subcategory_ids") or []
+        for sub in db.list_sub_categories():
+            if sub["_id"] in linked_sub_ids:
+                allowed_keys.update(sub.get("machine_keys") or [])
 
     device = report.get("device_id")
     name = (report.get("pc_name") or "").lower()

@@ -99,6 +99,15 @@ async def broadcast(report: dict) -> None:
     })
 
 
+async def broadcast_print_job(job: dict) -> None:
+    """Broadcast a `print.job` event so open dashboards show it live."""
+    await _send({
+        "type": "print.job",
+        "job": _strip_mongo_ids(job),
+        "ts": time.time(),
+    })
+
+
 async def _send(payload: dict) -> None:
     message = json.dumps(payload)
     stale: list[WebSocket] = []

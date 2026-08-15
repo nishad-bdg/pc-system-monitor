@@ -45,6 +45,7 @@ docs/          Specs/plans (superpowers)
 - Seed `ADMIN_USERNAME`/`ADMIN_PASSWORD` is auto-created (and legacy `admin` promoted) to `super_admin` on startup.
 - **Users page** (`/users`, super admin only): create users with a role + a set of groups (multi-select). One user can belong to **multiple groups** and then sees every PC in each assigned group. `PATCH /users/{id}` edits role/groups/password (can't change your own role); deleting yourself is blocked.
 - **Group scoping is enforced server-side**: for a `user`, `GET /reports`, `/reports/export`, and `/reports/{id}` are filtered to the user's groups; `GET /groups` returns only their groups. `admin`/`super_admin` are unrestricted.
+- **Sub-categories**: a many-to-many refinement of groups. A sub-category can belong to **many groups** (group doc holds `subcategory_ids`; sub-category holds `group_ids`) and holds its own `machine_keys`. A PC sits in **exactly one bucket** — a main group **or** one sub-category. Assigning a machine key to either bucket removes it from ALL other groups and sub-categories (enforced server-side via `remove_machine_keys_from_groups`/`remove_machine_keys_from_sub_categories`). Group scoping (filters + `user` role) automatically includes the sub-categories linked to a group, so a sub-category's PCs show up under every parent group. `GET /reports`/`/reports/export` accept `sub_category_id`; `GET /sub-categories` returns all for admin, only those linked to the user's groups otherwise; CRUD is `admin`/`super_admin` only.
 - **API keys** (`/api-keys` page + routes) are **super admin only** (403 otherwise).
 - **Dashboard:** session carries `role` + `groups` (fetched from `/auth/me` at login); sidebar hides API Keys/Users unless `super_admin`; Groups page is read-only for `user`.
 - A `user` with no groups assigned sees no reports (empty fleet).
@@ -201,6 +202,8 @@ Optional on `Report`: `pc_name`, `device_id`, `disk`, `printers`, `network`, `up
 | `disk_health` | `healthy` (≥1 disk, none warning/fail) or `problem` (has warning/fail) |
 | `battery` | `has` (battery present) or `none` |
 | `battery_health_min` | Min `health.battery.health_percent` (e.g. 80) |
+| `group_id` | Matches machine keys `id:`/`mac:`/`name:` in the group (incl. its linked sub-categories) |
+| `sub_category_id` | Matches machine keys in the sub-category |
 
 Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
 
@@ -208,21 +211,32 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
 
 - `POST /reports` — API key; stores `source_key` prefix.
 - `GET /reports/{id}` — JWT.
-- `GET /reports/export` — JWT; same filters as `/reports` plus `group_id` (incl. `disk_health`, `battery`, `battery_health_min`); streams CSV with **every report field flattened** (`a.b.c` columns, arrays as JSON).
+- `GET /reports/export` — JWT; same filters as `/reports` (incl. `group_id`, `sub_category_id`, `disk_health`, `battery`, `battery_health_min`); streams CSV with **every report field flattened** (`a.b.c` columns, arrays as JSON).
 - `GET/POST/PATCH/DELETE /api-keys` — admin JWT; `PATCH` renames / toggles active; secret shown only at create.
-- `GET/POST/PATCH/DELETE /groups` — admin JWT; a machine key belongs to **one group only** (assigning removes it from others).
+- `GET/POST/PATCH/DELETE /groups` — admin JWT; a machine key belongs to **one bucket only** (assigning removes it from other groups AND sub-categories).
+- `GET/POST/PATCH/DELETE /sub-categories` — admin JWT; create/update take `group_ids` (many-to-many); `PATCH` machine_keys remove the keys from all groups and other sub-categories (one-bucket).
+- `POST /print-jobs` — API key; batch `{device_id, pc_name, jobs:[...]}` → Mongo `print_jobs` + WS `print.job`. `GET /print-jobs`, `GET /print-jobs/summary` — JWT (see Print Activity below).
 - Auth, users, health — unchanged pattern.
-
-`GET /reports` also accepts `group_id` (matches machine keys `id:`/`mac:`/`name:` in the group).
 
 ### Realtime (`WebSocket /ws`, hi `--heartbeat`)
 
 - **`POST /heartbeat`** (API key) — desktop pings with `{device_id, pc_name}`; records `last_seen` in the `machines` collection.
 - **`GET/POST /reports`** — every saved report is annotated with `online` + `last_seen` and broadcasts a `report.created` event (full report incl. `printers`) over the WebSocket so the dashboard updates in realtime (print counts included).
-- **`WebSocket /ws`** (`routes/realtime.py`) — the dashboard connects with its JWT passed as the WS **subprotocol** (or `?token=`); only `admin`/`super_admin` roles are allowed; `Origin` must match `CORS_ORIGINS`. On connect the server sends `{"type":"hello"}` then seeds `{"type":"presence.changed","presence":{device_id,online,last_seen,pc_name}}` for every known machine (in-process snapshot). Events: `{"type":"report.created","report":{...},"ts":...}` and `{"type":"presence.changed","presence":{...},"ts":...}`.
+- **`WebSocket /ws`** (`routes/realtime.py`) — the dashboard connects with its JWT passed as the WS **subprotocol** (or `?token=`); only `admin`/`super_admin` roles are allowed; `Origin` must match `CORS_ORIGINS`. On connect the server sends `{"type":"hello"}` then seeds `{"type":"presence.changed","presence":{device_id,online,last_seen,pc_name}}` for every known machine (in-process snapshot). Events: `{"type":"report.created","report":{...},"ts":...}`, `{"type":"presence.changed","presence":{...},"ts":...}`, and `{"type":"print.job","job":{...},"ts":...}`.
 - **Live presence (Messenger-style):** `POST /heartbeat` and `POST /reports` (when `device_id` present) call `realtime.broadcast_presence(device_id, online=True, last_seen, pc_name)` so an open dashboard flips that PC's dot green instantly. The `broadcast_presence`/`update_presence` pair dedupes same-state flips. `realtime.py` keeps an in-process `_presence` map (`device_id -> {online,last_seen,pc_name}`); `presence_snapshot()` seeds newly-connected clients (notably **no initial fetch from Mongo** — the machine's known presence only reaches a fresh dashboard after a heartbeat/report from it, so a PC idle for >`ONLINE_TIMEOUT_SECONDS` starts grey until seen). The `presence.changed` payload goes out via the shared `_send` helper (never through `broadcast()`, which is `report.created`-only).
-- Dashboard `RealtimeProvider` (`src/components/realtime-provider.tsx`) holds one socket, reconnects with capped backoff, and invalidates `reports`/`reports-browse`/`report-pc` queries on each event — no manual Refresh needed. It keeps a live presence map and **client-side flips a dot to offline after `ONLINE_TIMEOUT_SECONDS` (300s)** of silence via per-device timers, so a machine that stops heartbeating goes red even without a server event (Messenger-style). `isOnline(deviceId)` and `lastSeenFor(deviceId, fallback)` feed the Fleet/Reports sidebar rows, report detail, and `machine-detail` identity bar.
+- Dashboard `RealtimeProvider` (`src/components/realtime-provider.tsx`) holds one socket, reconnects with capped backoff, and invalidates `reports`/`reports-browse`/`report-pc` queries on each event — no manual Refresh needed. It keeps a live presence map and **client-side flips a dot to offline after `ONLINE_TIMEOUT_SECONDS` (300s)** of silence via per-device timers, so a machine that stops heartbeating goes red even without a server event (Messenger-style). `isOnline(deviceId)` and `lastSeenFor(deviceId, fallback)` feed the Fleet/Reports sidebar rows, report detail, and `machine-detail` identity bar. On `print.job` it invalidates `print-jobs`/`print-summary` so the Print Activity page updates live.
 - Broadcasting is in-process (best-effort per uvicorn worker); the dashboard also refetches on reconnect so nothing is permanently lost.
+
+### Print Activity (`/print-jobs`)
+
+Desktops report **completed print jobs** so the dashboard shows who is printing what, live:
+
+- **Desktop (`print_jobs.py`):** collects new completed print jobs with a persistent watermark (no duplicates).
+  - **Windows:** `Microsoft-Windows-PrintService/Operational` Event ID **307** ("document printed") via PowerShell; watermark = last `RecordId`; parse document/user/printer/pages from the localized message.
+  - **macOS:** tails `/var/log/cups/page_log`; watermark = latest completion column; fields printer/user/job/pages/title.
+  - Every `--heartbeat` run (5-min on Windows) also flushes any new print jobs to the API, so activity shows within ~5 min. `system-info --print-jobs` flushes on demand.
+- **API:** `POST /print-jobs` (API key, batch `{device_id, pc_name, jobs:[{printer,document,user,pages,completed_at}]}`) stores in the Mongo `print_jobs` collection and broadcasts a **`print.job`** WS event per job; `GET /print-jobs?limit=` (JWT, group-scoped for `user` role, newest first) and `GET /print-jobs/summary?hours=` (per-hour counts of the last N hours). `source_key` prefix stored like reports.
+- **Dashboard:** `/print-jobs` page (slate+blue, sidebar + detail like Reports) with a **per-hour bar chart** (last 24h), live **recent-prints feed**, per-PC counts, and stat cards (jobs / pages / printers). The WS `print.job` event refreshes it with no manual refresh.
 
 ---
 
@@ -241,9 +255,10 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 | `/reports` | **Reports browser** — filters + one row per PC |
 | `/reports/[key]` | PC detail from reports (encoded machine key) |
 | `/api-keys` | Manage desktop API keys (create/copy/rename/toggle/delete) — **super admin only** |
-| `/groups` | Create/rename/delete groups, assign PCs (one group per PC); read-only for `user` role |
+| `/groups` | Create/rename/delete groups, assign PCs (one bucket per PC); manage **sub-categories** (many-to-many group membership); read-only for `user` role |
 | `/users` | Manage dashboard users (role + groups) — **super admin only** |
 | `/reports/export` | **Report export** — date presets + filters, CSV download |
+| `/print-jobs` | **Print Activity** — live recent prints + per-hour chart (via WS) |
 
 ### Fleet (`/dashboard`)
 
@@ -260,7 +275,7 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 ### Reports (`/reports`)
 
 - Same slate+blue **sidebar + detail** layout as Fleet.
-- Sidebar filters: date from/to, PC name, country, OS, **group**, and **health** (disk health: healthy / has warning-failing; battery: has / none; min battery health %). Each row shows a **green (online) / red (offline)** dot that updates live.
+- Sidebar filters: date from/to, PC name, country, OS, **group**, **sub-category** (scoped to linked groups), and **health** (disk health: healthy / has warning-failing; battery: has / none; min battery health %). Each row shows a **green (online) / red (offline)** dot that updates live.
 - **Usage sort** (highest first): Most CPU, Most RAM, Most disk space used, Most network usage (bytes sent+recv), or Last seen.
 - **Min thresholds**: Min CPU %, Min RAM %, Min disk % (filters out PCs below threshold).
 - Sidebar lists matching PCs with CPU/RAM/Disk/Net; main pane shows `MachineDetail`.
@@ -325,5 +340,6 @@ See `docs/render-deploy.md` + `render.yaml` (blueprint) + `api/Dockerfile` + `da
 - `docs/superpowers/specs/2026-08-12-printers-design.md`
 - `docs/superpowers/specs/2026-08-12-network-printers-metrics-design.md`
 - `docs/superpowers/specs/2026-08-12-uptime-bandwidth-design.md`
+- `docs/superpowers/specs/2026-08-15-sub-categories-design.md`
 - `docs/superpowers/plans/2026-08-12-multi-pc-monitoring.md`
 - `docs/superpowers/plans/2026-08-12-uptime-bandwidth.md`

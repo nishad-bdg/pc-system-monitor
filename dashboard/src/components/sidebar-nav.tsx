@@ -2,11 +2,19 @@
 
 import Link from "next/link";
 
-export type NavKey = "fleet" | "reports" | "keys" | "groups" | "export" | "users";
+export type NavKey =
+  | "fleet"
+  | "reports"
+  | "prints"
+  | "keys"
+  | "groups"
+  | "export"
+  | "users";
 
 const BASE_NAV_ITEMS: { key: NavKey; label: string; href: string; superOnly?: boolean }[] = [
   { key: "fleet", label: "Fleet", href: "/dashboard" },
   { key: "reports", label: "Reports", href: "/reports" },
+  { key: "prints", label: "Print Activity", href: "/print-jobs" },
   { key: "export", label: "Export", href: "/reports/export" },
   { key: "groups", label: "Groups", href: "/groups" },
   { key: "keys", label: "API Keys", href: "/api-keys", superOnly: true },

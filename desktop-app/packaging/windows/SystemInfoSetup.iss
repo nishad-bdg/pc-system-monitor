@@ -131,7 +131,9 @@ begin
   end;
 end;
 
-{ Heartbeat: keep the PC marked "online" between hourly reports.
+{ Heartbeat: keep the PC marked "online" between hourly reports AND flush new
+  print jobs to the API (the --heartbeat run also syncs print jobs, so print
+  activity shows in the dashboard within ~5 minutes).
   Runs every 5 minutes (only while the user is logged on). }
 procedure CreateHeartbeatTask;
 var

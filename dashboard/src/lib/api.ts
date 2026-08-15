@@ -162,6 +162,7 @@ export interface Group {
   id: string;
   name: string;
   machine_keys: string[];
+  subcategory_ids: string[];
   created_at?: number | null;
 }
 
@@ -184,6 +185,7 @@ export async function fetchReports(
     country?: string;
     os?: string;
     groupId?: string;
+    subCategoryId?: string;
     diskHealth?: "healthy" | "problem";
     battery?: "has" | "none";
     batteryHealthMin?: number;
@@ -197,6 +199,7 @@ export async function fetchReports(
   if (filters?.country) params.set("country", filters.country);
   if (filters?.os) params.set("os", filters.os);
   if (filters?.groupId) params.set("group_id", filters.groupId);
+  if (filters?.subCategoryId) params.set("sub_category_id", filters.subCategoryId);
   if (filters?.diskHealth) params.set("disk_health", filters.diskHealth);
   if (filters?.battery) params.set("battery", filters.battery);
   if (filters?.batteryHealthMin != null)
@@ -221,6 +224,7 @@ export async function exportReportsCsv(
     country?: string;
     os?: string;
     groupId?: string;
+    subCategoryId?: string;
     diskHealth?: "healthy" | "problem";
     battery?: "has" | "none";
     batteryHealthMin?: number;
@@ -235,6 +239,7 @@ export async function exportReportsCsv(
   if (filters?.country) params.set("country", filters.country);
   if (filters?.os) params.set("os", filters.os);
   if (filters?.groupId) params.set("group_id", filters.groupId);
+  if (filters?.subCategoryId) params.set("sub_category_id", filters.subCategoryId);
   if (filters?.diskHealth) params.set("disk_health", filters.diskHealth);
   if (filters?.battery) params.set("battery", filters.battery);
   if (filters?.batteryHealthMin != null)
@@ -731,6 +736,69 @@ export function deleteGroup(
   });
 }
 
+// ---- sub-categories ----
+
+export interface SubCategory {
+  id: string;
+  name: string;
+  group_ids: string[];
+  machine_keys: string[];
+  created_at?: number | null;
+}
+
+export function fetchSubCategories(
+  apiUrl: string,
+  apiToken: string,
+): Promise<SubCategory[]> {
+  return apiRequest(apiUrl, apiToken, "/sub-categories");
+}
+
+export function createSubCategory(
+  apiUrl: string,
+  apiToken: string,
+  name: string,
+  group_ids: string[],
+): Promise<SubCategory> {
+  return apiRequest(apiUrl, apiToken, "/sub-categories", {
+    method: "POST",
+    body: JSON.stringify({ name, group_ids }),
+  });
+}
+
+export function updateSubCategory(
+  apiUrl: string,
+  apiToken: string,
+  id: string,
+  changes: {
+    name?: string;
+    groupIds?: string[];
+    machineKeys?: string[];
+  },
+): Promise<SubCategory> {
+  return apiRequest(apiUrl, apiToken, `/sub-categories/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      ...(changes.name !== undefined ? { name: changes.name } : {}),
+      ...(changes.groupIds !== undefined
+        ? { group_ids: changes.groupIds }
+        : {}),
+      ...(changes.machineKeys !== undefined
+        ? { machine_keys: changes.machineKeys }
+        : {}),
+    }),
+  });
+}
+
+export function deleteSubCategory(
+  apiUrl: string,
+  apiToken: string,
+  id: string,
+): Promise<void> {
+  return apiRequest(apiUrl, apiToken, `/sub-categories/${id}`, {
+    method: "DELETE",
+  });
+}
+
 // ---- users (super admin only) ----
 
 export function fetchUsers(
@@ -781,6 +849,16 @@ export function groupOf(
   return groups.find((g) => g.machine_keys.includes(machine.key)) ?? null;
 }
 
+/** Sub-category a machine belongs to, or null. */
+export function subCategoryOf(
+  machine: MachineSummary,
+  subCategories: SubCategory[],
+): SubCategory | null {
+  return (
+    subCategories.find((s) => s.machine_keys.includes(machine.key)) ?? null
+  );
+}
+
 /** Online status of a machine (annotated by the API from heartbeats). */
 export function isOnline(m: Pick<MachineSummary, "latest">): boolean {
   return m.latest.online === true;
@@ -795,4 +873,49 @@ export function totalPrints(r: Report): number {
     (p.network?.reduce((s, x) => s + (x.print_count ?? 0), 0) ?? 0) +
     (p.other?.reduce((s, x) => s + (x.print_count ?? 0), 0) ?? 0)
   );
+}
+
+// ---- print jobs ----
+
+export type PrintJob = {
+  _id: string;
+  device_id?: string;
+  pc_name?: string | null;
+  printer: string;
+  document: string;
+  user?: string | null;
+  pages?: number | null;
+  completed_at?: number | null;
+  created_at?: number;
+};
+
+export type PrintJobsResponse = {
+  total: number;
+  jobs: PrintJob[];
+};
+
+export type PrintHourBucket = {
+  hour: string;
+  count: number;
+};
+
+export type PrintJobsSummary = {
+  hours: number;
+  buckets: PrintHourBucket[];
+};
+
+export function fetchPrintJobs(
+  apiUrl: string,
+  apiToken: string,
+  limit = 100,
+): Promise<PrintJobsResponse> {
+  return apiRequest(apiUrl, apiToken, `/print-jobs?limit=${limit}`);
+}
+
+export function fetchPrintSummary(
+  apiUrl: string,
+  apiToken: string,
+  hours = 24,
+): Promise<PrintJobsSummary> {
+  return apiRequest(apiUrl, apiToken, `/print-jobs/summary?hours=${hours}`);
 }

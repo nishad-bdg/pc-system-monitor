@@ -5,14 +5,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {
   createGroup,
+  createSubCategory,
   deleteGroup,
+  deleteSubCategory,
   fetchGroups,
   fetchReports,
+  fetchSubCategories,
   fmtRelative,
   Group,
   groupMachines,
   groupOf,
+  SubCategory,
+  subCategoryOf,
   updateGroup,
+  updateSubCategory,
 } from "@/lib/api";
 import { DashboardShell } from "@/components/dashboard/shell";
 
@@ -25,6 +31,8 @@ type ModalState =
   | { kind: "create"; name: string; error?: string }
   | { kind: "rename"; group: Group; name: string; error?: string }
   | { kind: "delete"; group: Group }
+  | { kind: "create-sub"; group: Group; name: string; groupIds: string[]; error?: string }
+  | { kind: "delete-sub"; sub: SubCategory; group: Group }
   | null;
 
 export function GroupsPanel() {
@@ -51,12 +59,27 @@ export function GroupsPanel() {
     refetchInterval: 30_000,
   });
 
+  const { data: subCategories = [], isLoading: loadingSubs } = useQuery({
+    queryKey: ["groups-sub-categories"],
+    queryFn: () => fetchSubCategories(API_URL, apiToken ?? ""),
+    enabled: !!apiToken,
+    refetchInterval: 30_000,
+  });
+
   const machines = useMemo(
     () => groupMachines(reportsRes?.reports ?? []),
     [reportsRes?.reports],
   );
 
   const selected = groups.find((g) => g.id === selectedId) ?? groups[0] ?? null;
+
+  const subsForGroup = useMemo(
+    () =>
+      selected
+        ? subCategories.filter((s) => s.group_ids.includes(selected.id))
+        : [],
+    [selected, subCategories],
+  );
 
   useEffect(() => {
     if (selectedId && !groups.some((g) => g.id === selectedId)) {
@@ -68,6 +91,8 @@ export function GroupsPanel() {
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["groups"] });
+    queryClient.invalidateQueries({ queryKey: ["groups-sub-categories"] });
+    queryClient.invalidateQueries({ queryKey: ["sub-categories"] });
   };
 
   const createMut = useMutation({
@@ -142,6 +167,72 @@ export function GroupsPanel() {
     onError: (e) => setStatus(`Assign failed: ${(e as Error).message}`),
   });
 
+  const createSubMut = useMutation({
+    mutationFn: (v: { name: string; groupIds: string[] }) =>
+      createSubCategory(API_URL, apiToken ?? "", v.name, v.groupIds),
+    onSuccess: () => {
+      invalidate();
+      setModal(null);
+      setStatus("Sub-category created.");
+    },
+    onError: (e) =>
+      setModal((m) =>
+        m?.kind === "create-sub"
+          ? { ...m, error: (e as Error).message }
+          : m,
+      ),
+  });
+
+  const deleteSubMut = useMutation({
+    mutationFn: (id: string) => deleteSubCategory(API_URL, apiToken ?? "", id),
+    onSuccess: () => {
+      invalidate();
+      setModal(null);
+      setStatus("Sub-category deleted.");
+    },
+    onError: (e) => setStatus(`Delete failed: ${(e as Error).message}`),
+  });
+
+  /** Assign one machine to a sub-category (or None). One-bucket exclusivity
+   * enforced by the API: this removes it from its group and other sub-categories. */
+  const assignSubMut = useMutation({
+    mutationFn: (v: { key: string; subId: string | null; group: Group }) => {
+      const ops: Promise<unknown>[] = [];
+      if (v.subId) {
+        const target = subCategories.find((s) => s.id === v.subId);
+        if (target) {
+          const keys = target.machine_keys.includes(v.key)
+            ? target.machine_keys
+            : [...target.machine_keys, v.key];
+          ops.push(
+            updateSubCategory(API_URL, apiToken ?? "", v.subId, { machineKeys: keys }),
+          );
+        }
+      } else {
+        // Unassign: remove from whichever sub-category currently holds the key.
+        const holding = subCategories.find((s) => s.machine_keys.includes(v.key));
+        if (holding) {
+          ops.push(
+            updateSubCategory(API_URL, apiToken ?? "", holding.id, {
+              machineKeys: holding.machine_keys.filter((k) => k !== v.key),
+            }),
+          );
+        }
+      }
+      return Promise.all(ops);
+    },
+    onSuccess: () => invalidate(),
+    onError: (e) => setStatus(`Assign failed: ${(e as Error).message}`),
+  });
+
+  function onCreateSubSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (modal?.kind !== "create-sub") return;
+    const name = modal.name.trim();
+    if (!name) return;
+    createSubMut.mutate({ name, groupIds: modal.groupIds });
+  }
+
   function onCreateSubmit(e: FormEvent) {
     e.preventDefault();
     if (modal?.kind !== "create") return;
@@ -169,7 +260,8 @@ export function GroupsPanel() {
       subtitle={
         <>
           {groups.length} group{groups.length === 1 ? "" : "s"} ·{" "}
-          {machines.length} PC{machines.length === 1 ? "" : "s"}
+          {machines.length} PC{machines.length === 1 ? "" : "s"} ·{" "}
+          {subCategories.length} sub-categor{subCategories.length === 1 ? "y" : "ies"}
         </>
       }
       sidebar={
@@ -239,7 +331,7 @@ export function GroupsPanel() {
                   {selected.machine_keys.length} PC
                   {selected.machine_keys.length === 1 ? "" : "s"} in this group
                   <span className="mx-1.5 text-slate-300">·</span>
-                  Each PC can be in only one group
+                  Each PC sits in one bucket: main group or sub-category
                 </p>
               </div>
               <div className="flex gap-2">
@@ -306,7 +398,7 @@ export function GroupsPanel() {
                   Assign PCs to “{selected.name}”
                 </h3>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  Pick a group per PC. Moving a PC reassigns it (one group only).
+                  Pick a bucket per PC. Moving a PC reassigns it (one bucket only).
                 </p>
               </div>
 
@@ -331,11 +423,13 @@ export function GroupsPanel() {
                       <th className="px-5 py-3">PC</th>
                       <th className="px-5 py-3">Last seen</th>
                       <th className="px-5 py-3">Group</th>
+                      <th className="px-5 py-3">Sub-category</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {machines.map((m) => {
                       const current = groupOf(m, groups);
+                      const sub = subCategoryOf(m, subCategories);
                       return (
                         <tr key={m.key} className="hover:bg-slate-50/60">
                           <td className="px-5 py-3.5">
@@ -371,11 +465,149 @@ export function GroupsPanel() {
                               ))}
                             </select>
                           </td>
+                          <td className="px-5 py-3.5">
+                            <select
+                              value={sub?.id ?? ""}
+                              disabled={assignSubMut.isPending}
+                              onChange={(e) =>
+                                assignSubMut.mutate({
+                                  key: m.key,
+                                  subId: e.target.value || null,
+                                  group: selected!,
+                                })
+                              }
+                              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-800 outline-none focus:border-blue-500"
+                            >
+                              <option value="">No sub-category</option>
+                              {subsForGroup.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                  {s.name}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
+              )}
+            </section>
+          )}
+
+          {selected && !isUser && (
+            <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-5 py-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    Sub-categories in “{selected.name}”
+                  </h3>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Refine a group into categories. A sub-category can belong to
+                    several groups; a PC lives in exactly one bucket.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setModal({
+                      kind: "create-sub",
+                      group: selected,
+                      name: "",
+                      groupIds: [selected.id],
+                    })
+                  }
+                  className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500"
+                >
+                  + New sub-category
+                </button>
+              </div>
+
+              {loadingSubs && (
+                <p className="px-5 py-8 text-center text-sm text-slate-400">
+                  Loading sub-categories…
+                </p>
+              )}
+
+              {!loadingSubs && subsForGroup.length === 0 && (
+                <p className="px-5 py-8 text-center text-sm text-slate-400">
+                  No sub-categories in this group yet.
+                </p>
+              )}
+
+              {!loadingSubs && subsForGroup.length > 0 && (
+                <div className="divide-y divide-slate-100">
+                  {subsForGroup.map((s) => (
+                    <div key={s.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-slate-900">{s.name}</span>
+                          <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
+                            {s.machine_keys.length} PC
+                            {s.machine_keys.length === 1 ? "" : "s"}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {groups
+                            .filter((g) => s.group_ids.includes(g.id))
+                            .map((g) => (
+                              <span
+                                key={g.id}
+                                className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600"
+                              >
+                                {g.name}
+                              </span>
+                            ))}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <select
+                          value={
+                            machines.find((m) => s.machine_keys.includes(m.key))?.key ?? ""
+                          }
+                          disabled={assignSubMut.isPending}
+                          onChange={(e) =>
+                            assignSubMut.mutate({
+                              key: e.target.value,
+                              subId: s.id,
+                              group: selected,
+                            })
+                          }
+                          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-800 outline-none focus:border-blue-500"
+                        >
+                          <option value="">Select a PC…</option>
+                          {machines
+                            .filter((m) => {
+                              const g = groupOf(m, groups);
+                              const inThisGroup =
+                                g?.id === selected.id ||
+                                (g == null &&
+                                  s.machine_keys.includes(m.key));
+                              return (
+                                inThisGroup &&
+                                (s.machine_keys.includes(m.key) ||
+                                  subCategoryOf(m, subCategories) == null)
+                              );
+                            })
+                            .map((m) => (
+                              <option key={m.key} value={m.key}>
+                                {m.name}
+                              </option>
+                            ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setModal({ kind: "delete-sub", sub: s, group: selected })
+                          }
+                          className="rounded-lg border border-red-200 px-2.5 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </section>
           )}
@@ -542,6 +774,115 @@ export function GroupsPanel() {
                 className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
               >
                 {deleteMut.isPending ? "Deleting…" : "Delete group"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create sub-category modal */}
+      {modal?.kind === "create-sub" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <form
+            onSubmit={onCreateSubSubmit}
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
+          >
+            <h3 className="text-lg font-semibold text-slate-900">
+              New sub-category in “{modal.group.name}”
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              A sub-category refines a group, e.g.{" "}
+              <span className="font-medium text-slate-700">Floor 3</span> or{" "}
+              <span className="font-medium text-slate-700">Lab</span>. Choose
+              which groups it belongs to.
+            </p>
+            <label className="mt-4 block text-xs font-medium text-slate-600">
+              Name
+              <input
+                autoFocus
+                value={modal.name}
+                onChange={(e) =>
+                  setModal({ ...modal, name: e.target.value, error: undefined })
+                }
+                placeholder="Floor 3"
+                className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+              />
+            </label>
+            <label className="mt-4 block text-xs font-medium text-slate-600">
+              Belongs to groups
+              <div className="mt-1.5 max-h-40 space-y-1.5 overflow-y-auto rounded-lg border border-slate-200 p-2">
+                {groups.map((g) => (
+                  <label
+                    key={g.id}
+                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-800 hover:bg-slate-50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={modal.groupIds.includes(g.id)}
+                      onChange={(e) =>
+                        setModal({
+                          ...modal,
+                          groupIds: e.target.checked
+                            ? [...modal.groupIds, g.id]
+                            : modal.groupIds.filter((id) => id !== g.id),
+                        })
+                      }
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    {g.name}
+                  </label>
+                ))}
+              </div>
+            </label>
+            {modal.error && (
+              <p className="mt-2 text-xs text-red-600">{modal.error}</p>
+            )}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setModal(null)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!modal.name.trim() || createSubMut.isPending}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+              >
+                {createSubMut.isPending ? "Creating…" : "Create sub-category"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Delete sub-category confirm */}
+      {modal?.kind === "delete-sub" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-slate-900">
+              Delete sub-category?
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              <span className="font-medium text-slate-700">{modal.sub.name}</span>{" "}
+              will be removed from all groups. Its PCs become unassigned.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setModal(null)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => deleteSubMut.mutate(modal.sub.id)}
+                disabled={deleteSubMut.isPending}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
+              >
+                {deleteSubMut.isPending ? "Deleting…" : "Delete"}
               </button>
             </div>
           </div>

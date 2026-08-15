@@ -22,6 +22,7 @@ class GroupOut(BaseModel):
     id: str
     name: str
     machine_keys: list[str]
+    subcategory_ids: list[str] = []
     created_at: float | None = None
 
 
@@ -30,6 +31,7 @@ def _to_out(doc: dict) -> dict:
         "id": doc["_id"],
         "name": doc["name"],
         "machine_keys": doc.get("machine_keys") or [],
+        "subcategory_ids": doc.get("subcategory_ids") or [],
         "created_at": doc.get("created_at"),
     }
 
@@ -64,14 +66,11 @@ def update_group(
         raise HTTPException(status_code=422, detail="Group name cannot be empty")
 
     if payload.machine_keys is not None:
-        # A PC can belong to at most one group: take the keys away from every
-        # other group before assigning them here.
-        for other in db.list_groups():
-            if other["_id"] == group_id:
-                continue
-            take = [k for k in other.get("machine_keys") or [] if k not in set(payload.machine_keys)]
-            if len(take) != len(other.get("machine_keys") or []):
-                db.update_group(other["_id"], machine_keys=take)
+        # A PC sits in exactly ONE bucket: its main group OR a sub-category.
+        # Take the keys away from every other group AND every sub-category
+        # before assigning them here.
+        db.remove_machine_keys_from_groups(payload.machine_keys, except_group_id=group_id)
+        db.remove_machine_keys_from_sub_categories(payload.machine_keys)
 
     if not db.update_group(group_id, name=name, machine_keys=payload.machine_keys):
         raise HTTPException(status_code=404, detail="Group not found")

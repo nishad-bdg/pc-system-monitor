@@ -26,12 +26,17 @@ def _patch_db(monkeypatch, user=None):
     monkeypatch.setattr(
         db,
         "list_reports",
-        lambda limit=20, device_id=None, pc_name=None, from_ts=None, to_ts=None, country=None, os_name=None, group_id=None, group_ids=None, disk_health=None, battery=None, battery_health_min=None: [],
+        lambda limit=20, device_id=None, pc_name=None, from_ts=None, to_ts=None, country=None, os_name=None, group_id=None, group_ids=None, sub_category_id=None, disk_health=None, battery=None, battery_health_min=None: [],
     )
     monkeypatch.setattr(db, "get_report", lambda rid: None)
     monkeypatch.setattr(db, "list_users", lambda: [dict(user)])
     monkeypatch.setattr(db, "list_api_keys", lambda: [])
     monkeypatch.setattr(db, "list_groups", lambda: [])
+    monkeypatch.setattr(db, "list_sub_categories", lambda: [])
+    monkeypatch.setattr(db, "get_sub_category", lambda sid: None)
+    monkeypatch.setattr(db, "create_sub_category", lambda name, group_ids=None: None)
+    monkeypatch.setattr(db, "update_sub_category", lambda *a, **k: False)
+    monkeypatch.setattr(db, "delete_sub_category", lambda sid: False)
     monkeypatch.setattr(db, "create_user", lambda *a, **k: True)
     monkeypatch.setattr(db, "update_user", lambda *a, **k: True)
     monkeypatch.setattr(db, "delete_user", lambda uid: True)
@@ -340,6 +345,7 @@ def test_list_reports_passes_filters(monkeypatch):
         disk_health=None,
         battery=None,
         battery_health_min=None,
+        sub_category_id=None,
     ):
         seen["limit"] = limit
         seen["device_id"] = device_id
@@ -436,6 +442,7 @@ def test_list_reports_with_group_id(monkeypatch):
         disk_health=None,
         battery=None,
         battery_health_min=None,
+        sub_category_id=None,
     ):
         seen["group_id"] = group_id
         return []
@@ -468,6 +475,7 @@ def test_list_reports_user_role_scoped_by_groups(monkeypatch):
         disk_health=None,
         battery=None,
         battery_health_min=None,
+        sub_category_id=None,
     ):
         seen["group_ids"] = group_ids
         return []
@@ -500,6 +508,7 @@ def test_list_reports_user_role_no_groups_returns_empty(monkeypatch):
         disk_health=None,
         battery=None,
         battery_health_min=None,
+        sub_category_id=None,
     ):
         seen["group_ids"] = group_ids
         return []
@@ -527,6 +536,7 @@ def test_list_reports_health_filters_passed(monkeypatch):
         disk_health=None,
         battery=None,
         battery_health_min=None,
+        sub_category_id=None,
     ):
         seen["disk_health"] = disk_health
         seen["battery"] = battery
@@ -936,6 +946,155 @@ def test_delete_group(monkeypatch):
     assert resp.status_code == 204
 
 
+# ---- sub-categories ----
+
+def test_list_sub_categories(monkeypatch):
+    _patch_db(monkeypatch)
+    monkeypatch.setattr(
+        db,
+        "list_sub_categories",
+        lambda: [
+            {
+                "_id": "s1",
+                "name": "Floor 3",
+                "group_ids": ["g1"],
+                "machine_keys": ["id:dev-1"],
+                "created_at": 1.0,
+            }
+        ],
+    )
+    resp = client.get("/sub-categories", headers=_auth_header())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["id"] == "s1"
+    assert body[0]["machine_keys"] == ["id:dev-1"]
+
+
+def test_list_sub_categories_user_sees_only_own_groups(monkeypatch):
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "ops1",
+        "role": "user",
+        "groups": ["g1"],
+    })
+    monkeypatch.setattr(
+        db,
+        "list_sub_categories",
+        lambda: [
+            {"_id": "s1", "name": "A", "group_ids": ["g1"], "machine_keys": [], "created_at": 1.0},
+            {"_id": "s2", "name": "B", "group_ids": ["g2"], "machine_keys": [], "created_at": 1.0},
+        ],
+    )
+    resp = client.get("/sub-categories", headers=_auth_header())
+    assert resp.status_code == 200
+    assert [s["id"] for s in resp.json()] == ["s1"]
+
+
+def test_user_cannot_create_sub_category(monkeypatch):
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "ops1",
+        "role": "user",
+        "groups": ["g1"],
+    })
+    resp = client.post("/sub-categories", json={"name": "Rogue", "group_ids": ["g1"]}, headers=_auth_header())
+    assert resp.status_code == 403
+
+
+def test_create_sub_category(monkeypatch):
+    _patch_db(monkeypatch)
+    monkeypatch.setattr(db, "create_sub_category", lambda name, group_ids=None: "s1")
+    monkeypatch.setattr(db, "list_groups", lambda: [{"_id": "g1", "name": "Ops"}])
+    resp = client.post("/sub-categories", json={"name": "Floor 3", "group_ids": ["g1"]}, headers=_auth_header())
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["name"] == "Floor 3"
+    assert body["group_ids"] == ["g1"]
+    assert body["machine_keys"] == []
+
+
+def test_create_sub_category_blank_name(monkeypatch):
+    _patch_db(monkeypatch)
+    resp = client.post("/sub-categories", json={"name": "   "}, headers=_auth_header())
+    assert resp.status_code == 422
+
+
+def test_update_sub_category_assigns_keys(monkeypatch):
+    _patch_db(monkeypatch)
+    doc = {"_id": "s1", "name": "Floor 3", "group_ids": ["g1"], "machine_keys": ["id:dev-1"]}
+    monkeypatch.setattr(db, "get_sub_category", lambda sid: dict(doc))
+    monkeypatch.setattr(
+        db, "update_sub_category",
+        lambda sub_id, name=None, group_ids=None, machine_keys=None: (doc.update({
+            "name": name if name is not None else doc["name"],
+            "group_ids": group_ids if group_ids is not None else doc["group_ids"],
+            "machine_keys": machine_keys if machine_keys is not None else doc["machine_keys"],
+        }) or True),
+    )
+    resp = client.patch(
+        "/sub-categories/s1",
+        json={"machine_keys": ["id:dev-1", "id:dev-2"]},
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["machine_keys"] == ["id:dev-1", "id:dev-2"]
+
+
+def test_delete_sub_category(monkeypatch):
+    _patch_db(monkeypatch)
+    monkeypatch.setattr(db, "delete_sub_category", lambda sid: True)
+    resp = client.delete("/sub-categories/s1", headers=_auth_header())
+    assert resp.status_code == 204
+
+
+def test_reports_filter_by_sub_category(monkeypatch):
+    _patch_db(monkeypatch)
+    seen = {}
+
+    def fake_list(
+        limit=20, device_id=None, pc_name=None, from_ts=None, to_ts=None,
+        country=None, os_name=None, group_id=None, group_ids=None,
+        sub_category_id=None, disk_health=None, battery=None, battery_health_min=None,
+    ):
+        seen["sub_category_id"] = sub_category_id
+        return []
+
+    monkeypatch.setattr(db, "list_reports", fake_list)
+    resp = client.get("/reports?sub_category_id=s1", headers=_auth_header())
+    assert resp.status_code == 200
+    assert seen["sub_category_id"] == "s1"
+
+
+def test_reports_invalid_group_or_sub_category_returns_empty(monkeypatch):
+    _patch_db(monkeypatch)
+    monkeypatch.setattr(db, "get_group", lambda gid: None)
+    monkeypatch.setattr(db, "get_sub_category", lambda sid: None)
+    resp = client.get("/reports?group_id=not-an-objectid&sub_category_id=nope", headers=_auth_header())
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 0
+
+
+def test_group_filter_expands_to_sub_categories(monkeypatch):
+    _patch_db(monkeypatch)
+    monkeypatch.setattr(
+        db,
+        "list_groups",
+        lambda: [{"_id": "g1", "name": "Ops", "machine_keys": ["id:dev-1"], "subcategory_ids": ["s1"]}],
+    )
+    monkeypatch.setattr(
+        db,
+        "list_sub_categories",
+        lambda: [{"_id": "s1", "name": "Floor 3", "group_ids": ["g1"], "machine_keys": ["id:dev-9"]}],
+    )
+    monkeypatch.setattr(db, "get_group", lambda gid: {"_id": gid, "machine_keys": ["id:dev-1"], "subcategory_ids": ["s1"]})
+    monkeypatch.setattr(db, "get_sub_category", lambda sid: {"_id": sid, "machine_keys": ["id:dev-9"]})
+    query = db._group_filter("g1")
+    assert query is not None
+    # The $or must include both the group's own key and the sub-category's key.
+    assert "dev-1" in repr(query)
+    assert "dev-9" in repr(query)
+
+
 def test_list_users(monkeypatch):
     _patch_db(monkeypatch, user=SUPER_USER)
     resp = client.get("/users", headers=_auth_header())
@@ -1099,6 +1258,112 @@ def test_heartbeat_mongo_down(monkeypatch):
     assert resp.status_code == 503
 
 
+# ---- print jobs ----
+
+def test_print_jobs_requires_api_key(monkeypatch):
+    _patch_db(monkeypatch)
+    resp = client.post(
+        "/print-jobs",
+        json={"device_id": "dev-1", "jobs": [{"printer": "HP", "document": "a.pdf"}]},
+    )
+    assert resp.status_code == 401
+
+
+def test_print_jobs_post_and_broadcast(monkeypatch):
+    from sysinfo_api import realtime
+
+    _patch_db(monkeypatch)
+    key = security.generate_api_key()
+    monkeypatch.setattr(db, "find_api_key_by_hash", lambda h: {"_id": "x", "prefix": key[:20], "active": True})
+    inserted = {}
+
+    def fake_save(docs):
+        inserted["docs"] = docs
+        return len(docs)
+
+    monkeypatch.setattr(db, "save_print_jobs", fake_save)
+    sent = []
+
+    async def fake_broadcast(job):
+        sent.append(job)
+
+    monkeypatch.setattr(realtime, "broadcast_print_job", fake_broadcast)
+    resp = client.post(
+        "/print-jobs",
+        json={
+            "device_id": "dev-1",
+            "pc_name": "PC1",
+            "jobs": [
+                {"printer": "Office HP", "document": "report.pdf", "user": "john", "pages": 3, "completed_at": 100.0},
+                {"printer": "Office HP", "document": "invoice.pdf", "user": "mary", "pages": 1, "completed_at": 100.1},
+            ],
+        },
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["count"] == 2
+    saved = inserted["docs"]
+    assert saved[0]["device_id"] == "dev-1"
+    assert saved[0]["pc_name"] == "PC1"
+    assert saved[0]["printer"] == "Office HP"
+    assert saved[0]["source_key"] == key[:20]
+    assert len(sent) == 2
+    assert sent[0]["printer"] == "Office HP"
+
+
+def test_print_jobs_post_mongo_down(monkeypatch):
+    _patch_db(monkeypatch)
+    key = security.generate_api_key()
+    monkeypatch.setattr(db, "find_api_key_by_hash", lambda h: {"_id": "x", "prefix": key[:20], "active": True})
+    monkeypatch.setattr(db, "save_print_jobs", lambda docs: 0)
+    resp = client.post(
+        "/print-jobs",
+        json={"device_id": "dev-1", "jobs": [{"printer": "HP", "document": "a.pdf"}]},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 503
+
+
+def test_print_jobs_list_requires_jwt(monkeypatch):
+    _patch_db(monkeypatch)
+    resp = client.get("/print-jobs")
+    assert resp.status_code == 401
+
+
+def test_print_jobs_list_with_jwt(monkeypatch):
+    _patch_db(monkeypatch)
+    monkeypatch.setattr(
+        db,
+        "list_print_jobs",
+        lambda limit=50, device_id=None, pc_name=None, from_ts=None, to_ts=None, group_ids=None: [
+            {"_id": "1", "device_id": "dev-1", "printer": "HP", "document": "a.pdf", "created_at": 1.0}
+        ],
+    )
+    resp = client.get("/print-jobs?limit=5", headers=_auth_header())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["jobs"][0]["printer"] == "HP"
+
+
+def test_print_jobs_summary(monkeypatch):
+    _patch_db(monkeypatch)
+    monkeypatch.setattr(
+        db,
+        "print_jobs_hourly_counts",
+        lambda hours=24, group_ids=None: [
+            {"hour": "2026-08-15T10:00", "count": 3},
+            {"hour": "2026-08-15T11:00", "count": 5},
+        ],
+    )
+    resp = client.get("/print-jobs/summary?hours=24", headers=_auth_header())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["hours"] == 24
+    assert body["buckets"][0]["count"] == 3
+    assert body["buckets"][1]["hour"] == "2026-08-15T11:00"
+
+
 # ---- reports annotate online ----
 
 def test_list_reports_annotates_online(monkeypatch):
@@ -1106,7 +1371,7 @@ def test_list_reports_annotates_online(monkeypatch):
     monkeypatch.setattr(
         db,
         "list_reports",
-        lambda limit=20, device_id=None, pc_name=None, from_ts=None, to_ts=None, country=None, os_name=None, group_id=None, group_ids=None, disk_health=None, battery=None, battery_health_min=None: [
+        lambda limit=20, device_id=None, pc_name=None, from_ts=None, to_ts=None, country=None, os_name=None, group_id=None, group_ids=None, sub_category_id=None, disk_health=None, battery=None, battery_health_min=None: [
             {"_id": "1", "pc_name": "Mac", "device_id": "dev-live", "created_at": 1.0},
             {"_id": "2", "pc_name": "Win", "device_id": "dev-gone", "created_at": 2.0},
         ],

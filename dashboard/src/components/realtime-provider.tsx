@@ -105,6 +105,10 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         queryClient.invalidateQueries({ queryKey: ["reports-browse"] });
         queryClient.invalidateQueries({ queryKey: ["report-pc"] });
       }
+      if (event.type === "print.job") {
+        queryClient.invalidateQueries({ queryKey: ["print-jobs"] });
+        queryClient.invalidateQueries({ queryKey: ["print-summary"] });
+      }
     },
     [queryClient, setEntry],
   );

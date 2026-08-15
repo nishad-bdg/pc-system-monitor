@@ -28,3 +28,17 @@ class ReportOut(BaseModel):
 class Heartbeat(BaseModel):
     device_id: str
     pc_name: str | None = None
+
+
+class PrintJob(BaseModel):
+    printer: str
+    document: str
+    user: str | None = None
+    pages: int | None = None
+    completed_at: float | None = Field(default=None, description="Unix timestamp")
+
+
+class PrintJobsBatch(BaseModel):
+    device_id: str
+    pc_name: str | None = None
+    jobs: list[PrintJob] = []

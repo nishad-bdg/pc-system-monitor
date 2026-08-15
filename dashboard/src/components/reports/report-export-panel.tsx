@@ -7,6 +7,7 @@ import {
   exportReportsCsv,
   fetchGroups,
   fetchReports,
+  fetchSubCategories,
   fmtBytes,
   fmtPercent,
   fmtRelative,
@@ -20,6 +21,7 @@ import {
   networkTotalBytes,
   SortOrder,
   sortMachines,
+  subCategoryOf,
 } from "@/lib/api";
 import { DashboardShell } from "@/components/dashboard/shell";
 
@@ -116,6 +118,7 @@ export function ReportExportPanel() {
   const [country, setCountry] = useState("");
   const [os, setOs] = useState("");
   const [groupId, setGroupId] = useState("");
+  const [subCategoryId, setSubCategoryId] = useState("");
   const [diskHealth, setDiskHealth] = useState<"" | "healthy" | "problem">("");
   const [battery, setBattery] = useState<"" | "has" | "none">("");
   const [batteryHealthMin, setBatteryHealthMin] = useState("");
@@ -127,6 +130,7 @@ export function ReportExportPanel() {
     country: string;
     os: string;
     groupId: string;
+    subCategoryId: string;
     diskHealth: "" | "healthy" | "problem";
     battery: "" | "has" | "none";
     batteryHealthMin: number;
@@ -142,6 +146,12 @@ export function ReportExportPanel() {
     enabled: !!apiToken,
   });
 
+  const { data: subCategories = [] } = useQuery({
+    queryKey: ["sub-categories"],
+    queryFn: () => fetchSubCategories(API_URL, apiToken ?? ""),
+    enabled: !!apiToken,
+  });
+
   const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["reports-export", applied],
     queryFn: () =>
@@ -153,6 +163,7 @@ export function ReportExportPanel() {
             fromTs: applied.fromTs,
             toTs: applied.toTs,
             groupId: applied.groupId || undefined,
+            subCategoryId: applied.subCategoryId || undefined,
             diskHealth: applied.diskHealth || undefined,
             battery: applied.battery || undefined,
             batteryHealthMin: applied.batteryHealthMin || undefined,
@@ -166,7 +177,19 @@ export function ReportExportPanel() {
     if (applied?.groupId) {
       list = list.filter((m) => {
         const g = groupOf(m, groups);
-        return !!g && g.id === applied.groupId;
+        if (g && g.id === applied.groupId) return true;
+        const s = subCategoryOf(m, subCategories);
+        return (
+          !!s &&
+          s.group_ids.includes(applied.groupId) &&
+          groups.some((gr) => gr.id === applied.groupId)
+        );
+      });
+    }
+    if (applied?.subCategoryId) {
+      list = list.filter((m) => {
+        const s = subCategoryOf(m, subCategories);
+        return !!s && s.id === applied.subCategoryId;
       });
     }
     if (applied != null && (applied.diskHealth || applied.battery || applied.batteryHealthMin > 0)) {
@@ -192,7 +215,7 @@ export function ReportExportPanel() {
       });
     }
     return sortMachines(list, sort, order);
-  }, [data?.reports, applied, groups, sort, order]);
+  }, [data?.reports, applied, groups, subCategories, sort, order]);
 
   const reports = data?.reports ?? [];
   const totalReports = data?.total ?? 0;
@@ -213,6 +236,7 @@ export function ReportExportPanel() {
       country: country.trim(),
       os: os.trim(),
       groupId,
+      subCategoryId,
       diskHealth,
       battery,
       batteryHealthMin: Number(batteryHealthMin) || 0,
@@ -228,6 +252,7 @@ export function ReportExportPanel() {
     setCountry("");
     setOs("");
     setGroupId("");
+    setSubCategoryId("");
     setDiskHealth("");
     setBattery("");
     setBatteryHealthMin("");
@@ -249,6 +274,7 @@ export function ReportExportPanel() {
         fromTs: applied.fromTs,
         toTs: applied.toTs,
         groupId: applied.groupId || undefined,
+        subCategoryId: applied.subCategoryId || undefined,
         diskHealth: applied.diskHealth || undefined,
         battery: applied.battery || undefined,
         batteryHealthMin: applied.batteryHealthMin || undefined,
@@ -367,6 +393,23 @@ export function ReportExportPanel() {
                   {g.name}
                 </option>
               ))}
+            </select>
+          </label>
+          <label className="block text-xs text-slate-400">
+            Sub-category
+            <select
+              value={subCategoryId}
+              onChange={(e) => setSubCategoryId(e.target.value)}
+              className={inputClass}
+            >
+              <option value="">All sub-categories</option>
+              {subCategories
+                .filter((s) => !groupId || s.group_ids.includes(groupId))
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
             </select>
           </label>
 

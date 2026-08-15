@@ -11,6 +11,8 @@ MONGO_API_KEYS = "api_keys"
 MONGO_GROUPS = "groups"
 MONGO_REFRESH_TOKENS = "refresh_tokens"
 MONGO_MACHINES = "machines"
+MONGO_PRINT_JOBS = "print_jobs"
+MONGO_SUB_CATEGORIES = "sub_categories"
 
 # A machine is "online" if we've seen a heartbeat/report within this window.
 ONLINE_TIMEOUT_SECONDS = int(os.getenv("SYSTEM_INFO_ONLINE_TIMEOUT_SECONDS", "300"))

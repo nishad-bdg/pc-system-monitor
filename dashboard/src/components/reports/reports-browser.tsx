@@ -8,6 +8,7 @@ import {
   encodeMachineKey,
   fetchGroups,
   fetchReports,
+  fetchSubCategories,
   fmtBytes,
   fmtPercent,
   fmtRelative,
@@ -18,6 +19,7 @@ import {
   maxDiskPercent,
   networkTotalBytes,
   sortMachines,
+  subCategoryOf,
 } from "@/lib/api";
 import { DashboardShell } from "@/components/dashboard/shell";
 import { MachineDetail } from "@/components/dashboard/machine-detail";
@@ -41,6 +43,7 @@ type AppliedFilters = {
   country: string;
   os: string;
   group: string;
+  subCategory: string;
   fromTs?: number;
   toTs?: number;
   sort: MachineSortKey;
@@ -57,6 +60,7 @@ const defaultApplied: AppliedFilters = {
   country: "",
   os: "",
   group: "",
+  subCategory: "",
   fromTs: undefined,
   toTs: undefined,
   sort: "cpu",
@@ -77,6 +81,7 @@ export function ReportsBrowser() {
   const [country, setCountry] = useState("");
   const [os, setOs] = useState("");
   const [group, setGroup] = useState("");
+  const [subCategory, setSubCategory] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [sort, setSort] = useState<MachineSortKey>("cpu");
@@ -92,6 +97,12 @@ export function ReportsBrowser() {
   const { data: groups = [] } = useQuery({
     queryKey: ["groups"],
     queryFn: () => fetchGroups(API_URL, apiToken ?? ""),
+    enabled: !!apiToken,
+  });
+
+  const { data: subCategories = [] } = useQuery({
+    queryKey: ["sub-categories"],
+    queryFn: () => fetchSubCategories(API_URL, apiToken ?? ""),
     enabled: !!apiToken,
   });
 
@@ -140,12 +151,25 @@ export function ReportsBrowser() {
 
       if (applied.group) {
         const g = groupOf(m, groups);
-        if (!g || g.id !== applied.group) return false;
+        if (g && g.id === applied.group) {
+          // in group directly
+        } else {
+          const s = subCategoryOf(m, subCategories);
+          const linkedToGroup =
+            s !== null &&
+            s.group_ids.includes(applied.group) &&
+            groups.some((gr) => gr.id === applied.group);
+          if (!linkedToGroup) return false;
+        }
+      }
+      if (applied.subCategory) {
+        const s = subCategoryOf(m, subCategories);
+        if (!s || s.id !== applied.subCategory) return false;
       }
       return true;
     });
     return sortMachines(list, applied.sort);
-  }, [data?.reports, applied, groups]);
+  }, [data?.reports, applied, groups, subCategories]);
 
   const selected =
     (selectedKey && machines.find((m) => m.key === selectedKey)) ||
@@ -159,6 +183,7 @@ export function ReportsBrowser() {
       country: country.trim(),
       os: os.trim(),
       group,
+      subCategory,
       fromTs: dateInputToTs(fromDate, false),
       toTs: dateInputToTs(toDate, true),
       sort,
@@ -176,6 +201,7 @@ export function ReportsBrowser() {
     setCountry("");
     setOs("");
     setGroup("");
+    setSubCategory("");
     setFromDate("");
     setToDate("");
     setSort("cpu");
@@ -268,6 +294,23 @@ export function ReportsBrowser() {
                   {g.name}
                 </option>
               ))}
+            </select>
+          </label>
+          <label className="block text-xs text-slate-400">
+            Sub-category
+            <select
+              value={subCategory}
+              onChange={(e) => setSubCategory(e.target.value)}
+              className={inputClass}
+            >
+              <option value="">All sub-categories</option>
+              {subCategories
+                .filter((s) => !group || s.group_ids.includes(group))
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
             </select>
           </label>
 

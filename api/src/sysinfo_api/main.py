@@ -4,7 +4,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import config, db, security
-from .routes import api_keys, auth, groups, health, realtime, reports, users
+from .routes import (
+    api_keys,
+    auth,
+    groups,
+    health,
+    print_jobs,
+    realtime,
+    reports,
+    sub_categories,
+    users,
+)
 
 
 @asynccontextmanager
@@ -39,6 +49,8 @@ app.include_router(reports.router)
 app.include_router(users.router)
 app.include_router(api_keys.router)
 app.include_router(groups.router)
+app.include_router(sub_categories.router)
+app.include_router(print_jobs.router)
 app.include_router(realtime.router)
 
 

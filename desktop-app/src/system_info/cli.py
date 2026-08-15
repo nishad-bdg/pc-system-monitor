@@ -19,6 +19,11 @@ from .health import collect_health_info
 from .email_accounts import collect_email_accounts
 from .device import get_or_create_device_id, resolve_pc_name
 from .update import check_for_update, maybe_auto_update
+from .print_jobs import (
+    collect_new_print_events,
+    save_state as save_print_state,
+    send_print_events,
+)
 # Load packaged/installer config before reading defaults.
 load_install_config()
 
@@ -46,6 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="Print output as JSON")
     parser.add_argument("--no-save", action="store_true", help="Do not save report to the API")
     parser.add_argument("--heartbeat", action="store_true", help="Only send a lightweight online heartbeat, then exit")
+    parser.add_argument("--print-jobs", action="store_true", help="Flush newly completed print jobs to the API, then exit")
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="API base URL to save reports to")
     parser.add_argument("--api-key", default=DEFAULT_API_KEY, help="API key for authenticated save")
     parser.add_argument(
@@ -121,6 +127,7 @@ def run(args: argparse.Namespace) -> int:
     if args.heartbeat:
         pc_name = resolve_pc_name(args.pc_name)
         device_id = get_or_create_device_id(pc_name)
+        sync_print_jobs(args, device_id, pc_name, quiet=True)
         payload = {"device_id": device_id, "pc_name": pc_name}
         ok = send_heartbeat(payload, args.api_url, args.api_key)
         if args.json:
@@ -130,6 +137,16 @@ def run(args: argparse.Namespace) -> int:
         else:
             print("\n[heartbeat] failed - check API URL and API key")
             return 1
+        return 0
+
+    if args.print_jobs:
+        pc_name = resolve_pc_name(args.pc_name)
+        device_id = get_or_create_device_id(pc_name)
+        sent = sync_print_jobs(args, device_id, pc_name)
+        if args.json:
+            print(json.dumps({"print_jobs": sent}))
+        else:
+            print(f"[print] flushed {sent} new print job(s)")
         return 0
 
     data: dict = {}
@@ -256,6 +273,34 @@ def send_heartbeat(data: dict, api_url: str, api_key: str = "") -> bool:
         if os.getenv("SYSTEM_INFO_DEBUG"):
             print(f"[heartbeat] failed: {exc}")
         return False
+
+
+def sync_print_jobs(
+    args: argparse.Namespace,
+    device_id: str,
+    pc_name: str,
+    quiet: bool = False,
+) -> int:
+    """Collect newly completed print jobs and POST them to the API.
+
+    Always advances the local watermark (state), even when the API is down,
+    so already-seen jobs are not re-reported. Returns the number of events
+    flushed (reported) this run.
+    """
+    events, state = collect_new_print_events()
+    save_print_state(state)
+    if not events:
+        return 0
+    ok = send_print_events(
+        events,
+        args.api_url,
+        args.api_key,
+        device_id=device_id,
+        pc_name=pc_name,
+    )
+    if not ok and not quiet:
+        print("[print] could not reach API")
+    return len(events)
 
 
 def _print(
