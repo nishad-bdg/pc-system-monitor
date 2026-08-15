@@ -184,6 +184,9 @@ export async function fetchReports(
     country?: string;
     os?: string;
     groupId?: string;
+    diskHealth?: "healthy" | "problem";
+    battery?: "has" | "none";
+    batteryHealthMin?: number;
   },
 ): Promise<ReportsResponse> {
   const params = new URLSearchParams({ limit: String(limit) });
@@ -194,6 +197,10 @@ export async function fetchReports(
   if (filters?.country) params.set("country", filters.country);
   if (filters?.os) params.set("os", filters.os);
   if (filters?.groupId) params.set("group_id", filters.groupId);
+  if (filters?.diskHealth) params.set("disk_health", filters.diskHealth);
+  if (filters?.battery) params.set("battery", filters.battery);
+  if (filters?.batteryHealthMin != null)
+    params.set("battery_health_min", String(filters.batteryHealthMin));
   const res = await fetch(`${apiUrl}/reports?${params}`, {
     headers: { Authorization: `Bearer ${apiToken}` },
     cache: "no-store",
@@ -214,6 +221,9 @@ export async function exportReportsCsv(
     country?: string;
     os?: string;
     groupId?: string;
+    diskHealth?: "healthy" | "problem";
+    battery?: "has" | "none";
+    batteryHealthMin?: number;
   },
   limit = 10000,
 ): Promise<Blob> {
@@ -225,6 +235,10 @@ export async function exportReportsCsv(
   if (filters?.country) params.set("country", filters.country);
   if (filters?.os) params.set("os", filters.os);
   if (filters?.groupId) params.set("group_id", filters.groupId);
+  if (filters?.diskHealth) params.set("disk_health", filters.diskHealth);
+  if (filters?.battery) params.set("battery", filters.battery);
+  if (filters?.batteryHealthMin != null)
+    params.set("battery_health_min", String(filters.batteryHealthMin));
   const res = await fetch(`${apiUrl}/reports/export?${params}`, {
     headers: { Authorization: `Bearer ${apiToken}` },
     cache: "no-store",

@@ -96,6 +96,9 @@ def list_reports(
     os_name: str | None = None,
     group_id: str | None = None,
     group_ids: list[str] | None = None,
+    disk_health: str | None = None,
+    battery: str | None = None,
+    battery_health_min: float | None = None,
 ) -> list[dict]:
     records: list[dict] = []
     clauses: list[dict] = []
@@ -123,6 +126,31 @@ def list_reports(
         )
     if os_name:
         clauses.append({"os.system": {"$regex": os_name, "$options": "i"}})
+    if disk_health == "healthy":
+        # At least one physical disk exists and none is failing/warning.
+        clauses.append(
+            {
+                "health.disks": {
+                    "$exists": True,
+                    "$ne": [],
+                    "$not": {"$elemMatch": {"health": {"$in": ["warning", "fail"]}}},
+                }
+            }
+        )
+    elif disk_health == "problem":
+        clauses.append(
+            {"health.disks": {"$elemMatch": {"health": {"$in": ["warning", "fail"]}}}}
+        )
+    if battery == "has":
+        clauses.append({"health.battery": {"$exists": True, "$ne": None}})
+    elif battery == "none":
+        clauses.append(
+            {"$or": [{"health.battery": None}, {"health.battery": {"$exists": False}}]}
+        )
+    if battery_health_min is not None:
+        clauses.append(
+            {"health.battery.health_percent": {"$gte": battery_health_min}}
+        )
     if group_id:
         group_clause = _group_filter(group_id)
         if group_clause:

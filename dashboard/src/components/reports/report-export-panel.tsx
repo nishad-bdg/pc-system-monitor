@@ -116,6 +116,9 @@ export function ReportExportPanel() {
   const [country, setCountry] = useState("");
   const [os, setOs] = useState("");
   const [groupId, setGroupId] = useState("");
+  const [diskHealth, setDiskHealth] = useState<"" | "healthy" | "problem">("");
+  const [battery, setBattery] = useState<"" | "has" | "none">("");
+  const [batteryHealthMin, setBatteryHealthMin] = useState("");
   const [applied, setApplied] = useState<{
     range: RangeKey;
     fromTs?: number;
@@ -124,6 +127,9 @@ export function ReportExportPanel() {
     country: string;
     os: string;
     groupId: string;
+    diskHealth: "" | "healthy" | "problem";
+    battery: "" | "has" | "none";
+    batteryHealthMin: number;
   } | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -147,6 +153,9 @@ export function ReportExportPanel() {
             fromTs: applied.fromTs,
             toTs: applied.toTs,
             groupId: applied.groupId || undefined,
+            diskHealth: applied.diskHealth || undefined,
+            battery: applied.battery || undefined,
+            batteryHealthMin: applied.batteryHealthMin || undefined,
           })
         : Promise.resolve({ total: 0, reports: [] }),
     enabled: !!apiToken && !!applied,
@@ -158,6 +167,28 @@ export function ReportExportPanel() {
       list = list.filter((m) => {
         const g = groupOf(m, groups);
         return !!g && g.id === applied.groupId;
+      });
+    }
+    if (applied != null && (applied.diskHealth || applied.battery || applied.batteryHealthMin > 0)) {
+      const a = applied;
+      list = list.filter((m) => {
+        const r = m.latest;
+        const healthDisks = r.health?.disks ?? [];
+        const problemDisks = healthDisks.filter(
+          (d) => d.health === "warning" || d.health === "fail",
+        );
+        if (a.diskHealth === "healthy" && problemDisks.length > 0) return false;
+        if (a.diskHealth === "problem" && problemDisks.length === 0) return false;
+
+        const hasBattery = r.health?.battery != null;
+        if (a.battery === "has" && !hasBattery) return false;
+        if (a.battery === "none" && hasBattery) return false;
+        const batHealth = r.health?.battery?.health_percent;
+        if (a.batteryHealthMin > 0) {
+          if (!hasBattery || batHealth == null || batHealth < a.batteryHealthMin)
+            return false;
+        }
+        return true;
       });
     }
     return sortMachines(list, sort, order);
@@ -182,6 +213,9 @@ export function ReportExportPanel() {
       country: country.trim(),
       os: os.trim(),
       groupId,
+      diskHealth,
+      battery,
+      batteryHealthMin: Number(batteryHealthMin) || 0,
     });
     setExportError(null);
   }
@@ -194,6 +228,9 @@ export function ReportExportPanel() {
     setCountry("");
     setOs("");
     setGroupId("");
+    setDiskHealth("");
+    setBattery("");
+    setBatteryHealthMin("");
     setSort("last_seen");
     setOrder("desc");
     setApplied(null);
@@ -212,6 +249,9 @@ export function ReportExportPanel() {
         fromTs: applied.fromTs,
         toTs: applied.toTs,
         groupId: applied.groupId || undefined,
+        diskHealth: applied.diskHealth || undefined,
+        battery: applied.battery || undefined,
+        batteryHealthMin: applied.batteryHealthMin || undefined,
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -329,6 +369,49 @@ export function ReportExportPanel() {
               ))}
             </select>
           </label>
+
+          <div>
+            <p className="mb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+              Health
+            </p>
+            <label className="block text-xs text-slate-400">
+              Disk health
+              <select
+                value={diskHealth}
+                onChange={(e) =>
+                  setDiskHealth(e.target.value as "" | "healthy" | "problem")
+                }
+                className={inputClass}
+              >
+                <option value="">Any</option>
+                <option value="healthy">All healthy</option>
+                <option value="problem">Has warning / failing</option>
+              </select>
+            </label>
+            <label className="mt-3 block text-xs text-slate-400">
+              Battery
+              <select
+                value={battery}
+                onChange={(e) => setBattery(e.target.value as "" | "has" | "none")}
+                className={inputClass}
+              >
+                <option value="">Any</option>
+                <option value="has">Has battery</option>
+                <option value="none">No battery</option>
+              </select>
+            </label>
+            <label className="mt-3 block text-xs text-slate-400">
+              Min battery health %
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={batteryHealthMin}
+                onChange={(e) => setBatteryHealthMin(e.target.value)}
+                className={inputClass}
+              />
+            </label>
+          </div>
 
           <p className="pt-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
             Sort by

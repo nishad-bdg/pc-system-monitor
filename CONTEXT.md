@@ -198,6 +198,9 @@ Optional on `Report`: `pc_name`, `device_id`, `disk`, `printers`, `network`, `up
 | `from_ts`, `to_ts` | Unix seconds on `created_at` |
 | `country` | Regex on `location.country` or `location.country_code` |
 | `os` | Regex on `os.system` |
+| `disk_health` | `healthy` (≥1 disk, none warning/fail) or `problem` (has warning/fail) |
+| `battery` | `has` (battery present) or `none` |
+| `battery_health_min` | Min `health.battery.health_percent` (e.g. 80) |
 
 Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
 
@@ -205,7 +208,7 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
 
 - `POST /reports` — API key; stores `source_key` prefix.
 - `GET /reports/{id}` — JWT.
-- `GET /reports/export` — JWT; same filters as `/reports` plus `group_id`; streams CSV with **every report field flattened** (`a.b.c` columns, arrays as JSON).
+- `GET /reports/export` — JWT; same filters as `/reports` plus `group_id` (incl. `disk_health`, `battery`, `battery_health_min`); streams CSV with **every report field flattened** (`a.b.c` columns, arrays as JSON).
 - `GET/POST/PATCH/DELETE /api-keys` — admin JWT; `PATCH` renames / toggles active; secret shown only at create.
 - `GET/POST/PATCH/DELETE /groups` — admin JWT; a machine key belongs to **one group only** (assigning removes it from others).
 - Auth, users, health — unchanged pattern.
@@ -256,7 +259,7 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 ### Reports (`/reports`)
 
 - Same slate+blue **sidebar + detail** layout as Fleet.
-- Sidebar filters: date from/to, PC name, country, OS, **group**. Each row shows a **green (online) / red (offline)** dot that updates live.
+- Sidebar filters: date from/to, PC name, country, OS, **group**, and **health** (disk health: healthy / has warning-failing; battery: has / none; min battery health %). Each row shows a **green (online) / red (offline)** dot that updates live.
 - **Usage sort** (highest first): Most CPU, Most RAM, Most disk space used, Most network usage (bytes sent+recv), or Last seen.
 - **Min thresholds**: Min CPU %, Min RAM %, Min disk % (filters out PCs below threshold).
 - Sidebar lists matching PCs with CPU/RAM/Disk/Net; main pane shows `MachineDetail`.

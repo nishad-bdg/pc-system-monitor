@@ -58,6 +58,9 @@ def get_reports(
     country: str | None = None,
     os: str | None = None,
     group_id: str | None = None,
+    disk_health: str | None = None,
+    battery: str | None = None,
+    battery_health_min: float | None = None,
     user: CurrentUser = None,
 ) -> dict:
     records = db.list_reports(
@@ -70,6 +73,9 @@ def get_reports(
         os_name=os or None,
         group_id=group_id or None,
         group_ids=_user_group_ids(user),
+        disk_health=disk_health or None,
+        battery=battery or None,
+        battery_health_min=battery_health_min,
     )
     seen_map = db.machines_seen_map()
     for rec in records:
@@ -87,6 +93,9 @@ def export_reports_csv(
     country: str | None = None,
     os: str | None = None,
     group_id: str | None = None,
+    disk_health: str | None = None,
+    battery: str | None = None,
+    battery_health_min: float | None = None,
     user: CurrentUser = None,
 ) -> StreamingResponse:
     records = db.list_reports(
@@ -99,6 +108,9 @@ def export_reports_csv(
         os_name=os or None,
         group_id=group_id or None,
         group_ids=_user_group_ids(user),
+        disk_health=disk_health or None,
+        battery=battery or None,
+        battery_health_min=battery_health_min,
     )
     buffer = io.StringIO()
     writer = csv.writer(buffer)

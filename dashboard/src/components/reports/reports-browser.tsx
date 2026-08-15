@@ -47,6 +47,9 @@ type AppliedFilters = {
   minCpu: number;
   minRam: number;
   minDisk: number;
+  diskHealth: "" | "healthy" | "problem";
+  battery: "" | "has" | "none";
+  batteryHealthMin: number;
 };
 
 const defaultApplied: AppliedFilters = {
@@ -60,6 +63,9 @@ const defaultApplied: AppliedFilters = {
   minCpu: 0,
   minRam: 0,
   minDisk: 0,
+  diskHealth: "",
+  battery: "",
+  batteryHealthMin: 0,
 };
 
 export function ReportsBrowser() {
@@ -77,6 +83,9 @@ export function ReportsBrowser() {
   const [minCpu, setMinCpu] = useState("0");
   const [minRam, setMinRam] = useState("0");
   const [minDisk, setMinDisk] = useState("0");
+  const [diskHealth, setDiskHealth] = useState<AppliedFilters["diskHealth"]>("");
+  const [battery, setBattery] = useState<AppliedFilters["battery"]>("");
+  const [batteryHealthMin, setBatteryHealthMin] = useState("0");
   const [applied, setApplied] = useState<AppliedFilters>(defaultApplied);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
@@ -95,6 +104,9 @@ export function ReportsBrowser() {
         os: applied.os || undefined,
         fromTs: applied.fromTs,
         toTs: applied.toTs,
+        diskHealth: applied.diskHealth || undefined,
+        battery: applied.battery || undefined,
+        batteryHealthMin: applied.batteryHealthMin || undefined,
       }),
     enabled: !!apiToken,
   });
@@ -109,6 +121,23 @@ export function ReportsBrowser() {
       if (cpu < applied.minCpu) return false;
       if (ram < applied.minRam) return false;
       if (disk < applied.minDisk) return false;
+
+      const healthDisks = r.health?.disks ?? [];
+      const problemDisks = healthDisks.filter(
+        (d) => d.health === "warning" || d.health === "fail",
+      );
+      if (applied.diskHealth === "healthy" && problemDisks.length > 0) return false;
+      if (applied.diskHealth === "problem" && problemDisks.length === 0) return false;
+
+      const hasBattery = r.health?.battery != null;
+      if (applied.battery === "has" && !hasBattery) return false;
+      if (applied.battery === "none" && hasBattery) return false;
+      const batHealth = r.health?.battery?.health_percent;
+      if (applied.batteryHealthMin > 0) {
+        if (!hasBattery || batHealth == null || batHealth < applied.batteryHealthMin)
+          return false;
+      }
+
       if (applied.group) {
         const g = groupOf(m, groups);
         if (!g || g.id !== applied.group) return false;
@@ -136,6 +165,9 @@ export function ReportsBrowser() {
       minCpu: Number(minCpu) || 0,
       minRam: Number(minRam) || 0,
       minDisk: Number(minDisk) || 0,
+      diskHealth,
+      battery,
+      batteryHealthMin: Number(batteryHealthMin) || 0,
     });
   }
 
@@ -150,6 +182,9 @@ export function ReportsBrowser() {
     setMinCpu("0");
     setMinRam("0");
     setMinDisk("0");
+    setDiskHealth("");
+    setBattery("");
+    setBatteryHealthMin("0");
     setApplied(defaultApplied);
   }
 
@@ -288,6 +323,45 @@ export function ReportsBrowser() {
               />
             </label>
           </div>
+
+          <p className="pt-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+            Health
+          </p>
+          <label className="block text-xs text-slate-400">
+            Disk health
+            <select
+              value={diskHealth}
+              onChange={(e) => setDiskHealth(e.target.value as AppliedFilters["diskHealth"])}
+              className={inputClass}
+            >
+              <option value="">Any</option>
+              <option value="healthy">All healthy</option>
+              <option value="problem">Has warning / failing</option>
+            </select>
+          </label>
+          <label className="block text-xs text-slate-400">
+            Battery
+            <select
+              value={battery}
+              onChange={(e) => setBattery(e.target.value as AppliedFilters["battery"])}
+              className={inputClass}
+            >
+              <option value="">Any</option>
+              <option value="has">Has battery</option>
+              <option value="none">No battery</option>
+            </select>
+          </label>
+          <label className="block text-xs text-slate-400">
+            Min battery health %
+            <input
+              type="number"
+              min={0}
+              max={100}
+              value={batteryHealthMin}
+              onChange={(e) => setBatteryHealthMin(e.target.value)}
+              className={inputClass}
+            />
+          </label>
 
           <div className="flex gap-2 pt-1">
             <button

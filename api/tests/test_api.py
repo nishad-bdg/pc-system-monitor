@@ -26,7 +26,7 @@ def _patch_db(monkeypatch, user=None):
     monkeypatch.setattr(
         db,
         "list_reports",
-        lambda limit=20, device_id=None, pc_name=None, from_ts=None, to_ts=None, country=None, os_name=None, group_id=None, group_ids=None: [],
+        lambda limit=20, device_id=None, pc_name=None, from_ts=None, to_ts=None, country=None, os_name=None, group_id=None, group_ids=None, disk_health=None, battery=None, battery_health_min=None: [],
     )
     monkeypatch.setattr(db, "get_report", lambda rid: None)
     monkeypatch.setattr(db, "list_users", lambda: [dict(user)])
@@ -331,6 +331,9 @@ def test_list_reports_passes_filters(monkeypatch):
         os_name=None,
         group_id=None,
         group_ids=None,
+        disk_health=None,
+        battery=None,
+        battery_health_min=None,
     ):
         seen["limit"] = limit
         seen["device_id"] = device_id
@@ -424,6 +427,9 @@ def test_list_reports_with_group_id(monkeypatch):
         os_name=None,
         group_id=None,
         group_ids=None,
+        disk_health=None,
+        battery=None,
+        battery_health_min=None,
     ):
         seen["group_id"] = group_id
         return []
@@ -453,6 +459,9 @@ def test_list_reports_user_role_scoped_by_groups(monkeypatch):
         os_name=None,
         group_id=None,
         group_ids=None,
+        disk_health=None,
+        battery=None,
+        battery_health_min=None,
     ):
         seen["group_ids"] = group_ids
         return []
@@ -482,6 +491,9 @@ def test_list_reports_user_role_no_groups_returns_empty(monkeypatch):
         os_name=None,
         group_id=None,
         group_ids=None,
+        disk_health=None,
+        battery=None,
+        battery_health_min=None,
     ):
         seen["group_ids"] = group_ids
         return []
@@ -490,6 +502,40 @@ def test_list_reports_user_role_no_groups_returns_empty(monkeypatch):
     resp = client.get("/reports", headers=_auth_header())
     assert resp.status_code == 200
     assert seen["group_ids"] == []
+
+
+def test_list_reports_health_filters_passed(monkeypatch):
+    _patch_db(monkeypatch)
+    seen = {}
+
+    def fake_list(
+        limit=20,
+        device_id=None,
+        pc_name=None,
+        from_ts=None,
+        to_ts=None,
+        country=None,
+        os_name=None,
+        group_id=None,
+        group_ids=None,
+        disk_health=None,
+        battery=None,
+        battery_health_min=None,
+    ):
+        seen["disk_health"] = disk_health
+        seen["battery"] = battery
+        seen["battery_health_min"] = battery_health_min
+        return []
+
+    monkeypatch.setattr(db, "list_reports", fake_list)
+    resp = client.get(
+        "/reports?disk_health=problem&battery=has&battery_health_min=80",
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 200
+    assert seen["disk_health"] == "problem"
+    assert seen["battery"] == "has"
+    assert seen["battery_health_min"] == 80.0
 
 
 def test_list_groups_user_sees_only_own(monkeypatch):
@@ -1038,7 +1084,7 @@ def test_list_reports_annotates_online(monkeypatch):
     monkeypatch.setattr(
         db,
         "list_reports",
-        lambda limit=20, device_id=None, pc_name=None, from_ts=None, to_ts=None, country=None, os_name=None, group_id=None, group_ids=None: [
+        lambda limit=20, device_id=None, pc_name=None, from_ts=None, to_ts=None, country=None, os_name=None, group_id=None, group_ids=None, disk_health=None, battery=None, battery_health_min=None: [
             {"_id": "1", "pc_name": "Mac", "device_id": "dev-live", "created_at": 1.0},
             {"_id": "2", "pc_name": "Win", "device_id": "dev-gone", "created_at": 2.0},
         ],
