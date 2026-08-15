@@ -117,6 +117,7 @@ export interface Report {
       smart_status?: string | null;
       internal?: boolean | null;
       health: string;
+      size_bytes?: number | null;
     }[];
     battery?: {
       cycle_count?: number | null;
@@ -126,6 +127,8 @@ export interface Report {
     } | null;
   } | null;
   created_at?: number;
+  online?: boolean;
+  last_seen?: number;
 }
 
 export interface ReportsResponse {
@@ -762,4 +765,20 @@ export function groupOf(
   groups: Group[],
 ): Group | null {
   return groups.find((g) => g.machine_keys.includes(machine.key)) ?? null;
+}
+
+/** Online status of a machine (annotated by the API from heartbeats). */
+export function isOnline(m: Pick<MachineSummary, "latest">): boolean {
+  return m.latest.online === true;
+}
+
+/** Print total across printer groups on a report. */
+export function totalPrints(r: Report): number {
+  const p = r.printers;
+  if (!p) return 0;
+  return (
+    (p.usb?.reduce((s, x) => s + (x.print_count ?? 0), 0) ?? 0) +
+    (p.network?.reduce((s, x) => s + (x.print_count ?? 0), 0) ?? 0) +
+    (p.other?.reduce((s, x) => s + (x.print_count ?? 0), 0) ?? 0)
+  );
 }

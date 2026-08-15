@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from functools import lru_cache
 import re
+import time
 
 from bson import ObjectId
 from pymongo import MongoClient
@@ -34,6 +35,46 @@ def _api_keys():
 
 def _groups():
     return _db()[config.MONGO_GROUPS]
+
+
+def _machines():
+    return _db()[config.MONGO_MACHINES]
+
+
+def touch_machine(device_id: str, pc_name: str | None = None, seen_at: float | None = None) -> bool:
+    """Record that a machine was seen (heartbeat or report). Returns success."""
+    seen_at = seen_at if seen_at is not None else time.time()
+    try:
+        _machines().update_one(
+            {"device_id": device_id},
+            {"$set": {"device_id": device_id, "pc_name": pc_name, "last_seen": seen_at}},
+            upsert=True,
+        )
+        return True
+    except (ConnectionFailure, PyMongoError):
+        return False
+
+
+def get_machine_seen_at(device_id: str) -> float | None:
+    """Last seen timestamp for a device, or None if unknown/untracked."""
+    try:
+        doc = _machines().find_one({"device_id": device_id}, {"last_seen": 1})
+    except (ConnectionFailure, PyMongoError):
+        return None
+    return doc.get("last_seen") if doc else None
+
+
+def machines_seen_map() -> dict[str, float]:
+    """Map device_id -> last_seen for every known machine (best-effort)."""
+    result: dict[str, float] = {}
+    try:
+        cursor = _machines().find({}, {"device_id": 1, "last_seen": 1})
+        for doc in cursor:
+            if doc.get("device_id") and doc.get("last_seen") is not None:
+                result[doc["device_id"]] = doc["last_seen"]
+    except (ConnectionFailure, PyMongoError):
+        pass
+    return result
 
 
 def save_report(document: dict) -> ObjectId | None:

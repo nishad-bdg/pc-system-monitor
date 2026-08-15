@@ -27,6 +27,28 @@ class FakeResponse:
         return self._text
 
 
+def test_send_heartbeat_success(monkeypatch):
+    sent = {}
+
+    def fake_post(url, json=None, headers=None, timeout=5):
+        sent["url"] = url
+        sent["payload"] = json
+        return FakeResponse(payload={"status": "ok"})
+
+    monkeypatch.setattr(cli.requests, "post", fake_post)
+    assert cli.send_heartbeat({"device_id": "d1", "pc_name": "PC"}, "http://x", "sk-key") is True
+    assert sent["url"] == "http://x/heartbeat"
+    assert sent["payload"] == {"device_id": "d1", "pc_name": "PC"}
+
+
+def test_send_heartbeat_failure(monkeypatch):
+    def boom(*a, **k):
+        raise OSError("down")
+
+    monkeypatch.setattr(cli.requests, "post", boom)
+    assert cli.send_heartbeat({"device_id": "d1"}, "http://x", "sk-key") is False
+
+
 def test_geo_locate_happy_path(monkeypatch):
     payload = {
         "status": "success",

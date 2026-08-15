@@ -23,3 +23,8 @@ class Report(BaseModel):
 
 class ReportOut(BaseModel):
     id: str
+
+
+class Heartbeat(BaseModel):
+    device_id: str
+    pc_name: str | None = None

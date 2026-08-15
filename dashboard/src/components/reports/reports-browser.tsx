@@ -21,6 +21,8 @@ import {
 } from "@/lib/api";
 import { DashboardShell } from "@/components/dashboard/shell";
 import { MachineDetail } from "@/components/dashboard/machine-detail";
+import { StatusDot } from "@/components/dashboard/status-dot";
+import { useRealtime } from "@/components/realtime-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -63,6 +65,7 @@ const defaultApplied: AppliedFilters = {
 export function ReportsBrowser() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
+  const { connected } = useRealtime();
 
   const [pcName, setPcName] = useState("");
   const [country, setCountry] = useState("");
@@ -158,7 +161,8 @@ export function ReportsBrowser() {
       widthClass="w-80"
       subtitle={
         <>
-          {machines.length} PC{machines.length === 1 ? "" : "s"} · sorted by{" "}
+          {machines.length} PC{machines.length === 1 ? "" : "s"}
+          {connected ? " · live" : " · connecting"} · sorted by{" "}
           {applied.sort.replace("_", " ")}
         </>
       }
@@ -331,7 +335,8 @@ export function ReportsBrowser() {
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <span className="truncate text-sm font-medium">
+                      <span className="flex items-center gap-1.5 truncate text-sm font-medium">
+                        <StatusDot online={r.online} />
                         {m.name}
                       </span>
                       <span
@@ -386,8 +391,11 @@ export function ReportsBrowser() {
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
                 <h2 className="text-xl font-semibold tracking-tight text-slate-900">
+                <span className="inline-flex items-center gap-2">
+                  <StatusDot online={selected.latest.online} showLabel />
                   {selected.name}
-                </h2>
+                </span>
+              </h2>
                 <p className="mt-1 text-sm text-slate-500">
                   {selected.latest.os?.system ?? "—"}{" "}
                   {selected.latest.os?.release ?? ""}

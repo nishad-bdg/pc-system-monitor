@@ -1,8 +1,9 @@
 # Windows installer (release-based updates)
 
-Creates a per-user install of `system-info.exe`, writes API settings, registers a
-**Task Scheduler** job every **hour**, and supports **auto-update from a
-release manifest URL** (not live `git pull`).
+Creates a per-user install of `system-info.exe`, writes API settings, registers
+**Task Scheduler** jobs (an **hourly** report plus a **5-minute heartbeat** for
+live online status), and supports **auto-update from a release manifest URL**
+(not live `git pull`).
 
 ## Prerequisites (build machine)
 
@@ -24,7 +25,11 @@ git tag v0.2.0 && git push origin v0.2.0   # version taken from the tag
 ```
 
 Point `SYSTEM_INFO_UPDATE_URL` at:
-`https://github.com/<owner>/<repo>/releases/download/v<version>/release-manifest.json`
+`https://github.com/<owner>/<repo>/releases/latest/download/release-manifest.json`
+
+The `releases/latest` path redirects to the newest `v*` tag, so one URL auto-updates
+every release. The installer field below is already pre-filled with this URL for this
+repo (`nishad-bdg/pc-system-monitor`).
 
 **Option B — local Windows machine.**
 
@@ -54,7 +59,7 @@ Wizard asks for:
 | PC name | optional Windows display name |
 | Update manifest URL | optional HTTPS JSON (see below) |
 
-Writes `%APPDATA%\system-info\config.env` and creates task **SystemInfoReport** (every hour).
+Writes `%APPDATA%\system-info\config.env` and creates tasks **SystemInfoReport** (every hour) and **SystemInfoHeartbeat** (every 5 minutes, `--heartbeat`) so the PC shows as online.
 
 ## 4. Release updates (not git)
 
@@ -89,4 +94,4 @@ system-info.exe --auto-update
 
 ## Uninstall
 
-Add/Remove Programs removes files and deletes the **SystemInfoReport** scheduled task.
+Add/Remove Programs removes files and deletes the **SystemInfoReport** and **SystemInfoHeartbeat** scheduled tasks.

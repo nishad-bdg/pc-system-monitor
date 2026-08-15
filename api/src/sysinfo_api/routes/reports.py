@@ -5,21 +5,39 @@ import time
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from .. import db, security
+from .. import db, realtime, security
 from ..models import Report, ReportOut
 from ..security import ApiKey, CurrentUser
+from .realtime import annotate_online
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 
+def _machine_keys(report: Report) -> list[str]:
+    """Machine identity keys for the report (device_id + pc_name + macs)."""
+    keys: list[str] = []
+    if report.device_id:
+        keys.append(f"id:{report.device_id}")
+    if report.pc_name:
+        keys.append(f"name:{report.pc_name}")
+    if report.mac_address:
+        keys.append(f"mac:{report.mac_address}")
+    return keys
+
+
 @router.post("", status_code=201, response_model=ReportOut)
-def create_report(report: Report, api_key: ApiKey) -> JSONResponse:
+async def create_report(report: Report, api_key: ApiKey) -> JSONResponse:
     document = report.model_dump(exclude_none=True)
     document["created_at"] = report.created_at or time.time()
     document["source_key"] = api_key["prefix"]
     report_id = db.save_report(document)
     if report_id is None:
         raise HTTPException(status_code=503, detail="MongoDB unavailable")
+    # Annotate online state and push to connected dashboards (incl. printers).
+    annotate_online(document)
+    if report.device_id:
+        db.touch_machine(report.device_id, report.pc_name, seen_at=document["created_at"])
+    await realtime.broadcast(document)
     return JSONResponse(status_code=201, content={"id": str(report_id)})
 
 
@@ -53,6 +71,9 @@ def get_reports(
         group_id=group_id or None,
         group_ids=_user_group_ids(user),
     )
+    seen_map = db.machines_seen_map()
+    for rec in records:
+        annotate_online(rec, seen_map)
     return {"total": len(records), "reports": records}
 
 
@@ -136,6 +157,7 @@ def get_report(report_id: str, user: CurrentUser = None) -> dict:
     if user.get("role") == security.ROLE_USER:
         if not _report_belongs_to_groups(doc, user.get("groups") or []):
             raise HTTPException(status_code=403, detail="Report is outside your groups")
+    annotate_online(doc)
     return doc
 
 

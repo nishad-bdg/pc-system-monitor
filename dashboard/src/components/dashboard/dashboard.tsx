@@ -15,12 +15,15 @@ import {
 } from "@/lib/api";
 import { DashboardShell } from "./shell";
 import { MachineDetail } from "./machine-detail";
+import { StatusDot } from "./status-dot";
+import { useRealtime } from "../realtime-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 export function Dashboard() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
+  const { connected } = useRealtime();
   const [filter, setFilter] = useState("");
   const [groupFilter, setGroupFilter] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -65,7 +68,8 @@ export function Dashboard() {
       role={session?.user?.role}
       subtitle={
         <>
-          {machines.length} machine{machines.length === 1 ? "" : "s"} ·{" "}
+          {machines.length} machine{machines.length === 1 ? "" : "s"}
+          {connected ? " · live" : " · connecting"} ·{" "}
           {reports.length} report{reports.length === 1 ? "" : "s"}
         </>
       }
@@ -130,7 +134,8 @@ export function Dashboard() {
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <span className="truncate text-sm font-medium">
+                      <span className="flex items-center gap-1.5 truncate text-sm font-medium">
+                        <StatusDot online={m.latest.online} />
                         {m.name}
                       </span>
                       <span
@@ -185,7 +190,8 @@ export function Dashboard() {
           {selected ? (
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
-                <h2 className="text-xl font-semibold tracking-tight text-slate-900">
+                <h2 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-slate-900">
+                  <StatusDot online={selected.latest.online} showLabel />
                   {selected.name}
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">

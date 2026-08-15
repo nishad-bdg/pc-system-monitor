@@ -35,6 +35,9 @@ def _patch_db(monkeypatch, user=None):
     monkeypatch.setattr(db, "create_user", lambda *a, **k: True)
     monkeypatch.setattr(db, "update_user", lambda *a, **k: True)
     monkeypatch.setattr(db, "delete_user", lambda uid: True)
+    monkeypatch.setattr(db, "touch_machine", lambda device_id, pc_name=None, seen_at=None: True)
+    monkeypatch.setattr(db, "get_machine_seen_at", lambda device_id: 2_000_000_000.0)
+    monkeypatch.setattr(db, "machines_seen_map", lambda: {})
 
     # Refresh-token store: in-memory, shared across tests in this module.
     global _REFRESH_STORE
@@ -986,3 +989,142 @@ def test_list_api_keys(monkeypatch):
     assert body[0]["id"] == "64b00000000000000000000b"
     assert body[0]["name"] == "desktop-1"
     assert body[0]["created_at"] == 1.0
+
+
+# ---- heartbeat ----
+
+def test_heartbeat_requires_api_key(monkeypatch):
+    _patch_db(monkeypatch)
+    resp = client.post("/heartbeat", json={"device_id": "dev-1", "pc_name": "PC1"})
+    assert resp.status_code == 401
+
+
+def test_heartbeat_ok(monkeypatch):
+    _patch_db(monkeypatch)
+    key = security.generate_api_key()
+    monkeypatch.setattr(db, "find_api_key_by_hash", lambda h: {"_id": "x", "prefix": key[:20], "active": True})
+    touched = {}
+    monkeypatch.setattr(db, "touch_machine", lambda device_id, pc_name=None, seen_at=None: touched.update({"device_id": device_id, "pc_name": pc_name, "seen_at": seen_at}) or True)
+    resp = client.post(
+        "/heartbeat",
+        json={"device_id": "dev-1", "pc_name": "PC1"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["online"] is True
+    assert touched["device_id"] == "dev-1"
+    assert touched["pc_name"] == "PC1"
+
+
+def test_heartbeat_mongo_down(monkeypatch):
+    _patch_db(monkeypatch)
+    key = security.generate_api_key()
+    monkeypatch.setattr(db, "find_api_key_by_hash", lambda h: {"_id": "x", "prefix": key[:20], "active": True})
+    monkeypatch.setattr(db, "touch_machine", lambda device_id, pc_name=None, seen_at=None: False)
+    resp = client.post(
+        "/heartbeat",
+        json={"device_id": "dev-1"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 503
+
+
+# ---- reports annotate online ----
+
+def test_list_reports_annotates_online(monkeypatch):
+    _patch_db(monkeypatch)
+    monkeypatch.setattr(
+        db,
+        "list_reports",
+        lambda limit=20, device_id=None, pc_name=None, from_ts=None, to_ts=None, country=None, os_name=None, group_id=None, group_ids=None: [
+            {"_id": "1", "pc_name": "Mac", "device_id": "dev-live", "created_at": 1.0},
+            {"_id": "2", "pc_name": "Win", "device_id": "dev-gone", "created_at": 2.0},
+        ],
+    )
+    monkeypatch.setattr(db, "machines_seen_map", lambda: {"dev-live": 2_000_000_000.0})
+    resp = client.get("/reports", headers=_auth_header())
+    reports = resp.json()["reports"]
+    assert reports[0]["online"] is True
+    assert reports[0]["last_seen"] == 2_000_000_000.0
+    assert reports[1]["online"] is False
+
+
+def test_create_report_broadcasts_printers(monkeypatch):
+    _patch_db(monkeypatch)
+    key = security.generate_api_key()
+    monkeypatch.setattr(db, "find_api_key_by_hash", lambda h: {"_id": "x", "prefix": key[:20], "active": True})
+    sent = []
+
+    from sysinfo_api import realtime
+
+    async def fake_broadcast(report):
+        sent.append(report)
+
+    monkeypatch.setattr(realtime, "broadcast", fake_broadcast)
+    resp = client.post(
+        "/reports",
+        json={
+            "pc_name": "MacBook",
+            "device_id": "dev-1",
+            "printers": {"count": 2, "network": [{"name": "R324", "port": "ipp://x", "ip": "10.0.0.9", "print_count": 12}]},
+            "os": {"system": "Darwin"},
+        },
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 201
+    assert len(sent) == 1
+    assert sent[0]["printers"]["network"][0]["print_count"] == 12
+    assert sent[0]["device_id"] == "dev-1"
+
+
+# ---- websocket ----
+
+def _ws_closed_without_hello(monkeypatch, url):
+    """Connect to ws and assert the server closes it (no hello frame)."""
+    import pytest as _pytest
+    from starlette.websockets import WebSocketDisconnect
+
+    try:
+        with client.websocket_connect(url, subprotocols=["dash-token"]) as ws:
+            # If the server accepted, we must see hello; rejections close early.
+            with _pytest.raises(WebSocketDisconnect):
+                ws.receive_json()
+    except WebSocketDisconnect:
+        pass  # server closed during handshake — expected.
+
+
+def test_websocket_requires_auth(monkeypatch):
+    _patch_db(monkeypatch)
+    _ws_closed_without_hello(monkeypatch, "/ws")
+
+
+def test_websocket_rejects_bad_token(monkeypatch):
+    _patch_db(monkeypatch)
+    _ws_closed_without_hello(monkeypatch, "/ws?token=not-a-real-token")
+
+
+def test_websocket_rejects_user_role(monkeypatch):
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "ops1",
+        "role": "user",
+        "groups": ["g1"],
+    })
+    _ws_closed_without_hello(monkeypatch, "/ws?token=" + _raw_token())
+
+
+def test_websocket_hello(monkeypatch):
+    _patch_db(monkeypatch)
+    with client.websocket_connect("/ws?token=" + _raw_token(), subprotocols=["dash-token"]) as ws:
+        data = ws.receive_json()
+        assert data["type"] == "hello"
+
+
+def _raw_token():
+    from datetime import datetime, timedelta, timezone
+    import jwt as pyjwt
+    from sysinfo_api import config
+    payload = {"sub": "64b000000000000000000001", "role": "admin", "exp": datetime.now(timezone.utc) + timedelta(minutes=10)}
+    return pyjwt.encode(payload, config.JWT_SECRET, algorithm="HS256")

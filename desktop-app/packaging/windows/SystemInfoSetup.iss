@@ -9,6 +9,7 @@
 ;   - Asks for API URL, API key, optional PC name + update manifest URL
 ;   - Writes %APPDATA%\system-info\config.env
 ;   - Creates Task Scheduler job SystemInfoReport every hour
+;   - Creates Task Scheduler job SystemInfoHeartbeat every 5 minutes (online status)
 
 #define MyAppName "System Info Reporter"
 #ifndef MyAppVersion
@@ -59,11 +60,15 @@ begin
   ConfigPage.Add('API URL:', False);
   ConfigPage.Add('API key (sk-...):', False);
   ConfigPage.Add('PC name (Windows only, optional):', False);
-  ConfigPage.Add('Update manifest URL (optional):', False);
+  ConfigPage.Add('Update manifest URL (optional, pre-filled):', False);
   ConfigPage.Values[0] := 'https://your-api.example.com';
   ConfigPage.Values[1] := '';
   ConfigPage.Values[2] := '';
-  ConfigPage.Values[3] := '';
+  {
+    Default to the repo's "latest" release manifest so installed PCs auto-update
+    after any new v* release tag. "releases/latest" redirects to the newest tag.
+  }
+  ConfigPage.Values[3] := 'https://github.com/nishad-bdg/pc-system-monitor/releases/latest/download/release-manifest.json';
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -126,6 +131,31 @@ begin
   end;
 end;
 
+{ Heartbeat: keep the PC marked "online" between hourly reports.
+  Runs every 5 minutes (only while the user is logged on). }
+procedure CreateHeartbeatTask;
+var
+  ResultCode: Integer;
+  ExePath, BeatArgs: string;
+begin
+  ExePath := ExpandConstant('{app}\{#MyAppExeName}');
+  BeatArgs :=
+    '/Create /F /TN "SystemInfoHeartbeat" /SC MINUTE /MO 5 /IT ' +
+    '/TR "\"' + ExePath + '\" --heartbeat" ' +
+    '/RL LIMITED';
+  Exec('schtasks.exe', BeatArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if ResultCode <> 0 then
+  begin
+    MsgBox(
+      'Could not create the heartbeat task (SystemInfoHeartbeat).' + #13#10 +
+      'schtasks exit code: ' + IntToStr(ResultCode) + #13#10 +
+      'Run manually: ' + #13#10 +
+      'schtasks /Create /F /TN SystemInfoHeartbeat /SC MINUTE /MO 5 /IT ' +
+      '/TR "\"' + ExePath + '\" --heartbeat"',
+      mbError, MB_OK);
+  end;
+end;
+
 procedure RunReportNow;
 var
   ExePath: string;
@@ -142,6 +172,7 @@ begin
   begin
     WriteConfigFile;
     CreateScheduledTask;
+    CreateHeartbeatTask;
     RunReportNow;
   end;
 end;
@@ -153,6 +184,7 @@ begin
   if CurUninstallStep = usUninstall then
   begin
     Exec('schtasks.exe', '/Delete /F /TN "SystemInfoReport"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec('schtasks.exe', '/Delete /F /TN "SystemInfoHeartbeat"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec('schtasks.exe', '/Delete /F /TN "SystemInfoWatch"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec('schtasks.exe', '/Delete /F /TN "SystemInfoPoll"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;

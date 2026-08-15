@@ -17,6 +17,7 @@ import {
 } from "@/lib/api";
 import { MachineDetail } from "@/components/dashboard/machine-detail";
 import { DashboardShell } from "@/components/dashboard/shell";
+import { StatusDot } from "@/components/dashboard/status-dot";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -55,7 +56,10 @@ export function ReportPcDetail({ encodedKey }: { encodedKey: string }) {
       role={session?.user?.role}
       sidebar={
         <div className="px-4 py-4 text-sm text-slate-300">
-          <p className="font-medium text-white">{machine?.name ?? "…"}</p>
+          <p className="flex items-center gap-2 font-medium text-white">
+            <StatusDot online={machine?.latest.online} />
+            {machine?.name ?? "…"}
+          </p>
           {machine && (
             <ul className="mt-3 space-y-1 text-xs text-slate-400">
               <li>CPU {fmtPercent(machine.latest.resources?.cpu_percent)}</li>

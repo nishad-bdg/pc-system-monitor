@@ -45,6 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--emails", action="store_true", help="Only show configured POP/IMAP email accounts")
     parser.add_argument("--json", action="store_true", help="Print output as JSON")
     parser.add_argument("--no-save", action="store_true", help="Do not save report to the API")
+    parser.add_argument("--heartbeat", action="store_true", help="Only send a lightweight online heartbeat, then exit")
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="API base URL to save reports to")
     parser.add_argument("--api-key", default=DEFAULT_API_KEY, help="API key for authenticated save")
     parser.add_argument(
@@ -114,8 +115,22 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     # Quiet release check on normal scheduled runs (Windows frozen builds).
-    if os.getenv("SYSTEM_INFO_UPDATE_URL") and not args.no_save:
+    if os.getenv("SYSTEM_INFO_UPDATE_URL") and not args.no_save and not args.heartbeat:
         maybe_auto_update(quiet=True)
+
+    if args.heartbeat:
+        pc_name = resolve_pc_name(args.pc_name)
+        device_id = get_or_create_device_id(pc_name)
+        payload = {"device_id": device_id, "pc_name": pc_name}
+        ok = send_heartbeat(payload, args.api_url, args.api_key)
+        if args.json:
+            print(json.dumps({"heartbeat": "ok" if ok else "failed"}))
+        elif ok:
+            print(f"[heartbeat] {device_id} {pc_name} -> {args.api_url}")
+        else:
+            print("\n[heartbeat] failed - check API URL and API key")
+            return 1
+        return 0
 
     data: dict = {}
 
@@ -223,6 +238,24 @@ def save_report(data: dict, api_url: str, api_key: str = "") -> str | None:
         if os.getenv("SYSTEM_INFO_DEBUG"):
             print(f"[save] failed: {exc}")
         return None
+
+
+def send_heartbeat(data: dict, api_url: str, api_key: str = "") -> bool:
+    """POST a lightweight online heartbeat to the API. Returns True on success."""
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        resp = requests.post(
+            f"{api_url.rstrip('/')}/heartbeat",
+            json=data,
+            headers=headers,
+            timeout=SAVE_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return True
+    except (requests.RequestException, ValueError, OSError) as exc:
+        if os.getenv("SYSTEM_INFO_DEBUG"):
+            print(f"[heartbeat] failed: {exc}")
+        return False
 
 
 def _print(

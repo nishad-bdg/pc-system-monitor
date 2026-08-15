@@ -72,11 +72,19 @@ Restart the API after model/query changes; old processes strip unknown fields (e
 ```bash
 uv run system-info --api-key sk-...          # full collect + save
 uv run system-info --no-save                 # print only
+uv run system-info --heartbeat               # lightweight online ping (scheduled every 5 min on Windows)
 uv run system-info --pc-name Office-PC-3     # Windows custom name
 uv run system-info --printers | --disk | --network | --sys | --security | --health | --emails
 ```
 
 Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`.
+
+### Online / offline status
+
+- Each PC sends a **heartbeat** (`--heartbeat`) that POSTs `{device_id, pc_name}` to `POST /heartbeat` (API key). The Windows installer schedules this every 5 minutes (`SystemInfoHeartbeat` Task Scheduler job), on top of the hourly full report.
+- The API tracks `last_seen` per `device_id` in a `machines` Mongo collection; a machine is **online** if `last_seen` is within `SYSTEM_INFO_ONLINE_TIMEOUT_SECONDS` (default 300s).
+- `GET /reports`, `GET /reports/{id}`, and `GET /reports/export` annotate every report with `online` (bool) + `last_seen`. Old reports without a `device_id` are marked offline.
+- The dashboard shows a **green (online) / red (offline)** dot next to each PC in the Fleet sidebar, Reports browser, and detail header.
 
 ### Identity
 
@@ -124,10 +132,11 @@ Detects installed internet-security products:
 
 **Disk:** physical drives with media type + SMART status:
 
-`{ name, device, media_type: "ssd" | "hdd" | "unknown", smart_status, internal, health: "ok" | "warning" | "fail" | "unknown" }`
+`{ name, device, media_type: "ssd" | "hdd" | "unknown", smart_status, internal, health: "ok" | "warning" | "fail" | "unknown", size_bytes }`
 
-- Windows: `Get-PhysicalDisk` (FriendlyName/MediaType/HealthStatus/BusType).
-- macOS: `system_profiler SPStorageDataType -json`, physical drives de-duplicated by bsd base (`disk3s1s1` → `disk3`).
+- Windows: `Get-PhysicalDisk` (FriendlyName/MediaType/HealthStatus/BusType/Size).
+- macOS: `system_profiler SPStorageDataType -json`, physical drives de-duplicated by bsd base (`disk3s1s1` → `disk3`), capacity taken from the largest volume entry.
+- The dashboard shows total storage (`size_bytes`, formatted) beside the drive name in the Summary + Health tabs.
 
 **Battery (laptop):**
 
@@ -203,6 +212,14 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
 
 `GET /reports` also accepts `group_id` (matches machine keys `id:`/`mac:`/`name:` in the group).
 
+### Realtime (`WebSocket /ws`, hi `--heartbeat`)
+
+- **`POST /heartbeat`** (API key) — desktop pings with `{device_id, pc_name}`; records `last_seen` in the `machines` collection.
+- **`GET/POST /reports`** — every saved report is annotated with `online` + `last_seen` and broadcasts a `report.created` event (full report incl. `printers`) over the WebSocket so the dashboard updates in realtime (print counts included).
+- **`WebSocket /ws`** (`routes/realtime.py`) — the dashboard connects with its JWT passed as the WS **subprotocol** (or `?token=`); only `admin`/`super_admin` roles are allowed; `Origin` must match `CORS_ORIGINS`. On connect the server sends `{"type":"hello"}`. Events: `{"type":"report.created","report":{...},"ts":...}`.
+- Dashboard `RealtimeProvider` (`src/components/realtime-provider.tsx`) holds one socket, reconnects with capped backoff, and invalidates `reports`/`reports-browse`/`report-pc` queries on each event — no manual Refresh needed.
+- Broadcasting is in-process (best-effort per uvicorn worker); the dashboard also refetches on reconnect so nothing is permanently lost.
+
 ---
 
 ## Dashboard (`dashboard/`)
@@ -226,7 +243,7 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 
 ### Fleet (`/dashboard`)
 
-- Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports.
+- Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports. Each PC row and the detail header show a **green (online) / red (offline)** status dot; data updates live via WebSocket.
 - Detail tabs (`machine-detail.tsx`): **Summary (default) / Overview / Printers / Uptime / Storage / Health / Emails**.
   - **Summary:** total uptime + session, network total + bandwidth, full CPU spec (model/arch/cores/clock + **brand**), full RAM spec (total/available/free/swap + **bus speed** `ram_speed_mhz` + `ram_type`), storage health (SSD/HDD badge + brand, SMART, Healthy/Failing), battery health (condition, health %, cycle count), internet security, printers + total prints.
   - **Overview:** CPU/RAM/swap tiles, compact UptimeState (session + days tracked) + DiskState (devices/used/free), location/machine, Battery stat card (laptops only), Network bandwidth chart, Printers, Security card.
@@ -239,7 +256,7 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 ### Reports (`/reports`)
 
 - Same slate+blue **sidebar + detail** layout as Fleet.
-- Sidebar filters: date from/to, PC name, country, OS, **group**.
+- Sidebar filters: date from/to, PC name, country, OS, **group**. Each row shows a **green (online) / red (offline)** dot that updates live.
 - **Usage sort** (highest first): Most CPU, Most RAM, Most disk space used, Most network usage (bytes sent+recv), or Last seen.
 - **Min thresholds**: Min CPU %, Min RAM %, Min disk % (filters out PCs below threshold).
 - Sidebar lists matching PCs with CPU/RAM/Disk/Net; main pane shows `MachineDetail`.
@@ -258,7 +275,7 @@ Keys look like `id:…`, `mac:…`, `name:…` (URL-encoded for `/reports/[key]`
 
 ### Important ops note
 
-Dashboard **Refresh** only reloads API data. It does **not** push collect commands to desktops. Re-run `system-info` on each PC for new snapshots.
+Dashboard **Refresh** only reloads API data. It does **not** push collect commands to desktops. Re-run `system-info` on each PC for new snapshots. New reports are pushed to open dashboards automatically over the WebSocket (no Refresh needed).
 
 
 ---
@@ -269,7 +286,8 @@ See `desktop-app/packaging/windows/README.md`.
 
 - **Installer (Inno Setup):** installs exe under `%LOCALAPPDATA%\SystemInfo`, writes
   `%APPDATA%\system-info\config.env` (API URL/key/PC name/update URL), creates
-  Task Scheduler job **SystemInfoReport** every hour.
+  Task Scheduler jobs **SystemInfoReport** every hour and **SystemInfoHeartbeat**
+  every 5 minutes (`--heartbeat`, for live online status).
 - **Updates:** host a JSON release manifest (`SYSTEM_INFO_UPDATE_URL`); app checks
   on each run and stages a new exe (not live `git pull`).
 
