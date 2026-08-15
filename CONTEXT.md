@@ -151,14 +151,13 @@ Dashboard: if `expired` → **Expired**; else if `expiry_date` → **N days rema
 
 - Windows: `Get-PhysicalDisk` (FriendlyName/MediaType/HealthStatus/BusType/Manufacturer/Size). `internal` from BusType: USB/SD/MMC → external; SATA/SAS/NVMe/RAID/SCM → internal; unknown bus → `null`.
 - macOS: `system_profiler SPStorageDataType -json`, physical drives de-duplicated by bsd base (`disk3s1s1` → `disk3`), capacity taken from the largest volume entry. `brand` from the device name (e.g. APPLE).
-- Unknown Windows battery `condition` is `null` (not `"unknown"`).
 - The dashboard shows total storage (`size_bytes`, formatted) beside the drive name in the Summary + Health tabs.
 
 **Battery (laptop):**
 
 `{ cycle_count, condition, max_capacity_percent, health_percent }`
 
-- Windows: `powercfg /batteryreport /xml` first (broad Win8+ support — exposes `DesignCapacity`/`FullChargeCapacity`/`CycleCount` directly, unlike the often-unpopulated `root/WMI` classes), falling back to `root/WMI` BatteryFullChargedCapacity / BatteryStaticData / BatteryCycleCount (`Win32_Battery.DesignCapacity` fallback included; ACPI sentinel `4294967295` is treated as unknown).
+- Windows: `powercfg /batteryreport /xml` first (broad Win8+ support — exposes `DesignCapacity`/`FullChargeCapacity`/`CycleCount` directly, unlike the often-unpopulated `root/WMI` classes), falling back to `root/WMI` BatteryFullChargedCapacity / BatteryStaticData / BatteryCycleCount (`Win32_Battery.DesignCapacity` fallback included; ACPI sentinel `4294967295` is treated as unknown). Unknown `condition` is `null` (not `"unknown"`).
 - macOS: `SPPowerDataType` (`sppower_battery_cycle_count`, `sppower_battery_health`, `sppower_battery_health_maximum_capacity` like `"82%"`).
 
 ### Printers
