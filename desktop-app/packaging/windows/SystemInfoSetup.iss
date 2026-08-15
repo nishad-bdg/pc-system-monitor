@@ -187,7 +187,9 @@ begin
   begin
     Exec('schtasks.exe', '/Delete /F /TN "SystemInfoReport"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec('schtasks.exe', '/Delete /F /TN "SystemInfoHeartbeat"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec('schtasks.exe', '/Delete /F /TN "SystemInfoWatch"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec('schtasks.exe', '/Delete /F /TN "SystemInfoPoll"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    { Remove the first-run auto-start (HKCU Run key + marker) so the app no
+      longer launches --heartbeat at every logon after uninstall. }
+    Exec('reg.exe', 'delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v SystemInfoReporter /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    DeleteFile(ExpandConstant('{userappdata}\system-info\startup-registered'));
   end;
 end;

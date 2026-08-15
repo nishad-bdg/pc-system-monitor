@@ -61,6 +61,13 @@ Wizard asks for:
 
 Writes `%APPDATA%\system-info\config.env` and creates tasks **SystemInfoReport** (every hour) and **SystemInfoHeartbeat** (every 5 minutes, `--heartbeat`) so the PC shows as online.
 
+After install, on the **first run** the app adds itself to the current user's
+**Startup** (HKCU `...\CurrentVersion\Run` → `SystemInfoReporter`) so
+`system-info.exe --heartbeat` runs once at every logon — the PC flips online
+right at login, before the next scheduled heartbeat. A marker file
+(`%APPDATA%\system-info\startup-registered`) ensures this happens only once.
+Set `SYSTEM_INFO_NO_STARTUP=1` to skip self-registration (portable use).
+
 ## 4. Release updates (not git)
 
 Publish a new `system-info.exe` (GitHub Release, S3, etc.) and a manifest JSON:
@@ -94,4 +101,4 @@ system-info.exe --auto-update
 
 ## Uninstall
 
-Add/Remove Programs removes files and deletes the **SystemInfoReport** and **SystemInfoHeartbeat** scheduled tasks.
+Add/Remove Programs removes files and deletes the **SystemInfoReport** and **SystemInfoHeartbeat** scheduled tasks, plus the **SystemInfoReporter** Run key and the `startup-registered` marker (so no `--heartbeat` at logon after uninstall).

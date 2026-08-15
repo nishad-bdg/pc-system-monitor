@@ -18,6 +18,7 @@ from .security import collect_security_info
 from .health import collect_health_info
 from .email_accounts import collect_email_accounts
 from .device import get_or_create_device_id, resolve_pc_name
+from .startup import register_startup, unregister_startup
 from .update import check_for_update, maybe_auto_update
 from .print_jobs import (
     collect_new_print_events,
@@ -102,6 +103,11 @@ def run(args: argparse.Namespace) -> int:
     if args.version:
         print(__version__)
         return 0
+
+    # First-run auto-start: on Windows installs the app registers itself to
+    # run --heartbeat at every logon (skipped with SYSTEM_INFO_NO_STARTUP=1).
+    if os.getenv("SYSTEM_INFO_NO_STARTUP") != "1":
+        register_startup()
 
     if args.check_update or args.auto_update:
         manifest = check_for_update()

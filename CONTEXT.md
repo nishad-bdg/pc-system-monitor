@@ -307,6 +307,12 @@ See `desktop-app/packaging/windows/README.md`.
   `%APPDATA%\system-info\config.env` (API URL/key/PC name/update URL), creates
   Task Scheduler jobs **SystemInfoReport** every hour and **SystemInfoHeartbeat**
   every 5 minutes (`--heartbeat`, for live online status).
+- **Auto-start on logon:** on the **first run** after install the app registers a
+  `SystemInfoReporter` value under HKCU `...\CurrentVersion\Run` pointing to
+  `system-info.exe --heartbeat`, so a PC flips online at login (before the next
+  scheduled heartbeat). Idempotent via the `startup-registered` marker file in
+  `%APPDATA%\system-info`; set `SYSTEM_INFO_NO_STARTUP=1` to skip. Uninstall
+  removes the Run value + marker.
 - **Updates:** host a JSON release manifest (`SYSTEM_INFO_UPDATE_URL`); app checks
   on each run and stages a new exe (not live `git pull`).
 
