@@ -144,7 +144,7 @@ Detects installed internet-security products:
 
 `{ cycle_count, condition, max_capacity_percent, health_percent }`
 
-- Windows: `root/WMI` BatteryFullChargedCapacity / BatteryStaticData / BatteryCycleCount (with `Win32_Battery.DesignCapacity` fallback when the WMI static-data class is missing; ACPI sentinel `4294967295` is treated as unknown).
+- Windows: `powercfg /batteryreport /xml` first (broad Win8+ support — exposes `DesignCapacity`/`FullChargeCapacity`/`CycleCount` directly, unlike the often-unpopulated `root/WMI` classes), falling back to `root/WMI` BatteryFullChargedCapacity / BatteryStaticData / BatteryCycleCount (`Win32_Battery.DesignCapacity` fallback included; ACPI sentinel `4294967295` is treated as unknown).
 - macOS: `SPPowerDataType` (`sppower_battery_cycle_count`, `sppower_battery_health`, `sppower_battery_health_maximum_capacity` like `"82%"`).
 
 ### Printers

@@ -2,8 +2,11 @@
 
 Windows:
   - Disks:  `Get-PhysicalDisk` (FriendlyName, MediaType, HealthStatus)
-  - Battery: `root/WMI` BatteryFullChargedCapacity vs BatteryStaticData
-             (DesignedCapacity) -> health %, plus cycle count when exposed.
+  - Battery: `powercfg /batteryreport /xml` first (broad Win8+ support;
+             exposes DesignCapacity, FullChargeCapacity and CycleCount
+             directly), falling back to `root/WMI` BatteryFullChargedCapacity /
+             BatteryStaticData / BatteryCycleCount (+ Win32_Battery) when the
+             report is unavailable.
 
 macOS:
   - Disks:  `system_profiler SPStorageDataType` physical_drive entries
@@ -18,7 +21,10 @@ import json
 import os
 import re
 import subprocess
+import tempfile
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass
@@ -212,7 +218,104 @@ def _sanitize_windows_capacity(value: object) -> int | None:
     return number
 
 
+def _win_battery_health(full_int: int | None, designed_int: int | None) -> int | None:
+    """Clamped 0..100 health % from full/design capacity, or None."""
+    if full_int is None or not designed_int:
+        return None
+    health = int(round((full_int / designed_int) * 100))
+    return max(0, min(100, health))
+
+
+def _parse_battery_xml(path: Path) -> BatteryHealth | None:
+    """Parse `powercfg /batteryreport /xml` output.
+
+    XML looks like:
+
+        <BatteryReport>
+          <Batteries>
+            <Battery>
+              <DesignCapacity>4800</DesignCapacity>
+              <FullChargeCapacity>4400</FullChargeCapacity>
+              <CycleCount>240</CycleCount>
+              ...
+    Battery energy values are in mWh; a desktop (no battery) omits the
+    <Battery> node entirely.
+    """
+    try:
+        tree = ET.parse(path)
+    except (OSError, ET.ParseError, ValueError):
+        return None
+    root = tree.getroot()
+    battery = root.find(".//Battery")
+    if battery is None:
+        return None
+
+    def _int_field(tag: str) -> int | None:
+        for node in battery.iter(tag):
+            value = _sanitize_windows_capacity((node.text or "").strip())
+            if value is not None:
+                return value
+        return None
+
+    full_int = _int_field("FullChargeCapacity")
+    designed_int = _int_field("DesignCapacity")
+    cycle_count = _int_field("CycleCount")
+    health_percent = _win_battery_health(full_int, designed_int)
+
+    # Windows reports -1 for cycle count in some powercfg versions when the
+    # value is unknown; treat only the ACPI sentinel as missing.
+    if cycle_count is not None and cycle_count <= 0:
+        cycle_count = None
+
+    if health_percent is None and full_int is None and cycle_count is None:
+        return None
+    return BatteryHealth(
+        cycle_count=cycle_count,
+        condition="Good" if (health_percent or 0) >= 80 else "Warning",
+        max_capacity_percent=health_percent,
+        health_percent=health_percent,
+    )
+
+
+def _collect_windows_battery_powercfg() -> BatteryHealth | None:
+    """Battery health via `powercfg /batteryreport /xml` (primary source)."""
+    path = None
+    try:
+        fd, name = tempfile.mkstemp(suffix=".xml", prefix="battery-report-")
+        os.close(fd)
+        path = Path(name)
+    except OSError:
+        return None
+    try:
+        # powercfg writes the report to the file; stdout is empty on success.
+        result = subprocess.run(
+            ["powercfg", "/batteryreport", "/output", str(path), "/xml"],
+            capture_output=True,
+            text=True,
+            timeout=20.0,
+            check=False,
+        )
+        if result.returncode != 0 or not path.is_file() or path.stat().st_size == 0:
+            return None
+        return _parse_battery_xml(path)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    finally:
+        if path is not None:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def _collect_windows_battery() -> BatteryHealth | None:
+    """Windows battery health. powercfg battery report is authoritative; WMI
+    (root/WMI MSBatteryClass + Win32_Battery) is the fallback.
+    """
+    from_powercfg = _collect_windows_battery_powercfg()
+    if from_powercfg is not None:
+        return from_powercfg
+
     script = (
         "$cap = Get-CimInstance -Namespace root/WMI -ClassName "
         "BatteryFullChargedCapacity -ErrorAction SilentlyContinue | "

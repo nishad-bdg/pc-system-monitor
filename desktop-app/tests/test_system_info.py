@@ -736,3 +736,92 @@ def test_health_windows_battery_cycle_only(monkeypatch):
     assert batt is not None
     assert batt.cycle_count == 88
     assert batt.health_percent is None
+
+
+def _write_battery_report_xml(tmp_path, battery_node):
+    path = tmp_path / "battery-report.xml"
+    path.write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        "<BatteryReport>\n"
+        "  <Created>2026-08-15T10:00:00</Created>\n"
+        "  <Batteries>\n"
+        f"{battery_node}\n"
+        "  </Batteries>\n"
+        "</BatteryReport>\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_health_windows_powercfg_xml_health_and_cycle(tmp_path):
+    """powercfg /batteryreport /xml exposes full/design capacity + cycles
+    directly, which is far more reliable than root/WMI on most laptops."""
+    from system_info.health import _parse_battery_xml
+
+    path = _write_battery_report_xml(
+        tmp_path,
+        "    <Battery>\n"
+        "      <ManufacturerName>LGC</ManufacturerName>\n"
+        "      <DesignCapacity>6500</DesignCapacity>\n"
+        "      <FullChargeCapacity>5100</FullChargeCapacity>\n"
+        "      <CycleCount>124</CycleCount>\n"
+        "    </Battery>",
+    )
+    batt = _parse_battery_xml(path)
+    assert batt is not None
+    assert batt.health_percent == 78
+    assert batt.max_capacity_percent == 78
+    assert batt.cycle_count == 124
+    assert batt.condition == "Warning"
+
+
+def test_health_windows_powercfg_xml_negative_cycle_count(tmp_path):
+    """powercfg reports cycle count as -1 when the vendor doesn't expose it;
+    that must be treated as missing, not as a bogus negative count."""
+    from system_info.health import _parse_battery_xml
+
+    path = _write_battery_report_xml(
+        tmp_path,
+        "    <Battery>\n"
+        "      <DesignCapacity>6500</DesignCapacity>\n"
+        "      <FullChargeCapacity>5577</FullChargeCapacity>\n"
+        "      <CycleCount>-1</CycleCount>\n"
+        "    </Battery>",
+    )
+    batt = _parse_battery_xml(path)
+    assert batt is not None
+    assert batt.health_percent == 86
+    assert batt.condition == "Good"
+    assert batt.cycle_count is None
+
+
+def test_health_windows_powercfg_xml_no_battery(tmp_path):
+    """A desktop with no battery omits the <Battery> node entirely -> None."""
+    from system_info.health import _parse_battery_xml
+
+    path = _write_battery_report_xml(tmp_path, "")
+    assert _parse_battery_xml(path) is None
+
+
+def test_health_windows_powercfg_fallback_to_wmi(monkeypatch, tmp_path):
+    """When powercfg fails (non-zero exit), WMI is still tried."""
+    from system_info.health import _collect_windows_battery
+
+    import subprocess as sp
+
+    def fake_run(cmd, *, capture_output=False, text=False, timeout=None, check=False):
+        return sp.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        "system_info.health.subprocess.run",
+        fake_run,
+    )
+    payload = {"FullChargedCapacity": 5100, "DesignedCapacity": 6500, "CycleCount": 124}
+    monkeypatch.setattr(
+        "system_info.health._run",
+        lambda cmd, timeout=15.0: __import__("json").dumps(payload),
+    )
+    batt = _collect_windows_battery()
+    assert batt is not None
+    assert batt.cycle_count == 124
+    assert batt.health_percent == 78
