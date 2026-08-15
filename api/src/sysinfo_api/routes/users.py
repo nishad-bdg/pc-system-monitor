@@ -14,6 +14,16 @@ VALID_ROLES = (
 )
 
 
+def _require_groups(role: str | None, groups: list[str] | None) -> None:
+    """Non-super-admin users must be scoped to at least one group."""
+    if role != security.ROLE_SUPER_ADMIN:
+        if groups is not None and len(groups) == 0:
+            raise HTTPException(
+                status_code=422,
+                detail="Select at least one group for this role",
+            )
+
+
 class UserCreate(BaseModel):
     username: str
     password: str
@@ -58,7 +68,7 @@ class UserOut(BaseModel):
 
 def _to_out(doc: dict) -> dict:
     return {
-        "id": doc["_id"],
+        "id": str(doc["_id"]),
         "username": doc["username"],
         "role": doc.get("role") or security.ROLE_USER,
         "groups": doc.get("groups") or [],
@@ -76,8 +86,9 @@ def create_user(
 ) -> dict:
     if db.find_user_by_username(payload.username):
         raise HTTPException(status_code=409, detail="Username already exists")
-    # Only a super admin can create another super admin; group-less non-super
-    # users would be able to see nothing, which is fine.
+    # Only a super admin can be created without a group; other roles must be
+    # scoped to at least one group.
+    _require_groups(payload.role, payload.groups)
     ok = db.create_user(
         payload.username,
         security.hash_password(payload.password),
@@ -102,6 +113,15 @@ def update_user(
         payload.role not in (None, current.get("role"))
     ):
         raise HTTPException(status_code=400, detail="Cannot change your own role")
+
+    # A non-super-admin user must always stay scoped to at least one group.
+    effective_role = payload.role or current.get("role")
+    effective_groups = payload.groups if payload.groups is not None else current.get("groups") or []
+    if effective_role != security.ROLE_SUPER_ADMIN and len(effective_groups) == 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Select at least one group for this role",
+        )
 
     if not db.update_user(
         user_id,

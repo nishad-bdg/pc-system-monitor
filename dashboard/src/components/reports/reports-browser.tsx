@@ -75,7 +75,7 @@ const defaultApplied: AppliedFilters = {
 export function ReportsBrowser() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
-  const { connected, isOnline, lastSeenFor } = useRealtime();
+  const { connected, isOnline, lastSeenFor, refreshAll } = useRealtime();
 
   const [pcName, setPcName] = useState("");
   const [country, setCountry] = useState("");
@@ -106,7 +106,7 @@ export function ReportsBrowser() {
     enabled: !!apiToken,
   });
 
-  const { data, isLoading, isError, isFetching, refetch } = useQuery({
+  const { data, isLoading, isError, isFetching } = useQuery({
     queryKey: ["reports-browse", applied],
     queryFn: () =>
       fetchReports(API_URL, apiToken ?? "", 500, {
@@ -497,7 +497,7 @@ export function ReportsBrowser() {
       sidebarFooter={
         <button
           type="button"
-          onClick={() => refetch()}
+          onClick={() => refreshAll()}
           className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
           disabled={isFetching}
         >

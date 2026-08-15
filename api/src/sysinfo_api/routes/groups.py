@@ -28,7 +28,7 @@ class GroupOut(BaseModel):
 
 def _to_out(doc: dict) -> dict:
     return {
-        "id": doc["_id"],
+        "id": str(doc["_id"]),
         "name": doc["name"],
         "machine_keys": doc.get("machine_keys") or [],
         "subcategory_ids": doc.get("subcategory_ids") or [],

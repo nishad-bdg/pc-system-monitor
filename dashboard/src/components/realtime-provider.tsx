@@ -39,6 +39,8 @@ type RealtimeContextValue = {
   isOnline: (deviceId?: string | null) => boolean | null;
   /** Live last-seen for a device, or the fallback when unknown. */
   lastSeenFor: (deviceId?: string | null, fallback?: number) => number | undefined;
+  /** Force-refetch every active query (Refresh button). */
+  refreshAll: () => void;
 };
 
 const RealtimeContext = createContext<RealtimeContextValue>({
@@ -47,6 +49,7 @@ const RealtimeContext = createContext<RealtimeContextValue>({
   presence: {},
   isOnline: () => null,
   lastSeenFor: (): number | undefined => undefined,
+  refreshAll: () => {},
 });
 
 /**
@@ -112,6 +115,12 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     },
     [queryClient, setEntry],
   );
+
+  /** Refresh button: fetch every active query (reports, groups, sub-cats,
+   * print jobs, export previews) — regardless of what page is open. */
+  const refreshAll = useCallback(() => {
+    queryClient.invalidateQueries();
+  }, [queryClient]);
 
   useEffect(() => {
     if (!apiToken) return;
@@ -184,7 +193,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <RealtimeContext.Provider
-      value={{ connected, wsUrl, presence, isOnline, lastSeenFor }}
+      value={{ connected, wsUrl, presence, isOnline, lastSeenFor, refreshAll }}
     >
       {children}
     </RealtimeContext.Provider>

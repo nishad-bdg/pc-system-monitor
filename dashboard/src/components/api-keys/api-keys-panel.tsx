@@ -13,6 +13,7 @@ import {
   updateApiKey,
 } from "@/lib/api";
 import { DashboardShell } from "@/components/dashboard/shell";
+import { useRealtime } from "@/components/realtime-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -31,12 +32,13 @@ export function ApiKeysPanel() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
   const queryClient = useQueryClient();
+  const { refreshAll } = useRealtime();
 
   const [modal, setModal] = useState<ModalState>(null);
   const [status, setStatus] = useState<string | null>(null);
   const copyInputRef = useRef<HTMLInputElement>(null);
 
-  const { data: keys = [], isLoading, isError, refetch, isFetching } = useQuery({
+  const { data: keys = [], isLoading, isError, isFetching } = useQuery({
     queryKey: ["api-keys"],
     queryFn: () => fetchApiKeys(API_URL, apiToken ?? ""),
     enabled: !!apiToken,
@@ -161,7 +163,7 @@ export function ApiKeysPanel() {
       sidebarFooter={
         <button
           type="button"
-          onClick={() => refetch()}
+          onClick={() => refreshAll()}
           className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
           disabled={isFetching}
         >

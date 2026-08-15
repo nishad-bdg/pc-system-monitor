@@ -152,7 +152,7 @@ export function ReportExportPanel() {
     enabled: !!apiToken,
   });
 
-  const { data, isLoading, isError, isFetching, refetch } = useQuery({
+  const { data, isLoading, isError, isFetching } = useQuery({
     queryKey: ["reports-export", applied],
     queryFn: () =>
       applied

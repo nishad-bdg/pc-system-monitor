@@ -30,7 +30,7 @@ class SubCategoryOut(BaseModel):
 
 def _to_out(doc: dict) -> dict:
     return {
-        "id": doc["_id"],
+        "id": str(doc["_id"]),
         "name": doc["name"],
         "group_ids": doc.get("group_ids") or [],
         "machine_keys": doc.get("machine_keys") or [],

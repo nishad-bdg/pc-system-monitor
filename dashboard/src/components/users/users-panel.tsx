@@ -15,6 +15,7 @@ import {
 import { DashboardShell } from "@/components/dashboard/shell";
 import { PasswordMeter } from "@/components/password-meter";
 import { passwordStrength } from "@/lib/password-strength";
+import { useRealtime } from "@/components/realtime-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -37,11 +38,12 @@ export function UsersPanel() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
   const queryClient = useQueryClient();
+  const { refreshAll } = useRealtime();
 
   const [modal, setModal] = useState<ModalState>(null);
   const [status, setStatus] = useState<string | null>(null);
 
-  const { data: users = [], isLoading, isError, refetch, isFetching } = useQuery({
+  const { data: users = [], isLoading, isError, isFetching } = useQuery({
     queryKey: ["users"],
     queryFn: () => fetchUsers(API_URL, apiToken ?? ""),
     enabled: !!apiToken,
@@ -115,6 +117,10 @@ export function UsersPanel() {
     e.preventDefault();
     if (modal?.kind !== "create") return;
     if (!modal.username.trim()) return;
+    if (modal.role !== "super_admin" && modal.groups.length === 0) {
+      setModal({ ...modal, error: "Select at least one group for this role." });
+      return;
+    }
     createMut.mutate({
       username: modal.username.trim(),
       password: modal.password,
@@ -126,6 +132,10 @@ export function UsersPanel() {
   function onEditSubmit(e: FormEvent) {
     e.preventDefault();
     if (modal?.kind !== "edit") return;
+    if (modal.role !== "super_admin" && modal.groups.length === 0) {
+      setModal({ ...modal, error: "Select at least one group for this role." });
+      return;
+    }
     updateMut.mutate({
       id: modal.user.id,
       role: modal.role,
@@ -175,7 +185,7 @@ export function UsersPanel() {
       sidebarFooter={
         <button
           type="button"
-          onClick={() => refetch()}
+          onClick={() => refreshAll()}
           className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
           disabled={isFetching}
         >
@@ -383,7 +393,14 @@ export function UsersPanel() {
                 </select>
               </label>
               <div>
-                <p className="text-xs font-medium text-slate-600">Groups</p>
+                <p className="text-xs font-medium text-slate-600">
+                  Groups{modal.role !== "super_admin" && <span className="ml-1 text-blue-600">*</span>}
+                </p>
+                {modal.role !== "super_admin" && (
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Required for this role — select at least one group.
+                  </p>
+                )}
                 {groups.length === 0 && (
                   <p className="mt-1 text-xs text-slate-400">
                     No groups yet — create groups first to scope access.
@@ -435,7 +452,8 @@ export function UsersPanel() {
                 disabled={
                   !modal.username.trim() ||
                   passwordStrength(modal.password) === "poor" ||
-                  createMut.isPending
+                  createMut.isPending ||
+                  (modal.role !== "super_admin" && modal.groups.length === 0)
                 }
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
               >
@@ -488,7 +506,14 @@ export function UsersPanel() {
                 )}
               </label>
               <div>
-                <p className="text-xs font-medium text-slate-600">Groups</p>
+                <p className="text-xs font-medium text-slate-600">
+                  Groups{modal.role !== "super_admin" && <span className="ml-1 text-blue-600">*</span>}
+                </p>
+                {modal.role !== "super_admin" && (
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Required for this role — select at least one group.
+                  </p>
+                )}
                 <div className="mt-2 flex max-h-40 flex-wrap gap-2 overflow-y-auto">
                   {groups.map((g) => {
                     const checked = modal.groups.includes(g.id);
@@ -540,7 +565,8 @@ export function UsersPanel() {
                 disabled={
                   updateMut.isPending ||
                   (modal.password.length > 0 &&
-                    passwordStrength(modal.password) === "poor")
+                    passwordStrength(modal.password) === "poor") ||
+                  (modal.role !== "super_admin" && modal.groups.length === 0)
                 }
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
               >

@@ -25,11 +25,11 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 export function ReportPcDetail({ encodedKey }: { encodedKey: string }) {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
-  const { isOnline, lastSeenFor } = useRealtime();
+  const { isOnline, lastSeenFor, refreshAll } = useRealtime();
   const key = decodeMachineKey(encodedKey);
   const baseFilters = filtersForMachineKey(key);
 
-  const { data, isLoading, isError, isFetching, refetch } = useQuery({
+  const { data, isLoading, isError, isFetching } = useQuery({
     queryKey: ["report-pc", key],
     queryFn: () =>
       fetchReports(API_URL, apiToken ?? "", 500, {
@@ -83,7 +83,7 @@ export function ReportPcDetail({ encodedKey }: { encodedKey: string }) {
       sidebarFooter={
         <button
           type="button"
-          onClick={() => refetch()}
+          onClick={() => refreshAll()}
           className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
           disabled={isFetching}
         >

@@ -1148,6 +1148,46 @@ def test_create_user_invalid_role(monkeypatch):
     assert resp.status_code == 422
 
 
+def test_create_user_requires_groups_for_non_super_admin(monkeypatch):
+    _patch_db(monkeypatch, user=SUPER_USER)
+    resp = client.post(
+        "/users",
+        json={"username": "ops1", "password": "secret123", "role": "user", "groups": []},
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 422
+
+
+def test_create_user_admin_requires_groups(monkeypatch):
+    _patch_db(monkeypatch, user=SUPER_USER)
+    resp = client.post(
+        "/users",
+        json={"username": "ops1", "password": "secret123", "role": "admin", "groups": []},
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 422
+
+
+def test_create_super_admin_without_groups_ok(monkeypatch):
+    _patch_db(monkeypatch, user=SUPER_USER)
+    created = {"_id": "64b000000000000000000009", "username": "root2", "role": "super_admin", "groups": []}
+    calls = {"n": 0}
+
+    def fake_find_user(uname):
+        if uname == "root2":
+            calls["n"] += 1
+            return created if calls["n"] > 1 else None
+        return None
+
+    monkeypatch.setattr(db, "find_user_by_username", fake_find_user)
+    resp = client.post(
+        "/users",
+        json={"username": "root2", "password": "secret123", "role": "super_admin", "groups": []},
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 201
+
+
 def test_update_user_role_and_groups(monkeypatch):
     _patch_db(monkeypatch, user=SUPER_USER)
     updated = {"_id": "64b000000000000000000009", "username": "ops1", "role": "user", "groups": ["g3"]}
@@ -1165,6 +1205,24 @@ def test_update_user_role_and_groups(monkeypatch):
     )
     assert resp.status_code == 200
     assert resp.json()["groups"] == ["g3"]
+
+
+def test_update_user_removing_last_group_blocked(monkeypatch):
+    _patch_db(monkeypatch, user=SUPER_USER)
+    updated = {"_id": "64b000000000000000000009", "username": "ops1", "role": "user", "groups": ["g3"]}
+
+    def fake_get_user(uid):
+        if uid == "64b000000000000000000009":
+            return dict(updated)
+        return dict(SUPER_USER)
+
+    monkeypatch.setattr(db, "get_user_by_id", fake_get_user)
+    resp = client.patch(
+        "/users/64b000000000000000000009",
+        json={"groups": []},
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 422
 
 
 def test_delete_user(monkeypatch):
