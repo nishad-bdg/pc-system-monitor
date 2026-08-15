@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import user_config_dir
+from .win_runtime import hidden_subprocess_kwargs
 
 _STATE_NAME = "print_jobs.json"
 _STATE_PATH: Path | None = None
@@ -117,6 +118,7 @@ def _run(cmd: list[str], timeout: float = 25.0, cwd: str | None = None) -> str:
             timeout=timeout,
             check=False,
             cwd=cwd,
+            **hidden_subprocess_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""

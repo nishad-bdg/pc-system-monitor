@@ -23,6 +23,7 @@ import requests
 
 from .version import __version__
 from .config import install_dir, is_frozen
+from .win_runtime import hidden_subprocess_kwargs
 
 UPDATE_TIMEOUT = 15
 
@@ -148,14 +149,9 @@ del /f /q "%~f0"
     try:
         import subprocess
 
-        flags = 0
-        if hasattr(subprocess, "DETACHED_PROCESS"):
-            flags |= subprocess.DETACHED_PROCESS
-        if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
-            flags |= subprocess.CREATE_NEW_PROCESS_GROUP
         subprocess.Popen(
             [os.environ.get("COMSPEC", "cmd.exe"), "/c", str(updater)],
-            creationflags=flags,
+            **hidden_subprocess_kwargs(),
             close_fds=True,
         )
     except OSError:
@@ -210,14 +206,9 @@ def apply_update_and_restart(manifest: dict) -> str | None:
     try:
         import subprocess
 
-        flags = 0
-        if hasattr(subprocess, "DETACHED_PROCESS"):
-            flags |= subprocess.DETACHED_PROCESS
-        if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
-            flags |= subprocess.CREATE_NEW_PROCESS_GROUP
         subprocess.Popen(
             [os.environ.get("COMSPEC", "cmd.exe"), "/c", str(updater)],
-            creationflags=flags,
+            **hidden_subprocess_kwargs(),
             close_fds=True,
         )
     except OSError:

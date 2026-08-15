@@ -26,6 +26,8 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .win_runtime import hidden_subprocess_kwargs
+
 
 @dataclass
 class DiskHealth:
@@ -87,6 +89,7 @@ def _run(cmd: list[str], timeout: float = 15.0) -> str:
             text=True,
             timeout=timeout,
             check=False,
+            **hidden_subprocess_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""
@@ -352,6 +355,7 @@ def _collect_windows_battery_powercfg() -> BatteryHealth | None:
             text=True,
             timeout=20.0,
             check=False,
+            **hidden_subprocess_kwargs(),
         )
         if result.returncode != 0 or not path.is_file() or path.stat().st_size == 0:
             return None

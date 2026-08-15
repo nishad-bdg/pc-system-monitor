@@ -22,6 +22,8 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
+from .win_runtime import hidden_subprocess_kwargs
+
 # vendor (lowercase match token) -> display label
 KNOWN_VENDORS = {
     "norton": "Norton",
@@ -103,6 +105,7 @@ def _run(cmd: list[str], timeout: float = 8.0) -> str:
             text=True,
             timeout=timeout,
             check=False,
+            **hidden_subprocess_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""

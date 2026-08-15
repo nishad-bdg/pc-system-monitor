@@ -8,6 +8,7 @@ fight the first, and Windows 10/11 may hide the notify icon / toasts.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import time
 import traceback
@@ -92,6 +93,24 @@ def set_app_user_model_id() -> None:
         )
     except Exception:
         pass
+
+
+def hidden_subprocess_kwargs() -> dict:
+    """Extra kwargs so a console child never flashes a window.
+
+    The frozen watcher is windowed (no console); any PowerShell / powercfg /
+    cmd child spawned without CREATE_NO_WINDOW gets its own visible console
+    window on Windows. Returns extra kwargs to pass to subprocess.run/Popen;
+    empty on non-Windows (the param is Windows-only).
+    """
+    if os.name != "nt":
+        return {}
+    flags = 0
+    if hasattr(subprocess, "CREATE_NO_WINDOW"):
+        flags |= subprocess.CREATE_NO_WINDOW
+    if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+        flags |= subprocess.CREATE_NEW_PROCESS_GROUP
+    return {"creationflags": flags} if flags else {}
 
 
 def acquire_watch_mutex() -> bool:

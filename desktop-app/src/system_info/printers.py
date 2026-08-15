@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import quote
 
+from .win_runtime import hidden_subprocess_kwargs
+
 
 _NETWORK_HINTS = (
     "ipp://",
@@ -107,6 +109,7 @@ def _run(cmd: list[str], timeout: float = 8.0) -> str:
             text=True,
             timeout=timeout,
             check=False,
+            **hidden_subprocess_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""

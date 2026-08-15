@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 import psutil
 
+from .win_runtime import hidden_subprocess_kwargs
+
 
 @dataclass
 class SystemResources:
@@ -83,6 +85,7 @@ def _run(cmd: list[str], timeout: float = 15.0) -> str:
             text=True,
             timeout=timeout,
             check=False,
+            **hidden_subprocess_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""

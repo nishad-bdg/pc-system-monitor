@@ -26,6 +26,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .win_runtime import hidden_subprocess_kwargs
+
 _PROTOCOLS = ("pop3", "imap", "exchange")
 _EMAIL_RE = re.compile(
     r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}",
@@ -718,6 +720,7 @@ def _run_powershell(script: str, timeout: float = 12.0) -> str:
             text=True,
             timeout=timeout,
             check=False,
+            **hidden_subprocess_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""
