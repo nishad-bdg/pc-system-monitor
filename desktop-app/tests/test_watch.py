@@ -226,7 +226,10 @@ def test_tray_icon_shows_product_name(monkeypatch):
     assert "Exit" in labels
 
 
-def test_show_tray_makes_icon_visible_and_notifies():
+def test_watch_product_name_survives_missing_version_attr():
+    import system_info.watch as watch
+
+    assert watch.PRODUCT_NAME == "System Info Reporter"
     from system_info.version import PRODUCT_NAME
     from system_info.watch import _show_tray
 

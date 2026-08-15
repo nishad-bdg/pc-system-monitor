@@ -50,8 +50,11 @@ jobs:
       - name: Stamp version
         shell: pwsh
         run: |
-          Set-Content -NoNewline -Path desktop-app/src/system_info/version.py `
-            -Value '__version__ = "${{ steps.ver.outputs.version }}"' -Encoding utf8
+          $v = "${{ steps.ver.outputs.version }}"
+          @"
+          __version__ = "$v"
+          PRODUCT_NAME = "System Info Reporter"
+          "@ | Set-Content -Path desktop-app/src/system_info/version.py -Encoding utf8NoBOM
 
       - name: Build exe (PyInstaller)
         shell: pwsh

@@ -22,8 +22,12 @@ import threading
 import time
 
 from .device import get_or_create_device_id, resolve_pc_name
-from .version import PRODUCT_NAME
+from . import version as _version
 from . import cli
+
+# Release CI used to stamp version.py with only __version__; keep a fallback
+# so a frozen Windows build still starts and can show the tray.
+PRODUCT_NAME = getattr(_version, "PRODUCT_NAME", None) or "System Info Reporter"
 
 HEARTBEAT_INTERVAL = 60  # seconds — must stay well under the 300s online timeout
 HOUR_INTERVAL = 3600  # seconds (60 min)
