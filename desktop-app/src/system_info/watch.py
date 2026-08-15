@@ -8,7 +8,7 @@ can close it explicitly. Closing the app stops it; it is not a one-shot that
 exits after sending data.
 
 Timing:
-  - heartbeat + print flush: every HEARTBEAT_INTERVAL (5 min)
+  - heartbeat + print flush: every HEARTBEAT_INTERVAL (60s)
   - full hourly report: on start and then every HOUR_INTERVAL (60 min),
     aligned to the wall-clock hour so all PCs report around the same time
 """
@@ -24,7 +24,7 @@ import time
 from .device import get_or_create_device_id, resolve_pc_name
 from . import cli
 
-HEARTBEAT_INTERVAL = 300  # seconds (5 min)
+HEARTBEAT_INTERVAL = 60  # seconds — must stay well under the 300s online timeout
 HOUR_INTERVAL = 3600  # seconds (60 min)
 
 
@@ -131,12 +131,21 @@ class WatchLoop:
         return True
 
     def _loop(self) -> None:
-        # Report immediately on startup so "running all the time" is visible at once.
+        # Heartbeat first so the PC is marked online immediately. The full
+        # report can take tens of seconds (printers, battery XML, WMI) and
+        # must not delay the first presence update.
+        try:
+            self.heartbeat()
+        except Exception:
+            pass
         try:
             self.full_report()
         except Exception:
             pass
         while not self._stop.is_set():
+            self._stop.wait(HEARTBEAT_INTERVAL)
+            if self._stop.is_set():
+                break
             now = time.time()
             try:
                 self.heartbeat()
@@ -147,7 +156,6 @@ class WatchLoop:
                     self.full_report()
                 except Exception:
                     pass
-            self._stop.wait(HEARTBEAT_INTERVAL)
 
     def run_blocking(self) -> None:
         """Run the loop (optionally with a tray icon) until stopped."""

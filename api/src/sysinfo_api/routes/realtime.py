@@ -165,6 +165,14 @@ async def websocket_agent_endpoint(ws: WebSocket, token: str = Query(default="")
                 device_id = str(msg.get("device_id") or "").strip()
                 if device_id:
                     realtime.connect_agent(device_id, ws)
+                    pc_name = str(msg.get("pc_name") or "").strip() or None
+                    seen = time.time()
+                    db.touch_machine(device_id, pc_name, seen_at=seen)
+                    # Watcher is connected: dashboards must show online now,
+                    # not after the next heartbeat.
+                    await realtime.broadcast_presence(
+                        device_id, online=True, last_seen=seen, pc_name=pc_name
+                    )
                     # Re-send any still-pending commands so nothing is lost
                     # between the last heartbeat poll and this connection.
                     for cmd in db.list_pending_commands(device_id):
@@ -187,7 +195,11 @@ async def websocket_agent_endpoint(ws: WebSocket, token: str = Query(default="")
         pass
     finally:
         if device_id:
-            realtime.disconnect_agent(device_id, ws)
+            remaining = realtime.disconnect_agent(device_id, ws)
+            if remaining == 0:
+                await realtime.broadcast_presence(
+                    device_id, online=False, last_seen=time.time()
+                )
 
 
 def _to_command_doc(cmd: dict) -> dict:

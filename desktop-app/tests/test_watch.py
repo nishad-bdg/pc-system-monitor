@@ -83,7 +83,10 @@ def test_should_full_report_hourly_aligned():
 
 
 def test_heartbeat_and_full_report_intervals_are_sane():
-    assert HEARTBEAT_INTERVAL <= 300
+    # Heartbeat must be well under the dashboard/API online timeout (300s)
+    # or a running watcher is shown as offline between beats.
+    assert HEARTBEAT_INTERVAL <= 60
+    assert HEARTBEAT_INTERVAL * 2 < 300
     assert HOUR_INTERVAL == 3600
 
 

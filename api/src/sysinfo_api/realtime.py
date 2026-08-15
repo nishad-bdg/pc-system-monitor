@@ -7,7 +7,7 @@ per-process; the dashboard also refetches on reconnect, so no event is
 permanently lost in practice.
 
 The presence cache mirrors the `machines` collection in memory so that:
-  - a heartbeat flips a dot to green instantly (Messenger-style), and
+  - a connected `/ws/agent` socket (or heartbeat) flips a dot to green instantly, and
   - a freshly-connected dashboard receives the current online/offline map.
 """
 
@@ -36,17 +36,22 @@ def connect_agent(device_id: str, ws: WebSocket) -> None:
         sockets.append(ws)
 
 
-def disconnect_agent(device_id: str, ws: WebSocket) -> None:
-    """Drop a desktop agent socket on disconnect/close."""
+def disconnect_agent(device_id: str, ws: WebSocket) -> int:
+    """Drop a desktop agent socket on disconnect/close.
+
+    Returns the number of remaining sockets for this device (0 = last one).
+    """
     sockets = _agent_clients.get(device_id)
     if not sockets:
-        return
+        return 0
     try:
         sockets.remove(ws)
     except ValueError:
         pass
     if not sockets:
         _agent_clients.pop(device_id, None)
+        return 0
+    return len(sockets)
 
 
 def agent_sockets(device_id: str) -> list[WebSocket]:
@@ -86,7 +91,11 @@ async def push_command_to_agent(command: dict) -> None:
         except Exception:
             stale.append(ws)
     for ws in stale:
-        disconnect_agent(device_id, ws)
+        remaining = disconnect_agent(device_id, ws)
+        if remaining == 0:
+            await broadcast_presence(
+                device_id, online=False, last_seen=time.time()
+            )
 
 
 def connect(ws: WebSocket) -> None:

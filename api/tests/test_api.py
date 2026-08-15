@@ -2154,6 +2154,43 @@ def test_websocket_agent_requires_api_key(monkeypatch):
         pass
 
 
+def test_websocket_agent_hello_marks_online(monkeypatch):
+    from sysinfo_api import realtime
+    import time as _time
+
+    _patch_db(monkeypatch)
+    key = security.generate_api_key()
+    monkeypatch.setattr(
+        db, "find_api_key_by_hash", lambda h: {"_id": "x", "prefix": key[:20], "active": True}
+    )
+    monkeypatch.setattr(db, "list_pending_commands", lambda device_id: [])
+    with client.websocket_connect("/ws/agent", subprotocols=[key]) as ws:
+        ws.send_json({"type": "hello", "device_id": "dev-1", "pc_name": "PC1"})
+        deadline = _time.time() + 2
+        snapshot = []
+        while _time.time() < deadline:
+            snapshot = realtime.presence_snapshot()
+            if any(e["device_id"] == "dev-1" and e["online"] is True for e in snapshot):
+                break
+            _time.sleep(0.05)
+        assert any(e["device_id"] == "dev-1" and e["online"] is True for e in snapshot)
+
+
+def test_websocket_agent_disconnect_marks_offline(monkeypatch):
+    from sysinfo_api import realtime
+
+    _patch_db(monkeypatch)
+    key = security.generate_api_key()
+    monkeypatch.setattr(
+        db, "find_api_key_by_hash", lambda h: {"_id": "x", "prefix": key[:20], "active": True}
+    )
+    monkeypatch.setattr(db, "list_pending_commands", lambda device_id: [])
+    with client.websocket_connect("/ws/agent", subprotocols=[key]) as ws:
+        ws.send_json({"type": "hello", "device_id": "dev-1", "pc_name": "PC1"})
+    snapshot = realtime.presence_snapshot()
+    assert any(e["device_id"] == "dev-1" and e["online"] is False for e in snapshot)
+
+
 def test_websocket_agent_hello_and_command_flow(monkeypatch):
     from sysinfo_api import realtime
 

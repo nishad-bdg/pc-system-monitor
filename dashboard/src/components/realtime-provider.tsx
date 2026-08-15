@@ -100,11 +100,9 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       const key = entry.device_id;
       const existing = timersRef.current[key];
       if (existing) clearTimeout(existing);
-      if (entry.online && entry.last_seen) {
-        const delay = Math.max(
-          1000,
-          (entry.last_seen + ONLINE_TIMEOUT_SECONDS - Date.now() / 1000) * 1000,
-        );
+      if (entry.online) {
+        // Timeout from when we *received* the event, not last_seen vs the
+        // browser clock — clock skew otherwise flips a live PC offline in 1s.
         timersRef.current[key] = setTimeout(() => {
           setPresence((prev) => {
             const cur = prev[key];
@@ -112,7 +110,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
             return { ...prev, [key]: { ...cur, online: false } };
           });
           delete timersRef.current[key];
-        }, delay);
+        }, ONLINE_TIMEOUT_SECONDS * 1000);
       }
     },
     [],
