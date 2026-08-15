@@ -24,6 +24,65 @@ _clients: Set[WebSocket] = set()
 # device_id -> {"online": bool, "last_seen": float, "pc_name": str | None}
 _presence: dict[str, dict] = {}
 
+# device_id -> list of connected desktop-agent sockets (API-key authed /ws/agent).
+# Commands (restart/shutdown) are pushed to these instantly.
+_agent_clients: dict[str, list[WebSocket]] = {}
+
+
+def connect_agent(device_id: str, ws: WebSocket) -> None:
+    """Register a connected desktop agent socket for immediate command push."""
+    sockets = _agent_clients.setdefault(device_id, [])
+    if ws not in sockets:
+        sockets.append(ws)
+
+
+def disconnect_agent(device_id: str, ws: WebSocket) -> None:
+    """Drop a desktop agent socket on disconnect/close."""
+    sockets = _agent_clients.get(device_id)
+    if not sockets:
+        return
+    try:
+        sockets.remove(ws)
+    except ValueError:
+        pass
+    if not sockets:
+        _agent_clients.pop(device_id, None)
+
+
+def agent_sockets(device_id: str) -> list[WebSocket]:
+    """All currently-connected agent sockets for a device (best-effort)."""
+    return list(_agent_clients.get(device_id) or [])
+
+
+async def push_command_to_agent(command: dict) -> None:
+    """Push a command to every connected desktop agent of a device (if any).
+
+    The agent executes immediately and acks; when offline it stays pending in
+    Mongo and is picked up via the heartbeat poll instead.
+    """
+    payload = json.dumps(
+        {
+            "type": "command",
+            "command": {
+                "id": str(command.get("_id") or command.get("id") or ""),
+                "device_id": command.get("device_id"),
+                "type": command.get("type"),
+                "status": command.get("status"),
+                "created_at": command.get("created_at"),
+            },
+            "ts": time.time(),
+        }
+    )
+    device_id = command.get("device_id")
+    stale: list[WebSocket] = []
+    for ws in list(_agent_clients.get(device_id) or []):
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            stale.append(ws)
+    for ws in stale:
+        disconnect_agent(device_id, ws)
+
 
 def connect(ws: WebSocket) -> None:
     _clients.add(ws)

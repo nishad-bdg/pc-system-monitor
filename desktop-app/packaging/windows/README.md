@@ -72,6 +72,23 @@ fails with a `schtasks` error. A marker file
 (`%APPDATA%\system-info\startup-registered`) ensures this happens only once. Set
 `SYSTEM_INFO_NO_STARTUP=1` to skip self-registration (portable use).
 
+### Remote control (restart / shutdown)
+
+While `--watch` is running it holds a persistent WebSocket agent channel to the
+API (`/ws/agent`, authenticated with the same API key) so admin actions land
+**immediately**:
+
+- From the dashboard **Restart** / **Shut down** buttons (detail header, admin /
+  super_admin only), the API pushes a `{"type":"command", ...}` frame to the
+  agent and stores a `pending` command in Mongo.
+- The watcher executes it on the spot (`shutdown /r /t 5` / `shutdown /s /t 5`),
+  then acks over the socket **and** via `POST /commands/{id}/ack`.
+- If the agent is offline the command stays `pending`; it is re-sent when the
+  socket reconnects (`hello`) **and** falls back to the heartbeat poll response.
+
+Both actions are best-effort and run in whatever privileges the watcher has (the
+per-user Run-key process typically can't reboot unless the user is an admin).
+
 ## 4. Release updates (not git)
 
 Publish a new `system-info.exe` (GitHub Release, S3, etc.) and a manifest JSON:

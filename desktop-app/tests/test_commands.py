@@ -1,0 +1,217 @@
+import json
+
+import pytest
+
+from system_info import commands
+
+
+class _FakeResponse:
+    def __init__(self, payload=None):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+def test_ack_command_posts_status(monkeypatch):
+    sent = {}
+
+    def fake_post(url, json=None, headers=None, timeout=5):
+        sent["url"] = url
+        sent["json"] = json
+        return _FakeResponse(payload={"id": "c1"})
+
+    monkeypatch.setattr(commands.requests, "post", fake_post)
+    ok = commands.ack_command("cmd-1", "done", "http://x", "sk-key")
+    assert ok is True
+    assert sent["url"] == "http://x/commands/cmd-1/ack"
+    assert sent["json"] == {"status": "done"}
+
+
+def test_ack_command_failure(monkeypatch):
+    def boom(*a, **k):
+        raise OSError("down")
+
+    monkeypatch.setattr(commands.requests, "post", boom)
+    assert commands.ack_command("cmd-1", "failed", "http://x", "sk-key") is False
+
+
+def test_restart_windows(monkeypatch, os_name="nt"):
+    monkeypatch.setattr("system_info.commands.os.name", os_name)
+    spawned = {}
+
+    def fake_popen(args, **kwargs):
+        spawned["args"] = args
+        return object()
+
+    monkeypatch.setattr(commands.subprocess, "Popen", fake_popen)
+    assert commands.restart_machine() is True
+    assert "shutdown" in spawned["args"][0]
+    assert "/r" in spawned["args"]
+
+
+def test_restart_macos(monkeypatch):
+    monkeypatch.setattr("system_info.commands.os.name", "posix")
+    ran = {}
+
+    def fake_run(cmd, timeout=15, check=True):
+        ran["cmd"] = cmd
+        return object()
+
+    monkeypatch.setattr(commands.subprocess, "run", fake_run)
+    assert commands.restart_machine() is True
+    assert ran["cmd"][0] == "osascript"
+
+
+def test_restart_failure(monkeypatch):
+    monkeypatch.setattr("system_info.commands.os.name", "posix")
+    monkeypatch.setattr("system_info.commands.os.getenv", lambda key, default=None: None)
+
+    def boom(*a, **k):
+        raise OSError("no gui")
+
+    monkeypatch.setattr(commands.subprocess, "run", boom)
+    assert commands.restart_machine() is False
+
+
+def test_handle_pending_commands_acks_done(monkeypatch):
+    acks = []
+
+    def fake_ack(cid, status, url, key="", error=None):
+        acks.append((cid, status))
+        return True
+
+    monkeypatch.setattr(commands, "ack_command", fake_ack)
+    monkeypatch.setattr("system_info.commands.os.name", "nt")
+
+    spawned = {}
+    monkeypatch.setattr(commands.subprocess, "Popen", lambda *a, **k: spawned.update({"args": a[0]}) or object())
+
+    commands.handle_pending_commands(
+        [{"id": "cmd-1", "type": "restart"}, {"id": "cmd-2", "type": "ignored"}],
+        "http://x",
+        "sk-key",
+    )
+    assert acks == [("cmd-1", "done"), ("cmd-2", "failed")]
+
+
+def test_handle_pending_commands_acks_failed(monkeypatch):
+    acks = []
+
+    def fake_ack(cid, status, url, key="", error=None):
+        acks.append((cid, status))
+        return True
+
+    monkeypatch.setattr(commands, "ack_command", fake_ack)
+    monkeypatch.setattr("system_info.commands.os.name", "posix")
+
+    def boom(*a, **k):
+        raise OSError("nope")
+
+    monkeypatch.setattr(commands.subprocess, "run", boom)
+
+    commands.handle_pending_commands(
+        [{"id": "cmd-9", "type": "restart"}],
+        "http://x",
+        "sk-key",
+    )
+    assert acks == [("cmd-9", "failed")]
+
+
+def test_handle_pending_commands_skips_empty(monkeypatch):
+    def fake_ack(*a, **k):
+        raise AssertionError("should not ack")
+
+    monkeypatch.setattr(commands, "ack_command", fake_ack)
+    commands.handle_pending_commands([], "http://x", "sk-key")
+    commands.handle_pending_commands(None, "http://x", "sk-key")
+
+
+def test_execute_command_supported_types(monkeypatch):
+    monkeypatch.setattr("system_info.commands.os.name", "nt")
+    spawned = {}
+    monkeypatch.setattr(
+        commands.subprocess, "Popen",
+        lambda args, **k: spawned.update({"args": args}) or object(),
+    )
+
+    assert commands.execute_command("shutdown") == (True, None)
+    assert "shutdown" in spawned["args"][0] and "/s" in spawned["args"]
+    assert commands.execute_command("restart") == (True, None)
+    assert "shutdown" in spawned["args"][0] and "/r" in spawned["args"]
+
+
+def test_execute_command_unsupported(monkeypatch):
+    ok, error = commands.execute_command("erase-disk")
+    assert ok is False
+    assert "unsupported" in error
+
+
+def test_ws_url_maps_scheme():
+    sock = commands.WatchCommandSocket("https://api.example.com/", "sk", "d1")
+    assert sock._ws_url() == "wss://api.example.com/ws/agent"
+    sock2 = commands.WatchCommandSocket("http://127.0.0.1:8000", "sk", "d1")
+    assert sock2._ws_url() == "ws://127.0.0.1:8000/ws/agent"
+
+
+def test_ws_agent_session_executes_and_acks(monkeypatch):
+    import json as _json
+
+    sent = []
+
+    class FakeWs:
+        def __init__(self, inbox):
+            self.inbox = list(inbox)
+            self.closed = False
+
+        def send(self, data):
+            sent.append(_json.loads(data))
+
+        def recv(self):
+            if not self.inbox:
+                raise OSError("closed")
+            return self.inbox.pop(0)
+
+        def close(self):
+            self.closed = True
+
+    command_msg = _json.dumps(
+        {"type": "command", "command": {"id": "cmd-9", "type": "shutdown"}, "ts": 1}
+    )
+    monkeypatch.setattr("system_info.commands.os.name", "nt")
+    monkeypatch.setattr(
+        commands.subprocess, "Popen", lambda args, **k: object()
+    )
+    acks = []
+
+    def fake_http_ack(*a, **k):
+        acks.append(a)
+        return True
+
+    monkeypatch.setattr(commands, "ack_command", fake_http_ack)
+
+    fake_ws = FakeWs([command_msg])
+
+    def fake_create_connection(url, subprotocols=None, timeout=5, enable_multithread=False):
+        assert url == "wss://x/ws/agent"
+        assert subprotocols == ["sk-key"]
+        return fake_ws
+
+    import websocket as _ws_module
+
+    monkeypatch.setattr(_ws_module, "create_connection", fake_create_connection)
+    monkeypatch.setattr(_ws_module, "WebSocket", lambda: None)
+
+    sock = commands.WatchCommandSocket("https://x", "sk-key", "d1")
+    sock._session()  # recv raises after inbox empties -> returns
+
+    assert sent[0]["type"] == "hello"
+    assert sent[0]["device_id"] == "d1"
+    ack = sent[-1]
+    assert ack["type"] == "command.ack"
+    assert ack["command_id"] == "cmd-9"
+    assert ack["status"] == "done"
+    assert fake_ws.closed is True

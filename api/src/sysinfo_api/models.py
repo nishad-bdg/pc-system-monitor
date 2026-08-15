@@ -42,3 +42,13 @@ class PrintJobsBatch(BaseModel):
     device_id: str
     pc_name: str | None = None
     jobs: list[PrintJob] = []
+
+
+class CommandCreate(BaseModel):
+    device_id: str
+    type: str = "restart"
+
+
+class CommandAck(BaseModel):
+    status: str  # "done" | "failed"
+    error: str | None = None

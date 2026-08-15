@@ -50,6 +50,10 @@ def _sub_categories():
     return _db()[config.MONGO_SUB_CATEGORIES]
 
 
+def _commands():
+    return _db()[config.MONGO_COMMANDS]
+
+
 def touch_machine(device_id: str, pc_name: str | None = None, seen_at: float | None = None) -> bool:
     """Record that a machine was seen (heartbeat or report). Returns success."""
     seen_at = seen_at if seen_at is not None else time.time()
@@ -844,3 +848,92 @@ def print_jobs_hourly_counts(
     except (ConnectionFailure, PyMongoError):
         return results
     return results
+
+
+# ---- remote commands (e.g. restart) ----
+# A command is enqueued by an admin (JWT) for a device and picked up by the
+# desktop agent on its next heartbeat (API key). The heartbeat response echoes
+# the pending command back; the agent acks it (done / failed) after executing.
+
+COMMAND_STATUS_PENDING = "pending"
+COMMAND_STATUS_DONE = "done"
+COMMAND_STATUS_FAILED = "failed"
+
+
+def create_command(device_id: str, command_type: str, requested_by: str) -> ObjectId | None:
+    """Queue a remote command for a device. Returns its id or None on error."""
+    try:
+        result = _commands().insert_one(
+            {
+                "device_id": device_id,
+                "type": command_type,
+                "status": COMMAND_STATUS_PENDING,
+                "requested_by": requested_by,
+                "created_at": datetime.now(UTC).timestamp(),
+                "acked_at": None,
+            }
+        )
+        return result.inserted_id
+    except (ConnectionFailure, PyMongoError):
+        return None
+
+
+def get_command(command_id: str) -> dict | None:
+    """Return one command (with _id stringified), or None."""
+    try:
+        doc = _commands().find_one({"_id": ObjectId(command_id)})
+    except (ConnectionFailure, PyMongoError, InvalidId):
+        return None
+    if doc:
+        doc["_id"] = str(doc["_id"])
+    return doc
+
+
+def list_pending_commands(device_id: str) -> list[dict]:
+    """Pending commands for a device (agents poll for these on heartbeat)."""
+    records: list[dict] = []
+    try:
+        cursor = (
+            _commands()
+            .find({"device_id": device_id, "status": COMMAND_STATUS_PENDING})
+            .sort("created_at", 1)
+        )
+        for doc in cursor:
+            doc["_id"] = str(doc["_id"])
+            records.append(doc)
+    except (ConnectionFailure, PyMongoError):
+        return records
+    return records
+
+
+def list_commands(limit: int = 50, device_id: str | None = None) -> list[dict]:
+    """Recent commands, newest first (admin view)."""
+    records: list[dict] = []
+    query: dict = {}
+    if device_id:
+        query["device_id"] = device_id
+    try:
+        cursor = (
+            _commands()
+            .find(query)
+            .sort("created_at", -1)
+            .limit(max(1, min(limit, 500)))
+        )
+        for doc in cursor:
+            doc["_id"] = str(doc["_id"])
+            records.append(doc)
+    except (ConnectionFailure, PyMongoError):
+        return records
+    return records
+
+
+def ack_command(command_id: str, status: str, error: str | None = None) -> bool:
+    """Mark a pending command as done/failed (agent reports back)."""
+    try:
+        result = _commands().update_one(
+            {"_id": ObjectId(command_id), "status": COMMAND_STATUS_PENDING},
+            {"$set": {"status": status, "error": error, "acked_at": datetime.now(UTC).timestamp()}},
+        )
+        return result.matched_count == 1
+    except (ConnectionFailure, PyMongoError, InvalidId):
+        return False

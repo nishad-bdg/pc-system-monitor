@@ -1,3 +1,4 @@
+import json
 import time
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -48,7 +49,16 @@ async def heartbeat(body: Heartbeat, api_key: security.ApiKey) -> dict:
     await realtime.broadcast_presence(
         body.device_id, online=True, last_seen=seen, pc_name=body.pc_name
     )
-    return {"status": "ok", "online": True, "last_seen": seen}
+    pending = db.list_pending_commands(body.device_id)
+    return {
+        "status": "ok",
+        "online": True,
+        "last_seen": seen,
+        "commands": [
+            {"id": str(c["_id"]), "type": c.get("type"), "device_id": body.device_id}
+            for c in pending
+        ],
+    }
 
 
 @router.websocket("/ws")
@@ -117,3 +127,74 @@ def _authorize(token: str) -> dict | None:
     if not user_id:
         return None
     return db.get_user_by_id(user_id)
+
+
+def _agent_token(ws: WebSocket) -> str:
+    """API key supplied as the WS subprotocol (browsers/agents can't set headers)."""
+    subprotocol = ws.headers.get("sec-websocket-protocol") or ""
+    offered = [p.strip() for p in subprotocol.split(",") if p.strip()]
+    return offered[0] if offered else ""
+
+
+@router.websocket("/ws/agent")
+async def websocket_agent_endpoint(ws: WebSocket, token: str = Query(default="")):
+    """Realtime command channel for desktop agents.
+
+    Auth: API key passed either as `?key=`/`?token=` query or as the WS
+    subprotocol (Python ws clients can set protocol headers). The first
+    message must be a JSON `{"type": "hello", "device_id": "...", ...}` that
+    registers the socket; afterwards the server pushes `{"type":"command", ...}`
+    instantly and the agent replies with `{"type":"command.ack", ...}`.
+    """
+    key = token or _agent_token(ws)
+    record = db.find_api_key_by_hash(security.hash_api_key(key)) if key else None
+    if record is None:
+        await ws.close(code=4001)  # unauthorized
+        return
+    await ws.accept(subprotocol=_agent_token(ws) or None)
+    device_id: str | None = None
+    try:
+        while True:
+            raw = await ws.receive_text()
+            try:
+                msg = json.loads(raw)
+            except (ValueError, TypeError):
+                continue
+            msg_type = (msg or {}).get("type")
+            if msg_type == "hello" and device_id is None:
+                device_id = str(msg.get("device_id") or "").strip()
+                if device_id:
+                    realtime.connect_agent(device_id, ws)
+                    # Re-send any still-pending commands so nothing is lost
+                    # between the last heartbeat poll and this connection.
+                    for cmd in db.list_pending_commands(device_id):
+                        await ws.send_json({
+                            "type": "command",
+                            "command": _to_command_doc(cmd),
+                            "ts": time.time(),
+                        })
+                continue
+            if msg_type == "command.ack" and device_id:
+                command_id = str((msg or {}).get("command_id") or "").strip()
+                status = str((msg or {}).get("status") or "failed").strip()
+                error = (msg or {}).get("error")
+                if command_id and status in (db.COMMAND_STATUS_DONE, db.COMMAND_STATUS_FAILED):
+                    db.ack_command(command_id, status, error)
+                continue
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        if device_id:
+            realtime.disconnect_agent(device_id, ws)
+
+
+def _to_command_doc(cmd: dict) -> dict:
+    return {
+        "id": str(cmd["_id"]),
+        "device_id": cmd.get("device_id"),
+        "type": cmd.get("type"),
+        "status": cmd.get("status"),
+        "created_at": cmd.get("created_at"),
+    }

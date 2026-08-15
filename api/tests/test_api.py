@@ -51,6 +51,7 @@ def _patch_db(monkeypatch, user=None):
 
     _rt._clients.clear()
     _rt._presence.clear()
+    _rt._agent_clients.clear()
 
     # Refresh-token store: in-memory, shared across tests in this module.
     global _REFRESH_STORE
@@ -1917,3 +1918,240 @@ def _raw_token():
     from sysinfo_api import config
     payload = {"sub": "64b000000000000000000001", "role": "admin", "exp": datetime.now(timezone.utc) + timedelta(minutes=10)}
     return pyjwt.encode(payload, config.JWT_SECRET, algorithm="HS256")
+
+
+# ---- remote commands ----
+
+def test_create_command_requires_admin(monkeypatch):
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "ops1",
+        "role": "user",
+        "groups": ["g1"],
+    })
+    resp = client.post("/commands", json={"device_id": "dev-1", "type": "restart"}, headers=_auth_header(role="user"))
+    assert resp.status_code == 403
+
+
+def test_create_command_restart_and_push(monkeypatch):
+    from sysinfo_api import realtime
+
+    _patch_db(monkeypatch)
+    created = {}
+
+    def fake_create(device_id, command_type, requested_by):
+        created["device_id"] = device_id
+        created["type"] = command_type
+        created["requested_by"] = requested_by
+        return "64b0000000000000000000aa"
+
+    monkeypatch.setattr(db, "create_command", fake_create)
+
+    def fake_get(cid):
+        return {
+            "_id": ObjectIdStr(cid),
+            "device_id": created["device_id"],
+            "type": created["type"],
+            "status": "pending",
+            "requested_by": created["requested_by"],
+            "created_at": 100.0,
+            "acked_at": None,
+        }
+
+    monkeypatch.setattr(db, "get_command", fake_get)
+    pushed = []
+
+    async def fake_push(command):
+        pushed.append(command)
+
+    monkeypatch.setattr(realtime, "push_command_to_agent", fake_push)
+    resp = client.post("/commands", json={"device_id": "dev-1", "type": "restart"}, headers=_auth_header())
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["device_id"] == "dev-1"
+    assert body["type"] == "restart"
+    assert body["status"] == "pending"
+    assert len(pushed) == 1
+
+
+def test_create_command_rejects_bad_type(monkeypatch):
+    _patch_db(monkeypatch)
+    resp = client.post("/commands", json={"device_id": "dev-1", "type": "boom"}, headers=_auth_header())
+    assert resp.status_code == 422
+
+
+def test_ack_command_requires_api_key(monkeypatch):
+    _patch_db(monkeypatch)
+    resp = client.post("/commands/cmd-1/ack", json={"status": "done"})
+    assert resp.status_code == 401
+
+
+def test_ack_command_updates_record(monkeypatch):
+    _patch_db(monkeypatch)
+    key = security.generate_api_key()
+    monkeypatch.setattr(db, "find_api_key_by_hash", lambda h: {"_id": "x", "prefix": key[:20], "active": True})
+    monkeypatch.setattr(
+        db,
+        "get_command",
+        lambda cid: {
+            "_id": ObjectIdStr(cid),
+            "device_id": "dev-1",
+            "type": "restart",
+            "status": "pending",
+            "created_at": 100.0,
+            "acked_at": None,
+        },
+    )
+    acked = {}
+
+    def fake_ack(cid, status, error=None):
+        acked["cid"] = cid
+        acked["status"] = status
+        return True
+
+    monkeypatch.setattr(db, "ack_command", fake_ack)
+    resp = client.post(
+        "/commands/cmd-1/ack",
+        json={"status": "failed", "error": "no perms"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 200
+    assert acked["cid"] == "cmd-1"
+    assert acked["status"] == "failed"
+
+
+def test_ack_command_rejects_already_resolved(monkeypatch):
+    _patch_db(monkeypatch)
+    key = security.generate_api_key()
+    monkeypatch.setattr(db, "find_api_key_by_hash", lambda h: {"_id": "x", "prefix": key[:20], "active": True})
+    monkeypatch.setattr(
+        db,
+        "get_command",
+        lambda cid: {
+            "_id": ObjectIdStr(cid),
+            "device_id": "dev-1",
+            "type": "restart",
+            "status": "done",  # already resolved -> 409
+            "created_at": 100.0,
+            "acked_at": 101.0,
+        },
+    )
+    resp = client.post(
+        "/commands/cmd-1/ack",
+        json={"status": "done"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 409
+
+
+def test_get_commands_list(monkeypatch):
+    _patch_db(monkeypatch)
+    ok = ObjectIdStr
+    monkeypatch.setattr(
+        db,
+        "list_commands",
+        lambda limit=50, device_id=None: [
+            {"_id": ok("c1"), "device_id": "dev-1", "type": "restart", "status": "pending", "created_at": 100.0, "acked_at": None},
+        ],
+    )
+    resp = client.get("/commands", headers=_auth_header())
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 1
+    assert resp.json()["commands"][0]["type"] == "restart"
+
+
+# ---- agent websocket (immediate command push) ----
+
+def test_websocket_agent_requires_api_key(monkeypatch):
+    _patch_db(monkeypatch)
+    import pytest as _pytest
+    from starlette.websockets import WebSocketDisconnect
+
+    try:
+        with client.websocket_connect("/ws/agent", subprotocols=["not-a-key"]) as ws:
+            with _pytest.raises(WebSocketDisconnect):
+                ws.receive_json()
+    except WebSocketDisconnect:
+        pass
+
+
+def test_websocket_agent_hello_and_command_flow(monkeypatch):
+    from sysinfo_api import realtime
+
+    _patch_db(monkeypatch)
+    key = security.generate_api_key()
+    monkeypatch.setattr(
+        db, "find_api_key_by_hash", lambda h: {"_id": "x", "prefix": key[:20], "active": True}
+    )
+    monkeypatch.setattr(db, "list_pending_commands", lambda device_id: [])
+    acked = {}
+
+    def fake_ack(cid, status, error=None):
+        acked["cid"] = cid
+        acked["status"] = status
+        return True
+
+    monkeypatch.setattr(db, "ack_command", fake_ack)
+
+    with client.websocket_connect("/ws/agent", subprotocols=[key]) as ws:
+        ws.send_json({"type": "hello", "device_id": "dev-1", "pc_name": "PC1"})
+
+        # Simulate the server pushing a command by enqueuing one and calling
+        # the realtime pusher (as the POST route would).
+        import asyncio as _asyncio
+
+        cmd = {
+            "_id": ObjectIdStr("c9"),
+            "device_id": "dev-1",
+            "type": "restart",
+            "status": "pending",
+            "created_at": 100.0,
+        }
+        _asyncio.run(realtime.push_command_to_agent(cmd))
+
+        received = ws.receive_json()
+        assert received["type"] == "command"
+        assert received["command"]["id"] == "c9"
+        assert received["command"]["type"] == "restart"
+
+        # Agent replies with the ack; server marks the Mongo record.
+        ws.send_json({"type": "command.ack", "command_id": "c9", "status": "done"})
+        import time as _time
+
+        deadline = _time.time() + 2
+        while not acked and _time.time() < deadline:
+            _time.sleep(0.05)
+        assert acked == {"cid": "c9", "status": "done"}
+
+
+def test_websocket_agent_resends_pending_on_hello(monkeypatch):
+    from sysinfo_api import realtime
+
+    _patch_db(monkeypatch)
+    key = security.generate_api_key()
+    monkeypatch.setattr(
+        db, "find_api_key_by_hash", lambda h: {"_id": "x", "prefix": key[:20], "active": True}
+    )
+    monkeypatch.setattr(
+        db,
+        "list_pending_commands",
+        lambda device_id: [
+            {"_id": ObjectIdStr("c1"), "device_id": "dev-1", "type": "shutdown", "status": "pending", "created_at": 100.0},
+        ],
+    )
+    with client.websocket_connect("/ws/agent", subprotocols=[key]) as ws:
+        ws.send_json({"type": "hello", "device_id": "dev-1", "pc_name": "PC1"})
+        received = ws.receive_json()
+        assert received["type"] == "command"
+        assert received["command"]["type"] == "shutdown"
+
+
+class ObjectIdStr(str):
+    """Placeholder _id string so `str(doc["_id"])` round-trips."""
+
+    def __init__(self, value: str):
+        super().__init__()
+        self._value = value
+
+    def __str__(self):
+        return self._value

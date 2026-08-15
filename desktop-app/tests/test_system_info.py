@@ -36,7 +36,8 @@ def test_send_heartbeat_success(monkeypatch):
         return FakeResponse(payload={"status": "ok"})
 
     monkeypatch.setattr(cli.requests, "post", fake_post)
-    assert cli.send_heartbeat({"device_id": "d1", "pc_name": "PC"}, "http://x", "sk-key") is True
+    result = cli.send_heartbeat({"device_id": "d1", "pc_name": "PC"}, "http://x", "sk-key")
+    assert result == {"status": "ok"}
     assert sent["url"] == "http://x/heartbeat"
     assert sent["payload"] == {"device_id": "d1", "pc_name": "PC"}
 
@@ -46,7 +47,7 @@ def test_send_heartbeat_failure(monkeypatch):
         raise OSError("down")
 
     monkeypatch.setattr(cli.requests, "post", boom)
-    assert cli.send_heartbeat({"device_id": "d1"}, "http://x", "sk-key") is False
+    assert cli.send_heartbeat({"device_id": "d1"}, "http://x", "sk-key") is None
 
 
 def test_geo_locate_happy_path(monkeypatch):

@@ -68,17 +68,29 @@ class WatchLoop:
     def heartbeat(self) -> bool:
         pc_name = resolve_pc_name(self.args.pc_name)
         device_id = get_or_create_device_id(pc_name)
-        ok = cli.send_heartbeat(
+        response = cli.send_heartbeat(
             {"device_id": device_id, "pc_name": pc_name},
             self.args.api_url,
             self.args.api_key,
         )
+        # Execute any pending remote commands (e.g. restart) reported by the API.
+        if response:
+            from .commands import handle_pending_commands
+
+            try:
+                handle_pending_commands(
+                    response.get("commands"),
+                    self.args.api_url,
+                    self.args.api_key,
+                )
+            except Exception:
+                pass
         # Flush new print jobs with the same 5-min cadence.
         try:
             cli.sync_print_jobs(self.args, device_id, pc_name, quiet=True)
         except Exception:
             pass
-        return ok
+        return bool(response)
 
     def full_report(self) -> None:
         full_args = watch_args(self.args, no_save=True)
@@ -124,6 +136,17 @@ class WatchLoop:
         self._worker = threading.Thread(target=self._loop, daemon=True)
         self._worker.start()
 
+        # Immediate command delivery: keep a /ws/agent socket open so remote
+        # restart/shutdown commands arrive instantly instead of waiting for the
+        # next heartbeat poll.
+        from .commands import WatchCommandSocket
+
+        pc_name = resolve_pc_name(self.args.pc_name)
+        device_id = get_or_create_device_id(pc_name)
+        agent = WatchCommandSocket(self.args.api_url, self.args.api_key, device_id, pc_name)
+        agent.start()
+        self._agent_ws = agent
+
         tray = _tray_icon(self)
         if tray is not None:
             # Blocking until the user picks Exit (which stops tray + loop).
@@ -139,6 +162,12 @@ class WatchLoop:
 
     def stop(self) -> None:
         self._stop.set()
+        agent = getattr(self, "_agent_ws", None)
+        if agent is not None:
+            try:
+                agent.stop()
+            except Exception:
+                pass
 
     @staticmethod
     def _current_version() -> str:

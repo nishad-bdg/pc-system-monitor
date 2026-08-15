@@ -7,6 +7,7 @@ from . import config, db, security
 from .routes import (
     api_keys,
     auth,
+    commands,
     groups,
     health,
     print_jobs,
@@ -51,6 +52,7 @@ app.include_router(api_keys.router)
 app.include_router(groups.router)
 app.include_router(sub_categories.router)
 app.include_router(print_jobs.router)
+app.include_router(commands.router)
 app.include_router(realtime.router)
 
 

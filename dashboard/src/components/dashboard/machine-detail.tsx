@@ -30,6 +30,9 @@ import {
 } from "@/lib/api";
 import { StatusDot } from "./status-dot";
 import { useRealtime } from "../realtime-provider";
+import { RemoteActions } from "./remote-actions";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 export function MachineDetail({ machine }: { machine: MachineSummary }) {
   const host = machine.latest;
@@ -81,6 +84,13 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         <IdentityItem label="Private IP" value={host.private_ip} />
         <IdentityItem label="Public IP" value={host.public_ip} />
         <IdentityItem label="MAC address" value={machineMac(host)} />
+        <div className="ml-auto">
+          <RemoteActions
+            apiUrl={API_URL}
+            deviceId={machine.deviceId}
+            pcName={machine.name}
+          />
+        </div>
       </div>
       <div className="flex gap-2 overflow-x-auto border-b border-slate-200">
         <button

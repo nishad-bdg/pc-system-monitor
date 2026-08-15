@@ -926,3 +926,39 @@ export function fetchPrintSummary(
 ): Promise<PrintJobsSummary> {
   return apiRequest(apiUrl, apiToken, `/print-jobs/summary?hours=${hours}`);
 }
+
+// ---- remote commands (restart / shutdown) ----
+
+export type Command = {
+  id: string;
+  device_id?: string;
+  type?: string;
+  status?: string;
+  requested_by?: string;
+  created_at?: number;
+  acked_at?: number | null;
+  error?: string | null;
+};
+
+export function sendCommand(
+  apiUrl: string,
+  apiToken: string,
+  deviceId: string,
+  type: "restart" | "shutdown",
+): Promise<Command> {
+  return apiRequest(apiUrl, apiToken, "/commands", {
+    method: "POST",
+    body: JSON.stringify({ device_id: deviceId, type }),
+  });
+}
+
+export function fetchCommands(
+  apiUrl: string,
+  apiToken: string,
+  deviceId?: string,
+  limit = 20,
+): Promise<{ total: number; commands: Command[] }> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (deviceId) params.set("device_id", deviceId);
+  return apiRequest(apiUrl, apiToken, `/commands?${params}`);
+}

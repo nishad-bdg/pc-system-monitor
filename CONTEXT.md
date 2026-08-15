@@ -219,7 +219,33 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
 - `GET/POST/PATCH/DELETE /groups` — admin JWT; a machine key belongs to **one bucket only** (assigning removes it from other groups AND sub-categories).
 - `GET/POST/PATCH/DELETE /sub-categories` — admin JWT; create/update take `group_ids` (many-to-many); `PATCH` machine_keys remove the keys from all groups and other sub-categories (one-bucket).
 - `POST /print-jobs` — API key; batch `{device_id, pc_name, jobs:[...]}` → Mongo `print_jobs` + WS `print.job`. `GET /print-jobs`, `GET /print-jobs/summary` — JWT (see Print Activity below).
+- `POST /commands` — admin JWT; `{device_id, type: "restart" | "shutdown"}` → Mongo `commands` collection + push to the agent over `/ws/agent`. `GET /commands?device_id=&limit=` — admin JWT, newest first. `POST /commands/{id}/ack` — **API key**; sets `status` + `acked_at` (409 if already resolved). See **Remote control** below.
 - Auth, users, health — unchanged pattern.
+
+### Remote control (Restart / Shutdown)
+
+- Admin triggers it from the dashboard detail header (**Restart** / **Shut down**
+  buttons, `admin`/`super_admin` only, show only when the machine has a
+  `device_id`). A confirm dialog calls `POST /commands`; the API stores a
+  `pending` command in Mongo **and** pushes it immediately to the desktop agent.
+- **Agent channel (`GET /ws/agent`):** the always-on watcher (`--watch`) holds a
+  persistent WebSocket to the API (same API key, passed as the WS **subprotocol**
+  or `?key=`; code **4001** on auth failure). On connect it sends
+  `{"type":"hello", device_id, pc_name}`; the server registers it in-process and
+  **re-sends any `pending` commands**. Server → agent:
+  `{"type":"command", command:{id,device_id,type,status,created_at}}`; agent →
+  server: `{"type":"command.ack", command_id, status, error?}` → Mongo updated.
+- **Desktop execution** (`commands.py`): `shutdown /r /t 5` / `shutdown /s /t 5`
+  (Windows), `osascript System Events restart|shut down` (macOS) — best-effort in
+  the watcher's privileges (a per-user process can't reboot without admin). Acks
+  over WS **and** HTTP `POST /commands/{id}/ack`; a failed execute acks `failed`
+  with the error.
+- **Offline fallback:** without a socket the command stays `pending`; it is
+  re-sent on agent `hello` at reconnect **and** echoed in the `commands` field of
+  the heartbeat poll response (`GET/POST /heartbeat`), which the one-shot
+  `--heartbeat` and self-healing `--watch` both process.
+- Broadcasting is in-process (per uvicorn worker), same caveat as print/WS
+  events.
 
 ### Realtime (`WebSocket /ws`, hi `--heartbeat`)
 

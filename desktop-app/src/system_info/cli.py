@@ -141,7 +141,17 @@ def run(args: argparse.Namespace) -> int:
         device_id = get_or_create_device_id(pc_name)
         sync_print_jobs(args, device_id, pc_name, quiet=True)
         payload = {"device_id": device_id, "pc_name": pc_name}
-        ok = send_heartbeat(payload, args.api_url, args.api_key)
+        response = send_heartbeat(payload, args.api_url, args.api_key)
+        if response:
+            from .commands import handle_pending_commands
+
+            try:
+                handle_pending_commands(
+                    response.get("commands"), args.api_url, args.api_key
+                )
+            except Exception:
+                pass
+        ok = response is not None
         if args.json:
             print(json.dumps({"heartbeat": "ok" if ok else "failed"}))
         elif ok:
@@ -280,8 +290,12 @@ def save_report(data: dict, api_url: str, api_key: str = "") -> str | None:
         return None
 
 
-def send_heartbeat(data: dict, api_url: str, api_key: str = "") -> bool:
-    """POST a lightweight online heartbeat to the API. Returns True on success."""
+def send_heartbeat(data: dict, api_url: str, api_key: str = "") -> dict | None:
+    """POST a lightweight online heartbeat to the API.
+
+    Returns the parsed JSON response (which includes any pending remote
+    commands for this device), or None on failure.
+    """
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
         resp = requests.post(
@@ -291,11 +305,11 @@ def send_heartbeat(data: dict, api_url: str, api_key: str = "") -> bool:
             timeout=SAVE_TIMEOUT,
         )
         resp.raise_for_status()
-        return True
+        return resp.json()
     except (requests.RequestException, ValueError, OSError) as exc:
         if os.getenv("SYSTEM_INFO_DEBUG"):
             print(f"[heartbeat] failed: {exc}")
-        return False
+        return None
 
 
 def sync_print_jobs(
