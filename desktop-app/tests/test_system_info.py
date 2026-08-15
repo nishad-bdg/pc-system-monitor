@@ -168,6 +168,61 @@ def test_resources_to_dict_keys():
         }
 
 
+def test_collect_battery_status_charging(monkeypatch):
+    import psutil
+    from system_info.resources import _collect_battery
+
+    class FakeBatt:
+        percent = 45.0
+        power_plugged = True
+        secsleft = 3600
+
+    monkeypatch.setattr("system_info.resources.psutil.sensors_battery", lambda: FakeBatt())
+    batt = _collect_battery()
+    assert batt is not None
+    assert batt["status"] == "charging"
+    assert batt["power_plugged"] is True
+    assert batt["seconds_left"] == 3600
+
+
+def test_collect_battery_status_full(monkeypatch):
+    from system_info.resources import _collect_battery
+
+    class FakeBatt:
+        percent = 100.0
+        power_plugged = True
+        secsleft = -1
+
+    monkeypatch.setattr("system_info.resources.psutil.sensors_battery", lambda: FakeBatt())
+    batt = _collect_battery()
+    assert batt is not None
+    assert batt["status"] == "full"
+    assert batt["seconds_left"] is None
+
+
+def test_collect_battery_status_discharging(monkeypatch):
+    from system_info.resources import _collect_battery
+
+    class FakeBatt:
+        percent = 30.0
+        power_plugged = False
+        secsleft = 5400
+
+    monkeypatch.setattr("system_info.resources.psutil.sensors_battery", lambda: FakeBatt())
+    batt = _collect_battery()
+    assert batt is not None
+    assert batt["status"] == "discharging"
+    assert batt["power_plugged"] is False
+    assert batt["seconds_left"] == 5400
+
+
+def test_collect_battery_none_on_desktop(monkeypatch):
+    from system_info.resources import _collect_battery
+
+    monkeypatch.setattr("system_info.resources.psutil.sensors_battery", lambda: None)
+    assert _collect_battery() is None
+
+
 def test_fmt_bytes():
     assert cli._fmt_bytes(1024) == "1.00 KiB"
     assert cli._fmt_bytes(1024 * 1024) == "1.00 MiB"

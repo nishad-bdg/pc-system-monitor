@@ -58,13 +58,20 @@ def _collect_battery() -> dict | None:
         return None
     secsleft = getattr(batt, "secsleft", -1)
     seconds_left = None
-    unlimited = getattr(psutil, "POWER_TIME_UNLIMITED", 2**24 - 1)
-    if isinstance(secsleft, int) and 0 <= secsleft < unlimited:
+    # psutil uses -1 (unknown) and -2 (unlimited) sentinels; a sane positive
+    # time-left value is real wall-clock seconds.
+    if isinstance(secsleft, int) and secsleft > 0:
         seconds_left = secsleft
+    plugged = bool(getattr(batt, "power_plugged", False))
+    percent = float(batt.percent)
+    status = "discharging"
+    if plugged:
+        status = "full" if percent >= 100 else "charging"
     return {
-        "percent": float(batt.percent),
-        "power_plugged": bool(batt.power_plugged),
+        "percent": percent,
+        "power_plugged": plugged,
         "seconds_left": seconds_left,
+        "status": status,
     }
 
 

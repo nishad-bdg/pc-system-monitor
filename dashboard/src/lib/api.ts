@@ -46,6 +46,7 @@ export interface Report {
       percent?: number;
       power_plugged?: boolean;
       seconds_left?: number | null;
+      status?: "discharging" | "charging" | "full" | null;
     } | null;
   } | null;
   uptime?: {

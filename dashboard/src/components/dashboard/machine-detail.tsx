@@ -233,10 +233,20 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
                   label="Battery"
                   value={fmtPercent(host.resources.battery.percent)}
                   sub={
-                    host.resources.battery.power_plugged
-                      ? "Charging / plugged in"
-                      : fmtBatteryTime(host.resources.battery.seconds_left) +
-                        " remaining"
+                    host.resources.battery.status === "charging"
+                      ? `Charging · ${fmtBatteryTime(
+                          host.resources.battery.seconds_left,
+                        )} to full`
+                      : host.resources.battery.status === "full"
+                        ? "Fully charged · plugged in"
+                        : host.resources.battery.status === "discharging"
+                          ? `On battery · ${fmtBatteryTime(
+                              host.resources.battery.seconds_left,
+                            )} remaining`
+                          : host.resources.battery.power_plugged
+                            ? "Plugged in"
+                            : fmtBatteryTime(host.resources.battery.seconds_left) +
+                              " remaining"
                   }
                   accent
                 />

@@ -117,7 +117,12 @@ Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`.
 
 Laptop only (`psutil.sensors_battery()`), `null` on desktops:
 
-`battery: { percent, power_plugged, seconds_left }`.
+`battery: { percent, power_plugged, seconds_left, status }`.
+
+`status` is derived from psutil: `"charging"` (plugged, <100%), `"full"`
+(plugged, 100%), `"discharging"` (on battery, shows `seconds_left`
+remaining). The dashboard Overview Battery card shows this state
+(Charging · time to full / Fully charged / On battery · time remaining).
 
 ### Internet Security (`security`)
 
