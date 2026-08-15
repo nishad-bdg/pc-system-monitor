@@ -743,7 +743,16 @@ export function ReportExportPanel() {
                             {sec
                               ? Array.isArray(sec)
                                 ? sec.map((s: any) => s.name).join(", ")
-                                : (sec as any).installed?.map((s: any) => s.name).join(", ") || "—"
+                                : (sec as any).installed
+                                    ?.map((s: any) => {
+                                      if (s.expired) return `${s.name} (Expired)`;
+                                      if (s.expiry_date) {
+                                        const days = s.days_remaining ?? 0;
+                                        return `${s.name} (${days}d remaining, ${s.expiry_date})`;
+                                      }
+                                      return s.name;
+                                    })
+                                    .join(", ") || "—"
                               : "—"}
                           </td>
                           <td className="px-4 py-3 text-slate-600">

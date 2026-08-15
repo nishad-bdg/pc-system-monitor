@@ -624,6 +624,7 @@ function SummarySection({ machine }: { machine: MachineSummary }) {
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-slate-900">{p.name}</p>
                     <p className="truncate text-xs text-slate-500">{p.vendor}</p>
+                    <SecurityExpiryLine product={p} />
                   </div>
                   {p.active === true && (
                     <span className="shrink-0 text-[11px] font-semibold text-emerald-600">Active</span>
@@ -1427,6 +1428,7 @@ function SecuritySection({
                   {p.name}
                 </p>
                 <p className="mt-0.5 text-xs text-slate-500">{p.vendor}</p>
+                <SecurityExpiryLine product={p} />
               </div>
               {p.active === true && (
                 <span className="shrink-0 text-[11px] font-semibold text-emerald-600">
@@ -1443,6 +1445,37 @@ function SecuritySection({
         </ul>
       )}
     </div>
+  );
+}
+
+type SecurityProductInfo = NonNullable<
+  NonNullable<Report["security"]>["installed"]
+>[number];
+
+function formatExpiryDate(iso: string): string {
+  const parsed = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return parsed.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function SecurityExpiryLine({ product }: { product: SecurityProductInfo }) {
+  if (product.expired) {
+    return (
+      <p className="mt-0.5 text-xs font-semibold text-red-600">Expired</p>
+    );
+  }
+  if (!product.expiry_date) return null;
+  const days = product.days_remaining ?? 0;
+  const remaining = days === 1 ? "1 day remaining" : `${days} days remaining`;
+  const soon = days <= 30;
+  return (
+    <p className={`mt-0.5 text-xs ${soon ? "font-medium text-amber-700" : "text-slate-500"}`}>
+      {remaining} · expires {formatExpiryDate(product.expiry_date)}
+    </p>
   );
 }
 

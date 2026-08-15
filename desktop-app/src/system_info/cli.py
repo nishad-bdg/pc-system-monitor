@@ -510,7 +510,17 @@ def _print(
                     state = " [active]"
                 elif active is False:
                     state = " [inactive]"
-                print(f"  - {name} ({vendor}){state}")
+                expiry = ""
+                if product.get("expired"):
+                    expiry = " [Expired]"
+                elif product.get("expiry_date"):
+                    days = product.get("days_remaining")
+                    if days is None:
+                        expiry = f" [expires {product.get('expiry_date')}]"
+                    else:
+                        unit = "day" if days == 1 else "days"
+                        expiry = f" [{days} {unit} remaining, expires {product.get('expiry_date')}]"
+                print(f"  - {name} ({vendor}){state}{expiry}")
         else:
             print("  none detected")
 

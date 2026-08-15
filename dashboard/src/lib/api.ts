@@ -91,6 +91,9 @@ export interface Report {
       name: string;
       vendor: string;
       active?: boolean | null;
+      expiry_date?: string | null;
+      expired?: boolean | null;
+      days_remaining?: number | null;
     }[];
     platform?: string;
   } | null;

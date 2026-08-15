@@ -680,9 +680,101 @@ def test_security_windows_fallback_when_security_center_empty(monkeypatch):
     )
     monkeypatch.setattr("system_info.security._scan_processes", lambda: [])
     monkeypatch.setattr("system_info.security._scan_launch_items", lambda: [])
+    monkeypatch.setattr("system_info.security._collect_windows_expiry_hints", lambda: {})
     info = collect_security_info()
     assert info.platform == "windows"
     assert any(p.vendor == "Norton" for p in info.installed)
+
+
+def test_security_product_to_dict_includes_expiry():
+    from datetime import date, timedelta
+
+    from system_info.security import SecurityProduct, _apply_expiry
+
+    future = date(2030, 3, 15)
+    product = _apply_expiry(
+        SecurityProduct(name="ESET NOD32", vendor="ESET", active=True),
+        future,
+        today=date(2030, 1, 14),
+    )
+    payload = product.to_dict()
+    assert payload["expiry_date"] == "2030-03-15"
+    assert payload["expired"] is False
+    assert payload["days_remaining"] == 60
+
+
+def test_expiry_status_expired():
+    from datetime import date
+
+    from system_info.security import SecurityProduct, _apply_expiry
+
+    product = _apply_expiry(
+        SecurityProduct(name="Norton", vendor="Norton"),
+        date(2026, 1, 1),
+        today=date(2026, 8, 15),
+    )
+    assert product.expired is True
+    assert product.days_remaining == 0
+    assert product.expiry_date == "2026-01-01"
+
+
+def test_parse_expiry_date_formats():
+    from datetime import date
+
+    from system_info.security import _parse_expiry_date
+
+    assert _parse_expiry_date("2030-12-31") == date(2030, 12, 31)
+    assert _parse_expiry_date("2018-11-17T12:00:00Z") == date(2018, 11, 17)
+    assert _parse_expiry_date("17/11/2018") == date(2018, 11, 17)
+    assert _parse_expiry_date(1893456000) == date(2030, 1, 1)  # unix
+    assert _parse_expiry_date("not-a-date") is None
+    assert _parse_expiry_date(None) is None
+
+
+def test_interpret_registry_days_remaining():
+    from datetime import date
+
+    from system_info.security import _interpret_registry_expiry
+
+    expiry = _interpret_registry_expiry("LicDaysTillExpiration", 12, today=date(2026, 8, 15))
+    assert expiry == date(2026, 8, 27)
+    expiry = _interpret_registry_expiry("SurveyDataInfo", '{"days_left": 3}', today=date(2026, 8, 15))
+    assert expiry == date(2026, 8, 18)
+
+
+def test_eset_license_xml_expiration():
+    from datetime import date
+
+    from system_info.security import _eset_expiry_from_license
+
+    xml = (
+        "<ESET><PRODUCT_LICENSE_FILE><LICENSE><ACTIVE_PRODUCT "
+        'EXPIRATION_DATE="2027-04-01T12:00:00Z"/></LICENSE>'
+        "</PRODUCT_LICENSE_FILE></ESET>"
+    )
+    assert _eset_expiry_from_license(xml) == date(2027, 4, 1)
+
+
+def test_attach_windows_expiry_matches_vendor(monkeypatch):
+    from datetime import date
+
+    from system_info.security import SecurityProduct, _attach_windows_expiry
+
+    monkeypatch.setattr("system_info.security.os.name", "nt")
+    monkeypatch.setattr(
+        "system_info.security._collect_windows_expiry_hints",
+        lambda: {"ESET": date(2026, 9, 14)},
+    )
+    products = [
+        SecurityProduct(name="ESET NOD32 Antivirus", vendor="ESET", active=True),
+        SecurityProduct(name="Windows Defender", vendor="Windows Defender", active=True),
+    ]
+    _attach_windows_expiry(products, today=date(2026, 8, 15))
+    assert products[0].expired is False
+    assert products[0].days_remaining == 30
+    assert products[0].expiry_date == "2026-09-14"
+    assert products[1].expiry_date is None
+    assert products[1].expired is None
 
 
 def test_health_macos_disk_dedupe(monkeypatch):
