@@ -222,8 +222,72 @@ def test_collect_outlook_classic_windows(tmp_path, monkeypatch):
         "<email>erin@corp.com</email><sendhost>smtp.corp.com</sendhost></account></xml>"
     )
     monkeypatch.setenv("APPDATA", str(tmp_path / "APPDATA"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "LOCALAPPDATA"))
+    monkeypatch.setattr(
+        "system_info.email_accounts._run_powershell",
+        lambda script, timeout=12.0: "",
+    )
     accounts = _collect_outlook_classic_windows()
     assert len(accounts) == 2
     emails = {a.email for a in accounts}
     assert emails == {"dave@classic.com", "erin@corp.com"}
     assert all(a.client == "outlook_classic" for a in accounts)
+
+
+def test_office_identity_json_extracts_signed_in_outlook():
+    from system_info.email_accounts import _accounts_from_office_identity_json
+
+    raw = json.dumps(
+        [
+            {"Email": "jane@contoso.com", "Name": "Jane Doe", "Provider": "orgid"},
+            {"Email": "not-an-email", "Name": "x"},
+            {"Email": "jane@contoso.com", "Name": "Jane Doe"},
+        ]
+    )
+    accounts = _accounts_from_office_identity_json(raw)
+    assert len(accounts) == 1
+    acc = accounts[0]
+    assert acc.email == "jane@contoso.com"
+    assert acc.full_name == "Jane Doe"
+    assert acc.protocol == "exchange"
+    assert acc.client == "outlook_classic"
+
+
+def test_collect_outlook_new_windows_olk_and_smtp_address(tmp_path, monkeypatch):
+    olk = tmp_path / "LOCALAPPDATA" / "Microsoft" / "Olk"
+    olk.mkdir(parents=True)
+    (olk / "accounts.json").write_text(
+        json.dumps(
+            {
+                "accounts": [
+                    {
+                        "SmtpAddress": "newolk@fabrikam.com",
+                        "UserPrincipalName": "newolk@fabrikam.com",
+                        "accountType": "exchange",
+                    }
+                ]
+            }
+        )
+    )
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "LOCALAPPDATA"))
+    accounts = _collect_outlook_new_windows()
+    assert any(a.email == "newolk@fabrikam.com" for a in accounts)
+    acc = next(a for a in accounts if a.email == "newolk@fabrikam.com")
+    assert acc.client == "outlook_new"
+    assert acc.protocol == "exchange"
+
+
+def test_collect_outlook_classic_autodiscover_filename(tmp_path, monkeypatch):
+    from system_info.email_accounts import _collect_outlook_cache_files_windows
+
+    cache = tmp_path / "LOCALAPPDATA" / "Microsoft" / "Outlook"
+    cache.mkdir(parents=True)
+    (cache / "alex@contoso.com.xml").write_text(
+        "<Autodiscover><AutoDiscoverSMTPAddress>alex@contoso.com</AutoDiscoverSMTPAddress></Autodiscover>",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "LOCALAPPDATA"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "APPDATA"))
+    accounts = _collect_outlook_cache_files_windows()
+    emails = {a.email.lower() for a in accounts}
+    assert "alex@contoso.com" in emails

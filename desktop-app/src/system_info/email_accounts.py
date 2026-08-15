@@ -391,52 +391,233 @@ def _walk_json(value, depth: int = 0) -> list[dict]:
             yield from _walk_json(child, depth + 1)
 
 
-def _collect_outlook_new_windows() -> list[EmailAccount]:
-    local = os.getenv("LOCALAPPDATA") or os.getenv("APPDATA") or ""
-    base = (
-        Path(local)
-        / "Packages"
-        / "Microsoft.OutlookForWindows_8wekyb3d8bbwe"
-        / "LocalState"
-    )
-    if not base.is_dir():
+_SKIP_EMAIL_LOCAL = re.compile(
+    r"^(image\d+|pid-|noreply|no-reply|mailer-daemon|postmaster)$",
+    re.I,
+)
+
+
+def _plausible_email(value: object) -> str | None:
+    text = str(value or "").strip().strip("<>").strip('"').strip()
+    if "#EXT#" in text:
+        text = text.split("#", 1)[0]
+    match = _EMAIL_RE.search(text)
+    if not match:
+        return None
+    email = match.group(0)
+    local, _, domain = email.partition("@")
+    if not local or not domain or _SKIP_EMAIL_LOCAL.match(local):
+        return None
+    if domain.lower() in {"example.com", "email.microsoft.com"}:
+        return None
+    return email
+
+
+def _node_email(node: dict) -> str | None:
+    lowered = {str(key).lower(): value for key, value in node.items()}
+    for key in (
+        "email",
+        "emailaddress",
+        "smtpaddress",
+        "userprincipalname",
+        "preferred_username",
+        "unique_name",
+        "emailid",
+        "mail",
+        "upn",
+        "address",
+        "account",
+    ):
+        if key not in lowered:
+            continue
+        found = _plausible_email(lowered[key])
+        if found:
+            return found
+    return None
+
+
+def _accounts_from_office_identity_json(raw: str) -> list[EmailAccount]:
+    """Parse PowerShell JSON from Office Identity\\Identities (signed-in M365)."""
+    if not (raw or "").strip():
+        return []
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return []
+    if isinstance(payload, dict):
+        payload = [payload]
+    if not isinstance(payload, list):
         return []
     accounts: list[EmailAccount] = []
-    for json_path in base.rglob("*.json"):
-        try:
-            data = json.loads(json_path.read_text(encoding="utf-8", errors="ignore"))
-        except (OSError, ValueError):
+    seen: set[str] = set()
+    for item in payload:
+        if not isinstance(item, dict):
             continue
-        for node in _walk_json(data):
-            email = (
-                node.get("email")
-                or node.get("emailAddress")
-                or node.get("Email")
-                or node.get("emailId")
-                or node.get("mail")
+        email = _plausible_email(item.get("Email") or item.get("email"))
+        if not email or email.lower() in seen:
+            continue
+        seen.add(email.lower())
+        name = str(item.get("Name") or item.get("FriendlyName") or "").strip() or None
+        accounts.append(
+            EmailAccount(
+                client="outlook_classic",
+                email=email,
+                full_name=name,
+                username=email,
+                protocol="exchange",
+                incoming_host="outlook.office365.com",
+                outgoing_host="smtp.office365.com",
             )
-            if not email:
-                continue
-            host = (
-                node.get("mailServerHostName")
-                or node.get("imapServer")
-                or node.get("popServer")
-                or node.get("server")
-                or node.get("hostname")
-            )
-            protocol = _norm_protocol(
-                node.get("accountType") or node.get("protocol") or node.get("type")
-            )
-            accounts.append(
-                EmailAccount(
-                    client="outlook_new",
-                    email=str(email),
-                    username=node.get("username"),
-                    protocol=protocol,
-                    incoming_host=host,
+        )
+    return accounts
+
+
+def _outlook_windows_scan_roots() -> list[tuple[Path, str]]:
+    """(directory, client) pairs to search for New/classic Outlook account files."""
+    roots: list[tuple[Path, str]] = []
+    local = os.getenv("LOCALAPPDATA") or ""
+    appdata = os.getenv("APPDATA") or ""
+    if local:
+        local_path = Path(local)
+        roots.append((local_path / "Microsoft" / "Olk", "outlook_new"))
+        packages = local_path / "Packages"
+        if packages.is_dir():
+            for pkg in packages.glob("Microsoft.OutlookForWindows_*"):
+                roots.append((pkg / "LocalState", "outlook_new"))
+        else:
+            roots.append(
+                (
+                    local_path
+                    / "Packages"
+                    / "Microsoft.OutlookForWindows_8wekyb3d8bbwe"
+                    / "LocalState",
+                    "outlook_new",
                 )
             )
+        roots.append((local_path / "Microsoft" / "Outlook", "outlook_classic"))
+    if appdata:
+        roots.append((Path(appdata) / "Microsoft" / "Outlook", "outlook_classic"))
+    return roots
+
+
+def _iter_outlook_text_files(base: Path):
+    if not base.is_dir():
+        return
+    count = 0
+    for path in base.rglob("*"):
+        if count >= 250:
+            return
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in {".json", ".xml", ".txt", ".config"}:
+            continue
+        try:
+            if path.stat().st_size > 2_000_000:
+                continue
+        except OSError:
+            continue
+        count += 1
+        yield path
+
+
+def _collect_outlook_new_windows() -> list[EmailAccount]:
+    accounts: list[EmailAccount] = []
+    for base, client in _outlook_windows_scan_roots():
+        if client != "outlook_new":
+            continue
+        for json_path in _iter_outlook_text_files(base):
+            try:
+                text = json_path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            try:
+                data = json.loads(text)
+            except ValueError:
+                email = _plausible_email(json_path.stem) or _plausible_email(text)
+                if email:
+                    accounts.append(EmailAccount(client=client, email=email))
+                continue
+            for node in _walk_json(data):
+                email = _node_email(node)
+                if not email:
+                    continue
+                host = (
+                    node.get("mailServerHostName")
+                    or node.get("imapServer")
+                    or node.get("popServer")
+                    or node.get("server")
+                    or node.get("hostname")
+                )
+                protocol = _norm_protocol(
+                    node.get("accountType") or node.get("protocol") or node.get("type")
+                )
+                username = node.get("username")
+                username_text = (
+                    _plausible_email(username) or (str(username).strip() if username else None)
+                )
+                accounts.append(
+                    EmailAccount(
+                        client=client,
+                        email=email,
+                        username=username_text,
+                        protocol=protocol,
+                        incoming_host=str(host).strip() if host else None,
+                    )
+                )
     return accounts
+
+
+def _collect_outlook_cache_files_windows() -> list[EmailAccount]:
+    """Autodiscover XML / files named like user@domain under Microsoft\\Outlook."""
+    accounts: list[EmailAccount] = []
+    for base, client in _outlook_windows_scan_roots():
+        if client != "outlook_classic":
+            continue
+        for path in _iter_outlook_text_files(base):
+            from_name = _plausible_email(path.stem)
+            if from_name:
+                accounts.append(
+                    EmailAccount(
+                        client=client,
+                        email=from_name,
+                        protocol="exchange",
+                    )
+                )
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            for match in _EMAIL_RE.finditer(text):
+                email = _plausible_email(match.group(0))
+                if email:
+                    accounts.append(EmailAccount(client=client, email=email))
+    return accounts
+
+
+def _collect_office_identity_windows() -> list[EmailAccount]:
+    """Signed-in Microsoft 365 / Outlook identity from HKCU Office Identity."""
+    raw = _run_powershell(
+        r"""
+$out = @()
+$versions = Get-ChildItem "HKCU:\Software\Microsoft\Office" -ErrorAction SilentlyContinue |
+  Where-Object { $_.PSChildName -match '^\d+\.\d+$' }
+foreach ($ver in $versions) {
+  $root = Join-Path $ver.PSPath "Common\Identity"
+  $rootProp = Get-ItemProperty $root -ErrorAction SilentlyContinue
+  if ($rootProp -and $rootProp.EmailAddress) {
+    $out += [pscustomobject]@{ Email = [string]$rootProp.EmailAddress; Name = [string]$rootProp.FriendlyName }
+  }
+  Get-ChildItem (Join-Path $root "Identities") -ErrorAction SilentlyContinue | ForEach-Object {
+    $p = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+    if ($p -and $p.EmailAddress) {
+      $out += [pscustomobject]@{ Email = [string]$p.EmailAddress; Name = [string]$p.FriendlyName }
+    }
+  }
+}
+if ($out.Count -eq 0) { "[]" } else { $out | ConvertTo-Json -Compress }
+"""
+    )
+    return _accounts_from_office_identity_json(raw)
 
 
 # ---- Classic Outlook for Windows (best-effort) ----
