@@ -1,8 +1,8 @@
 {
   "version": "0.1.0",
-  "notes": "Host this JSON at a stable HTTPS URL. Set SYSTEM_INFO_UPDATE_URL to that URL.",
+  "notes": "The CI workflow (windows-release.yml) generates a real release-manifest.json for every v* release. Host it as a GitHub Release asset so SYSTEM_INFO_UPDATE_URL (default: .../releases/latest/download/release-manifest.json) auto-updates installed PCs.",
   "windows": {
-    "url": "https://github.com/OWNER/REPO/releases/download/v0.1.0/system-info.exe",
+    "url": "https://github.com/nishad-bdg/pc-system-monitor/releases/download/v0.1.0/system-info.exe",
     "sha256": "REPLACE_WITH_SHA256_OF_EXE"
   }
 }

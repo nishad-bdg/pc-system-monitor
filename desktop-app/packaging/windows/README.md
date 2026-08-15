@@ -25,11 +25,10 @@ git tag v0.2.0 && git push origin v0.2.0   # version taken from the tag
 ```
 
 Point `SYSTEM_INFO_UPDATE_URL` at:
-`https://github.com/<owner>/<repo>/releases/latest/download/release-manifest.json`
+`https://github.com/nishad-bdg/pc-system-monitor/releases/latest/download/release-manifest.json`
 
 The `releases/latest` path redirects to the newest `v*` tag, so one URL auto-updates
-every release. The installer field below is already pre-filled with this URL for this
-repo (`nishad-bdg/pc-system-monitor`).
+every release. The installer field below is already pre-filled with this URL.
 
 **Option B — local Windows machine.**
 
@@ -57,7 +56,7 @@ Wizard asks for:
 | API URL | e.g. `https://your-api.example.com` |
 | API key | `sk-...` from admin `POST /api-keys` |
 | PC name | optional Windows display name |
-| Update manifest URL | optional HTTPS JSON (see below) |
+| Update manifest URL | optional; **pre-filled with this repo's `releases/latest` manifest** so installed PCs auto-update. Clear it to disable auto-update. |
 
 Writes `%APPDATA%\system-info\config.env` and creates tasks **SystemInfoReport** (every hour) and **SystemInfoHeartbeat** (every 5 minutes, `--heartbeat`) so the PC shows as online.
 

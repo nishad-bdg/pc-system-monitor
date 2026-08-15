@@ -5,9 +5,9 @@
 #   - Manual:  Actions -> "Windows Release" -> Run workflow (set version, e.g. 0.2.0)
 #   - Tag push: git tag v0.2.0 && git push origin v0.2.0   (version taken from tag)
 #
-# PCs with SYSTEM_INFO_UPDATE_URL pointing at
-#   https://github.com/<owner>/<repo>/releases/download/v<version>/release-manifest.json
-# will auto-update on their next hourly run.
+# PCs with SYSTEM_INFO_UPDATE_URL pointing at the repo's "latest" manifest
+# https://github.com/nishad-bdg/pc-system-monitor/releases/latest/download/release-manifest.json
+# (the default pre-filled by the installer) will auto-update on their next hourly run.
 name: Windows Release
 
 on:
