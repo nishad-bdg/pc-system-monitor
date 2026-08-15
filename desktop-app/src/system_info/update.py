@@ -163,6 +163,26 @@ del /f /q "%~f0"
     return str(updater)
 
 
+def _watch_relaunch_script(pid: int, current: Path, pending: Path, backup: Path, target_dir: Path) -> str:
+    """Batch that waits for `pid`, swaps the exe, then starts `--watch` (tray)."""
+    return f"""@echo off
+rem Wait for the current watcher (pid {pid}) to exit so the exe is unlocked.
+:wait
+tasklist /FI "PID eq {pid}" 2>nul | findstr "{pid}" >nul
+if not errorlevel 1 (
+  ping 127.0.0.1 -n 2 >nul
+  goto wait
+)
+if exist "{backup}" del /f /q "{backup}"
+if exist "{current}" move /y "{current}" "{backup}"
+move /y "{pending}" "{current}"
+ping 127.0.0.1 -n 2 >nul
+cd /d "{target_dir}"
+start "" "{current}" --watch
+del /f /q "%~f0"
+"""
+
+
 def apply_update_and_restart(manifest: dict) -> str | None:
     """Download a new exe and write a batch that swaps it in AND relaunches
     `--watch` once this (old) process has fully exited.
@@ -182,22 +202,7 @@ def apply_update_and_restart(manifest: dict) -> str | None:
     pid = os.getpid()
     updater = target_dir / "apply-update-restart.cmd"
     backup = target_dir / f"system-info.prev{current.suffix}"
-    script = f"""@echo off
-rem Wait for the current watcher (pid {pid}) to exit so the exe is unlocked.
-:wait
-tasklist /FI "PID eq {pid}" 2>nul | findstr "{pid}" >nul
-if not errorlevel 1 (
-  ping 127.0.0.1 -n 2 >nul
-  goto wait
-)
-if exist "{backup}" del /f /q "{backup}"
-if exist "{current}" move /y "{current}" "{backup}"
-move /y "{pending}" "{current}"
-ping 127.0.0.1 -n 2 >nul
-cd /d "{target_dir}"
-start "" "{current}" --watch
-del /f /q "%~f0"
-"""
+    script = _watch_relaunch_script(pid, current, pending, backup, target_dir)
     try:
         updater.write_text(script, encoding="utf-8")
     except OSError:

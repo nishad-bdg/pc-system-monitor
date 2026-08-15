@@ -107,7 +107,7 @@ def test_handle_update_request(monkeypatch, manifest, staged, expected_fragment)
     loop = WatchLoop(_args())
     message, title = loop.handle_update_request()
 
-    assert expected_fragment in message.lower()
+    assert expected_fragment.lower() in message.lower()
     if not manifest:
         assert "no update" in title
         assert getattr(loop, "_exit_for_update", False) is False

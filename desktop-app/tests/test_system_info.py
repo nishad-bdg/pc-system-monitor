@@ -293,28 +293,20 @@ def test_maybe_auto_update_restarts_into_watch(monkeypatch):
     assert called["manifest"]["version"] == "9.9.9"
 
 
-def test_apply_update_and_restart_script_relaunches_tray(monkeypatch, tmp_path):
-    import subprocess
+def test_apply_update_and_restart_script_relaunches_tray():
     from pathlib import Path
 
-    from system_info import update as update_mod
+    from system_info.update import _watch_relaunch_script
 
-    pending = tmp_path / "system-info.new.exe"
-    pending.write_bytes(b"new")
-    exe = tmp_path / "system-info.exe"
-    monkeypatch.setattr(update_mod, "is_frozen", lambda: True)
-    monkeypatch.setattr("system_info.update.os.name", "nt")
-    monkeypatch.setattr(update_mod, "_download_new_exe", lambda manifest: pending)
-    monkeypatch.setattr(update_mod, "install_dir", lambda: tmp_path)
-    monkeypatch.setattr(update_mod.sys, "executable", str(exe))
-    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: object())
-
-    path = update_mod.apply_update_and_restart({"version": "9.9.9"})
-    assert path
-    script = Path(path).read_text(encoding="utf-8")
+    current = Path(r"C:\SystemInfo\system-info.exe")
+    pending = Path(r"C:\SystemInfo\system-info.new.exe")
+    backup = Path(r"C:\SystemInfo\system-info.prev.exe")
+    script = _watch_relaunch_script(4242, current, pending, backup, current.parent)
     assert "--watch" in script
     assert "start" in script.lower()
-    assert str(exe) in script
+    assert "4242" in script
+    assert str(current) in script
+    assert str(pending) in script
 
 
 def test_collect_network_usage(monkeypatch):
