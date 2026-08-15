@@ -1,10 +1,14 @@
+import json
 import plistlib
 from pathlib import Path
 
 from system_info.email_accounts import (
     _collect_apple_mail,
+    _collect_outlook_classic_windows,
     _collect_outlook_mac,
+    _collect_outlook_new_windows,
     _collect_thunderbird,
+    _outlook_mac_mode_to_protocol,
     _parse_prefs_js,
     collect_email_accounts,
 )
@@ -140,3 +144,86 @@ def test_collect_email_accounts_no_config(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     info = collect_email_accounts()
     assert info.count == 0
+
+
+def test_outlook_mac_mode_to_protocol():
+    assert _outlook_mac_mode_to_protocol("ActiveSyncExchange") == "exchange"
+    assert _outlook_mac_mode_to_protocol("O365") == "exchange"
+    assert _outlook_mac_mode_to_protocol("Imap") == "imap"
+    assert _outlook_mac_mode_to_protocol("Pop") == "pop3"
+    assert _outlook_mac_mode_to_protocol("Exchange") == "exchange"
+    assert _outlook_mac_mode_to_protocol("Omc_Direct") == "exchange"
+
+
+def test_collect_outlook_mac_profiles(tmp_path, monkeypatch):
+    """Modern Outlook for Mac: account list lives in ProfilePreferences.plist
+    as SortedAccounts entries like 'email_ActiveSyncExchange_HxS'."""
+    prefs = (
+        tmp_path
+        / "Library"
+        / "Group Containers"
+        / "UBF8T346G9.Office"
+        / "Outlook"
+        / "Outlook 15 Profiles"
+        / "Main Profile"
+    )
+    prefs.mkdir(parents=True)
+    (prefs / "ProfilePreferences.plist").write_bytes(
+        plistlib.dumps(
+            {
+                "SortedAccounts": [
+                    "developer.eight@neutrix.co_ActiveSyncExchange_HxS",
+                    "personal@example.com_Imap_HxS",
+                ],
+                "OutlookGatewayURLFordeveloper.eight@neutrix.co_ActiveSyncExchange_HxS": (
+                    "https://outlook.office365.com"
+                ),
+            }
+        )
+    )
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    accounts = _collect_outlook_mac()
+    assert len(accounts) == 2
+    ex = next(a for a in accounts if a.email == "developer.eight@neutrix.co")
+    assert ex.client == "outlook_mac"
+    assert ex.protocol == "exchange"
+    assert ex.incoming_host == "outlook.office365.com"
+    imap = next(a for a in accounts if a.email == "personal@example.com")
+    assert imap.protocol == "imap"
+    assert imap.incoming_host is None
+
+
+def test_collect_outlook_new_windows(tmp_path, monkeypatch):
+    """New Outlook for Windows: account JSON under the packaged app LocalState."""
+    local = tmp_path / "LOCALAPPDATA" / "Packages" / "Microsoft.OutlookForWindows_8wekyb3d8bbwe" / "LocalState"
+    (local / "Accounts").mkdir(parents=True)
+    (local / "Accounts" / "account1.json").write_text(
+        json.dumps(
+            {"emailAddress": "carol@winoutlook.com", "username": "carol", "protocol": "IMAP"}
+        )
+    )
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "LOCALAPPDATA"))
+    accounts = _collect_outlook_new_windows()
+    assert len(accounts) == 1
+    acc = accounts[0]
+    assert acc.email == "carol@winoutlook.com"
+    assert acc.username == "carol"
+    assert acc.protocol == "imap"
+    assert acc.client == "outlook_new"
+
+
+def test_collect_outlook_classic_windows(tmp_path, monkeypatch):
+    """Classic Outlook for Windows: email addrs in outlook.xml (no registry needed)."""
+    appdata = tmp_path / "APPDATA" / "Microsoft" / "Outlook"
+    appdata.mkdir(parents=True)
+    (appdata / "outlook.xml").write_text(
+        "<xml><account><email>dave@classic.com</email>"
+        "<sendhost>smtp.classic.com</sendhost></account><account>"
+        "<email>erin@corp.com</email><sendhost>smtp.corp.com</sendhost></account></xml>"
+    )
+    monkeypatch.setenv("APPDATA", str(tmp_path / "APPDATA"))
+    accounts = _collect_outlook_classic_windows()
+    assert len(accounts) == 2
+    emails = {a.email for a in accounts}
+    assert emails == {"dave@classic.com", "erin@corp.com"}
+    assert all(a.client == "outlook_classic" for a in accounts)

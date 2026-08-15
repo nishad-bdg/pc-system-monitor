@@ -176,7 +176,7 @@ Detects POP/IMAP accounts configured in mail clients (address + server config on
 
 - **Apple Mail (macOS):** `~/Library/Preferences/com.apple.mail.plist` (`MailAccounts` + `DeliveryAccounts` for SMTP).
 - **Thunderbird (mac + Win):** `prefs.js` in each profile (`mail.account.*`, `mail.server.*.type|hostname|port|socketType`, `mail.identity.*.email`, SMTP via `mail.smtpserver.*`). `socketType`/`try_ssl` map to `none|starttls|ssl`.
-- **Outlook for Mac:** account plists under `~/Library/Group Containers/UBF8T346G9.Office/Outlook/*/Accounts/`.
+- **Outlook for Mac:** account plists under `~/Library/Group Containers/UBF8T346G9.Office/Outlook/*/Accounts/` (legacy) **or** modern Outlook/Office-365 `ProfilePreferences.plist` `SortedAccounts` entries (`<email>_ActiveSyncExchange_HxS` / `_Imap_HxS` / `_Pop_HxS`) — emails + protocol + gateway host extracted.
 - **New Outlook (Win):** account JSON under `%LOCALAPPDATA%\Packages\Microsoft.OutlookForWindows_8wekyb3d8bbwe\LocalState`.
 - **Classic Outlook (Win, best-effort):** `%APPDATA%\Microsoft\Outlook\outlook.xml` + registry profile blob string scan.
 

@@ -3,7 +3,9 @@
 Supported clients:
   - Apple Mail (macOS)          via ~/Library/Preferences/com.apple.mail.plist
   - Thunderbird (macOS/Win)     via prefs.js in each Thunderbird profile
-  - Outlook for Mac             via account plists in the Office group container
+  - Outlook for Mac             via account plists, plus modern Outlook
+    (Office 365) via ProfilePreferences.plist SortedAccounts entries like
+    '<email>_ActiveSyncExchange_HxS' (extracts the email + mode/server)
   - New Outlook for Windows     via account JSON under the packaged app state
   - Classic Outlook (Windows)   best-effort: outlook.xml + registry string scan
 
@@ -18,6 +20,7 @@ import json
 import os
 import plistlib
 import re
+import sqlite3
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -244,7 +247,40 @@ def _collect_thunderbird() -> list[EmailAccount]:
 
 # ---- Outlook for Mac ----
 
-def _collect_outlook_mac() -> list[EmailAccount]:
+_YAHOO = ("aol", "yahoo")
+# Outlook for Mac account identifiers look like:
+#   developer.eight@neutrix.co_ActiveSyncExchange_HxS
+#   user@example.com_O365_HxS
+#   user@example.com_Imap_HxS
+_ACCOUNT_ID_RE = re.compile(
+    r"^(?P<email>[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})"
+    r"_(?P<mode>[^_]+)(?:_HxS)?$"
+)
+
+
+def _outlook_mac_mode_to_protocol(mode: str) -> str | None:
+    text = (str(mode or "")).lower()
+    if "exchange" in text or "activesync" in text:
+        return "exchange"
+    if "imap" in text:
+        return "imap"
+    if "pop" in text:
+        return "pop3"
+    if text in ("oc", "o365", "omc_direct", "direct"):
+        return "exchange"
+    return None
+
+
+def _collect_outlook_mac_profiles() -> list[EmailAccount]:
+    """Modern Outlook for Mac: read SortedAccounts from ProfilePreferences.plist.
+
+    Outlook 15+/Microsoft-365 keeps the account list in
+    .../Outlook 15 Profiles/<Profile>/ProfilePreferences.plist under the
+    SortedAccounts key. Each entry is '<email>_<AccountType>_HxS' (e.g.
+    'a@b.com_ActiveSyncExchange_HxS'), so the email address is extracted
+    directly and the server (e.g. outlook.office365.com) usually appears in a
+    matching 'OutlookGatewayURLFor<email>' / '<int>GatewayURLFor...' key.
+    """
     base = (
         Path.home()
         / "Library"
@@ -255,8 +291,64 @@ def _collect_outlook_mac() -> list[EmailAccount]:
     if not base.is_dir():
         return []
     accounts: list[EmailAccount] = []
+    for prefs_path in base.rglob("ProfilePreferences.plist"):
+        try:
+            with open(prefs_path, "rb") as fh:
+                prefs = plistlib.load(fh)
+        except (OSError, plistlib.InvalidFileException):
+            continue
+        sorted_accounts = prefs.get("SortedAccounts") or []
+        gateways: dict[str, str] = {}
+        for key, value in prefs.items():
+            if not isinstance(value, str):
+                continue
+            if "GatewayURLFor" not in key:
+                continue
+            # key like OutlookGatewayURLFor<email>_ActiveSyncExchange_HxS
+            rest = key.split("GatewayURLFor", 1)[1]
+            match = _ACCOUNT_ID_RE.match(rest)
+            if match:
+                gateways[match.group("email").lower()] = value
+
+        for entry in sorted_accounts:
+            entry = str(entry or "")
+            match = _ACCOUNT_ID_RE.match(entry)
+            if not match:
+                continue
+            email = match.group("email")
+            protocol = _outlook_mac_mode_to_protocol(match.group("mode"))
+            host = None
+            gateway = gateways.get(email.lower())
+            if gateway:
+                host = gateway.split("://", 1)[-1].split("/", 1)[0]
+            accounts.append(
+                EmailAccount(
+                    client="outlook_mac",
+                    email=email,
+                    protocol=protocol,
+                    incoming_host=host or None,
+                    outgoing_host=host or None,
+                )
+            )
+    return accounts
+
+
+def _collect_outlook_mac() -> list[EmailAccount]:
+    base = (
+        Path.home()
+        / "Library"
+        / "Group Containers"
+        / "UBF8T346G9.Office"
+        / "Outlook"
+    )
+    if not base.is_dir():
+        return _collect_outlook_mac_profiles()
+    accounts: list[EmailAccount] = []
+    # Legacy (Outlook 2016 era): account plists under .../Accounts/
     for plist_path in base.rglob("*.plist"):
         if "Accounts" not in str(plist_path.parent):
+            if plist_path.name == "ProfilePreferences.plist":
+                continue
             continue
         try:
             with open(plist_path, "rb") as fh:
@@ -280,6 +372,7 @@ def _collect_outlook_mac() -> list[EmailAccount]:
                 outgoing_host=data.get("SMTPHost") or data.get("InternalSMTPHost"),
             )
         )
+    accounts.extend(_collect_outlook_mac_profiles())
     return accounts
 
 
