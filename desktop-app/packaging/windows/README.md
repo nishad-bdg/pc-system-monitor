@@ -57,20 +57,20 @@ Wizard asks for:
 | PC name | optional Windows display name |
 | Update manifest URL | optional; **pre-filled with this repo's `releases/latest` manifest** so installed PCs auto-update. Clear it to disable auto-update. |
 
-Writes `%APPDATA%\system-info\config.env`, creates the **SystemInfoWatch** task
-(runs `--watch` at every **logon**), and launches `--watch` right after install
-so the PC shows as online immediately. `--watch` is an **always-on** background
-agent (messenger-style): while it is open it stays in the system tray with an
-**Exit** item, keeps the PC "online" (heartbeat ~5 min), flushes new print jobs,
-and sends a **full report hourly**. Closing it (tray → Exit) stops it — it does
-**not** exit on its own after sending data.
+Writes `%APPDATA%\system-info\config.env` and launches `--watch` right after
+install so the PC shows as online immediately. `--watch` is an **always-on**
+background agent (messenger-style): while it is open it stays in the system tray
+with an **Exit** item, keeps the PC "online" (heartbeat ~5 min), flushes new
+print jobs, and sends a **full report hourly**. Closing it (tray → Exit) stops
+it — it does **not** exit on its own after sending data.
 
-After install, on the **first run** the app also adds itself to the current
-user's **Startup** (HKCU `...\CurrentVersion\Run` → `SystemInfoReporter` →
-`system-info.exe --watch`) so the watcher restarts at every logon even without
-the scheduled task. A marker file (`%APPDATA%\system-info\startup-registered`)
-ensures this happens only once. Set `SYSTEM_INFO_NO_STARTUP=1` to skip
-self-registration (portable use).
+After install, on the **first run** the app adds itself to the current user's
+**Startup** (HKCU `...\CurrentVersion\Run` → `SystemInfoReporter` →
+`system-info.exe --watch`) so the watcher restarts at every logon. This needs
+**no admin rights** (no scheduled task, no elevation), so the install never
+fails with a `schtasks` error. A marker file
+(`%APPDATA%\system-info\startup-registered`) ensures this happens only once. Set
+`SYSTEM_INFO_NO_STARTUP=1` to skip self-registration (portable use).
 
 ## 4. Release updates (not git)
 
@@ -105,7 +105,7 @@ system-info.exe --auto-update
 
 ## Uninstall
 
-Add/Remove Programs removes files and deletes the **SystemInfoWatch** scheduled
-task (plus legacy **SystemInfoReport**/**SystemInfoHeartbeat**), the
-**SystemInfoReporter** Run key, and the `startup-registered` marker — so the
-watcher no longer runs after uninstall.
+Add/Remove Programs removes the app files, the **SystemInfoReporter** Run key,
+the `startup-registered` marker, and any legacy scheduled tasks
+(**SystemInfoWatch**/**SystemInfoReport**/**SystemInfoHeartbeat**) left over
+from older versions — so the watcher no longer runs after uninstall.

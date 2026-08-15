@@ -8,8 +8,9 @@
 ;   - Copies system-info.exe
 ;   - Asks for API URL, API key, optional PC name + update manifest URL
 ;   - Writes %APPDATA%\system-info\config.env
-;   - Creates Task Scheduler job SystemInfoWatch (runs --watch at every logon)
-;   - Launches --watch immediately so the PC is online right away
+;   - Launches --watch immediately so the PC is online right away; on that first
+;     run the app self-registers an HKCU Run entry so --watch starts at logon
+;     with no admin rights (no scheduled task, no elevation needed)
 
 #define MyAppName "System Info Reporter"
 #ifndef MyAppVersion
@@ -106,37 +107,14 @@ begin
   SaveStringToFile(Path, Content, False);
 end;
 
-procedure CreateWatchTask;
-var
-  ResultCode: Integer;
-  ExePath, WatchArgs: string;
-begin
-  ExePath := ExpandConstant('{app}\{#MyAppExeName}');
-  WatchArgs :=
-    '/Create /F /TN "SystemInfoWatch" /SC ONLOGON /IT ' +
-    '/TR "\"' + ExePath + '\" --watch" ' +
-    '/RL LIMITED';
-  Exec('schtasks.exe', WatchArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  if ResultCode <> 0 then
-  begin
-    MsgBox(
-      'Could not create the watch task (SystemInfoWatch).' + #13#10 +
-      'schtasks exit code: ' + IntToStr(ResultCode) + #13#10 +
-      'Run manually: ' + #13#10 +
-      'schtasks /Create /F /TN SystemInfoWatch /SC ONLOGON /IT ' +
-      '/TR "\"' + ExePath + '\" --watch"',
-      mbError, MB_OK);
-  end;
-end;
-
 procedure LaunchWatcher;
 var
   ExePath: string;
   PID: Integer;
 begin
   { Start the always-on watcher right after install (non-blocking, silent).
-    Its first run also self-registers the HKCU Run entry so --watch starts at
-    every logon even without the scheduled task. }
+    Its first run self-registers the HKCU Run entry so --watch starts at every
+    logon with no admin rights (no scheduled task / no elevation needed). }
   ExePath := ExpandConstant('{app}\{#MyAppExeName}');
   Exec(ExePath, '--watch', ExpandConstant('{app}'), SW_HIDE, ewNoWait, PID);
 end;
@@ -146,7 +124,6 @@ begin
   if CurStep = ssPostInstall then
   begin
     WriteConfigFile;
-    CreateWatchTask;
     LaunchWatcher;
   end;
 end;
@@ -157,6 +134,8 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
+    { Legacy cleanup: delete any scheduled tasks from older installs. New
+      installs no longer create them (startup is the HKCU Run key, admin-free). }
     Exec('schtasks.exe', '/Delete /F /TN "SystemInfoWatch"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec('schtasks.exe', '/Delete /F /TN "SystemInfoReport"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec('schtasks.exe', '/Delete /F /TN "SystemInfoHeartbeat"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);

@@ -307,9 +307,10 @@ Dashboard **Refresh** only reloads API data. It does **not** push collect comman
 See `desktop-app/packaging/windows/README.md`.
 
 - **Installer (Inno Setup):** installs exe under `%LOCALAPPDATA%\SystemInfo`, writes
-  `%APPDATA%\system-info\config.env` (API URL/key/PC name/update URL), creates a
-  **SystemInfoWatch** Task Scheduler job (runs `--watch` at every logon), and
+  `%APPDATA%\system-info\config.env` (API URL/key/PC name/update URL), and
   launches `--watch` right after install so the PC is online immediately.
+  No scheduled task is created — startup is handled by the admin-free HKCU Run
+  key (below) to avoid elevation/`schtasks` failures during install.
 - **Always-on watcher (`--watch`, messenger-style):** a single persistent
   background process (system-tray icon with **Check for updates…** and **Exit**)
   that keeps the PC "online" (heartbeat ~ every 5 min), flushes new print jobs,
@@ -322,10 +323,10 @@ See `desktop-app/packaging/windows/README.md`.
   (one-shot `--heartbeat` still works for manual/portable use).
 - **Auto-start on logon:** on the **first run** after install the app registers a
   `SystemInfoReporter` value under HKCU `...\CurrentVersion\Run` pointing to
-  `system-info.exe --watch`, so the watcher restarts at login even without the
-  scheduled task. Idempotent via the `startup-registered` marker file in
+  `system-info.exe --watch`, so the watcher restarts at login with no admin
+  rights. Idempotent via the `startup-registered` marker file in
   `%APPDATA%\system-info`; set `SYSTEM_INFO_NO_STARTUP=1` to skip. Uninstall
-  removes the Run value + marker + scheduled task.
+  removes the Run value + marker (plus legacy scheduled tasks).
 - **Updates:** host a JSON release manifest (`SYSTEM_INFO_UPDATE_URL`); app checks
   on each run and stages a new exe (not live `git pull`).
 
