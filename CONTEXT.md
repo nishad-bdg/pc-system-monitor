@@ -144,7 +144,7 @@ Detects installed internet-security products:
 
 `{ cycle_count, condition, max_capacity_percent, health_percent }`
 
-- Windows: `root/WMI` BatteryFullChargedCapacity / BatteryStaticData / BatteryCycleCount.
+- Windows: `root/WMI` BatteryFullChargedCapacity / BatteryStaticData / BatteryCycleCount (with `Win32_Battery.DesignCapacity` fallback when the WMI static-data class is missing; ACPI sentinel `4294967295` is treated as unknown).
 - macOS: `SPPowerDataType` (`sppower_battery_cycle_count`, `sppower_battery_health`, `sppower_battery_health_maximum_capacity` like `"82%"`).
 
 ### Printers
@@ -154,7 +154,9 @@ Grouped as **usb / network / other**.
 Each printer: `{ name, port, ip, print_count }`.
 
 - **ip:** extracted from network port/URI when IPv4 present; else `null`.
-- **print_count:** best-effort (macOS IPP/`ipptool`; Windows `Get-PrinterProperty`); else `null`.
+- **print_count:** best-effort (macOS IPP/`ipptool` — test file written to a
+  temp file because `ipptool` rejects stdin `-`; Windows `Get-PrinterProperty`);
+  else `null`.
 - macOS: CUPS `lpstat -v`; Windows: PowerShell `Get-Printer`.
 
 ### Network bandwidth
@@ -225,7 +227,7 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
 - **`GET/POST /reports`** — every saved report is annotated with `online` + `last_seen` and broadcasts a `report.created` event (full report incl. `printers`) over the WebSocket so the dashboard updates in realtime (print counts included).
 - **`WebSocket /ws`** (`routes/realtime.py`) — the dashboard connects with its JWT passed as the WS **subprotocol** (or `?token=`); only `admin`/`super_admin` roles are allowed; `Origin` must match `CORS_ORIGINS`. On connect the server sends `{"type":"hello"}` then seeds `{"type":"presence.changed","presence":{device_id,online,last_seen,pc_name}}` for every known machine (in-process snapshot). Events: `{"type":"report.created","report":{...},"ts":...}`, `{"type":"presence.changed","presence":{...},"ts":...}`, and `{"type":"print.job","job":{...},"ts":...}`.
 - **Live presence (Messenger-style):** `POST /heartbeat` and `POST /reports` (when `device_id` present) call `realtime.broadcast_presence(device_id, online=True, last_seen, pc_name)` so an open dashboard flips that PC's dot green instantly. The `broadcast_presence`/`update_presence` pair dedupes same-state flips. `realtime.py` keeps an in-process `_presence` map (`device_id -> {online,last_seen,pc_name}`); `presence_snapshot()` seeds newly-connected clients (notably **no initial fetch from Mongo** — the machine's known presence only reaches a fresh dashboard after a heartbeat/report from it, so a PC idle for >`ONLINE_TIMEOUT_SECONDS` starts grey until seen). The `presence.changed` payload goes out via the shared `_send` helper (never through `broadcast()`, which is `report.created`-only).
-- Dashboard `RealtimeProvider` (`src/components/realtime-provider.tsx`) holds one socket, reconnects with capped backoff, and invalidates `reports`/`reports-browse`/`report-pc` queries on each event — no manual Refresh needed. It keeps a live presence map and **client-side flips a dot to offline after `ONLINE_TIMEOUT_SECONDS` (300s)** of silence via per-device timers, so a machine that stops heartbeating goes red even without a server event (Messenger-style). `isOnline(deviceId)` and `lastSeenFor(deviceId, fallback)` feed the Fleet/Reports sidebar rows, report detail, and `machine-detail` identity bar. On `print.job` it invalidates `print-jobs`/`print-summary` so the Print Activity page updates live.
+- Dashboard `RealtimeProvider` (`src/components/realtime-provider.tsx`) holds one socket, reconnects with capped backoff, and invalidates `reports`/`reports-browse`/`report-pc` queries on each event — no manual Refresh needed. It keeps a live presence map and **client-side flips a dot to offline after `ONLINE_TIMEOUT_SECONDS` (300s)** of silence via per-device timers, so a machine that stops heartbeating goes red even without a server event (Messenger-style). `isOnline(deviceId)` and `lastSeenFor(deviceId, fallback)` feed the Fleet/Reports sidebar rows, report detail, and `machine-detail` identity bar. On `print.job` it invalidates `print-jobs`/`print-summary` so the Print Activity page updates live, and it bumps a per-device **`printing` badge** (60s window, `isPrinting(deviceId)`/`printingCount(deviceId)`) shown as an amber "printing"/"N prints" pill over the PC card in the Fleet + Reports sidebars (`printing-badge.tsx`).
 - Broadcasting is in-process (best-effort per uvicorn worker); the dashboard also refetches on reconnect so nothing is permanently lost.
 
 ### Print Activity (`/print-jobs`)

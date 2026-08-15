@@ -27,7 +27,16 @@ export type RealtimeEvent = {
   type: string;
   report?: import("@/lib/api").Report;
   presence?: PresenceEntry;
+  job?: {
+    device_id?: string;
+    pc_name?: string | null;
+  };
   ts?: number;
+};
+
+type PrintingEntry = {
+  count: number;
+  lastPrintAt: number;
 };
 
 type RealtimeContextValue = {
@@ -39,6 +48,10 @@ type RealtimeContextValue = {
   isOnline: (deviceId?: string | null) => boolean | null;
   /** Live last-seen for a device, or the fallback when unknown. */
   lastSeenFor: (deviceId?: string | null, fallback?: number) => number | undefined;
+  /** Whether a device just printed (live `print.job` push within the window). */
+  isPrinting: (deviceId?: string | null) => boolean;
+  /** Live count of recent `print.job` events for a device. */
+  printingCount: (deviceId?: string | null) => number;
   /** Force-refetch every active query (Refresh button). */
   refreshAll: () => void;
 };
@@ -49,6 +62,8 @@ const RealtimeContext = createContext<RealtimeContextValue>({
   presence: {},
   isOnline: () => null,
   lastSeenFor: (): number | undefined => undefined,
+  isPrinting: () => false,
+  printingCount: () => 0,
   refreshAll: () => {},
 });
 
@@ -66,10 +81,15 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
   const [connected, setConnected] = useState(false);
   const [presence, setPresence] = useState<Record<string, PresenceEntry>>({});
+  const [printing, setPrinting] = useState<Record<string, PrintingEntry>>({});
   const wsRef = useRef<WebSocket | null>(null);
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const printTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const wsUrl = buildWsUrl(API_URL);
+
+  /** How long a "printing" badge stays lit after the last `print.job`. */
+  const PRINT_BADGE_WINDOW_MS = 60_000;
 
   const setEntry = useCallback(
     (entry: PresenceEntry) => {
@@ -98,6 +118,33 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  const registerPrint = useCallback(
+    (deviceId?: string | null) => {
+      if (!deviceId) return;
+      const key = deviceId;
+      setPrinting((prev) => {
+        const cur = prev[key] ?? { count: 0, lastPrintAt: 0 };
+        return { ...prev, [key]: { count: cur.count + 1, lastPrintAt: Date.now() } };
+      });
+      const existing = printTimersRef.current[key];
+      if (existing) clearTimeout(existing);
+      printTimersRef.current[key] = setTimeout(() => {
+        setPrinting((prev) => {
+          const cur = prev[key];
+          if (!cur) return prev;
+          if (Date.now() - cur.lastPrintAt >= PRINT_BADGE_WINDOW_MS) {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          }
+          return prev;
+        });
+        delete printTimersRef.current[key];
+      }, PRINT_BADGE_WINDOW_MS + 1000);
+    },
+    [],
+  );
+
   const onEvent = useCallback(
     (event: RealtimeEvent) => {
       if (event.type === "presence.changed" && event.presence) {
@@ -109,11 +156,12 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         queryClient.invalidateQueries({ queryKey: ["report-pc"] });
       }
       if (event.type === "print.job") {
+        registerPrint(event.job?.device_id);
         queryClient.invalidateQueries({ queryKey: ["print-jobs"] });
         queryClient.invalidateQueries({ queryKey: ["print-summary"] });
       }
     },
-    [queryClient, setEntry],
+    [queryClient, setEntry, registerPrint],
   );
 
   /** Refresh button: fetch every active query (reports, groups, sub-cats,
@@ -169,6 +217,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     return () => {
       for (const t of Object.values(timersRef.current)) clearTimeout(t);
+      for (const t of Object.values(printTimersRef.current)) clearTimeout(t);
     };
   }, []);
 
@@ -191,9 +240,39 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     [presence],
   );
 
+  const isPrinting = useCallback(
+    (deviceId?: string | null): boolean => {
+      if (!deviceId) return false;
+      const entry = printing[deviceId];
+      if (!entry) return false;
+      return Date.now() - entry.lastPrintAt < PRINT_BADGE_WINDOW_MS;
+    },
+    [printing],
+  );
+
+  const printingCount = useCallback(
+    (deviceId?: string | null): number => {
+      if (!deviceId) return 0;
+      const entry = printing[deviceId];
+      return entry && Date.now() - entry.lastPrintAt < PRINT_BADGE_WINDOW_MS
+        ? entry.count
+        : 0;
+    },
+    [printing],
+  );
+
   return (
     <RealtimeContext.Provider
-      value={{ connected, wsUrl, presence, isOnline, lastSeenFor, refreshAll }}
+      value={{
+        connected,
+        wsUrl,
+        presence,
+        isOnline,
+        lastSeenFor,
+        isPrinting,
+        printingCount,
+        refreshAll,
+      }}
     >
       {children}
     </RealtimeContext.Provider>

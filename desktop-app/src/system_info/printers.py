@@ -10,7 +10,9 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 from urllib.parse import quote
 
 
@@ -137,10 +139,15 @@ def _macos_print_count(name: str) -> int | None:
         "  DISPLAY pages-completed\n"
         "}\n"
     )
+    # ipptool requires a real file path (it does not accept "-" for stdin).
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".ipp", delete=False, encoding="utf-8"
+    ) as fh:
+        fh.write(test)
+        test_path = Path(fh.name)
     try:
         result = subprocess.run(
-            ["ipptool", "-t", uri, "-"],
-            input=test,
+            ["ipptool", "-t", uri, str(test_path)],
             capture_output=True,
             text=True,
             timeout=6.0,
@@ -148,6 +155,11 @@ def _macos_print_count(name: str) -> int | None:
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
+    finally:
+        try:
+            test_path.unlink()
+        except OSError:
+            pass
     text = (result.stdout or "") + "\n" + (result.stderr or "")
     for attr in (
         "printer-impressions-completed",
@@ -155,7 +167,14 @@ def _macos_print_count(name: str) -> int | None:
         "printer-pages-printed",
         "pages-completed",
     ):
-        match = re.search(rf"{re.escape(attr)}\s*[:=]\s*(\d+)", text, re.I)
+        # ipptool report lines look like:
+        #   printer-impressions-completed (integer) = 4821
+        #   printer-pages-printed (integer) = "12"
+        match = re.search(
+            rf"{re.escape(attr)}\s*\(?[^:=()]*\)?\s*[:=]\s*[\"']?(\d+)[\"']?",
+            text,
+            re.I,
+        )
         if match:
             return _parse_int(match.group(1))
     return None

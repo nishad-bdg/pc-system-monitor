@@ -24,6 +24,7 @@ import {
 import { DashboardShell } from "@/components/dashboard/shell";
 import { MachineDetail } from "@/components/dashboard/machine-detail";
 import { StatusDot } from "@/components/dashboard/status-dot";
+import { PrintingBadge } from "@/components/dashboard/printing-badge";
 import { useRealtime } from "@/components/realtime-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -75,7 +76,8 @@ const defaultApplied: AppliedFilters = {
 export function ReportsBrowser() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
-  const { connected, isOnline, lastSeenFor, refreshAll } = useRealtime();
+  const { connected, isOnline, lastSeenFor, isPrinting, printingCount, refreshAll } =
+    useRealtime();
 
   const [pcName, setPcName] = useState("");
   const [country, setCountry] = useState("");
@@ -441,18 +443,25 @@ export function ReportsBrowser() {
               const disk = maxDiskPercent(r);
               const net = networkTotalBytes(r);
               const online = isOnline(m.deviceId) ?? r.online;
+              const printing = isPrinting(m.deviceId);
+              const printCount = printingCount(m.deviceId);
               const lastSeen = lastSeenFor(m.deviceId, r.created_at);
               return (
                 <li key={m.key}>
                   <button
                     type="button"
                     onClick={() => setSelectedKey(m.key)}
-                    className={`w-full rounded-lg px-3 py-2.5 text-left transition ${
+                    className={`relative w-full rounded-lg px-3 py-2.5 text-left transition ${
                       active
                         ? "bg-blue-600 text-white shadow-sm shadow-blue-900/40"
                         : "text-slate-200 hover:bg-slate-900"
                     }`}
                   >
+                    {printing && (
+                      <span className="absolute right-2 top-1.5">
+                        <PrintingBadge count={printCount} />
+                      </span>
+                    )}
                     <div className="flex items-start justify-between gap-2">
                       <span className="flex items-center gap-1.5 truncate text-sm font-medium">
                         <StatusDot online={online} />

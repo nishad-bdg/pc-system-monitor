@@ -296,6 +296,38 @@ def test_uptime_same_boot_credits_gap(tmp_path):
     assert info.by_day["2026-08-12"] == 7200.0
 
 
+def test_macos_print_count_parses_ipp_report(monkeypatch):
+    """ipptool needs a real temp file (stdin '-' is rejected) and the count
+    is parsed from the PASS/attribute report."""
+    from system_info import printers
+    import subprocess as _sp
+
+    captured: dict = {}
+
+    def fake_run(cmd, capture_output, text, timeout, check):
+        captured["cmd"] = cmd
+        assert "/tmp/" in cmd[-1] or ".ipp" in cmd[-1], f"no temp file: {cmd}"
+        assert cmd[0] == "ipptool"
+        assert cmd[1] == "-t"
+        assert not cmd[-1].startswith("ipp://"), "URI must come before file path"
+        return _sp.CompletedProcess(cmd, 0, stdout="printer-impressions-completed (integer) = 4821\n", stderr="")
+
+    monkeypatch.setattr(printers.subprocess, "run", fake_run)
+    result = printers._macos_print_count("Office_Laser")
+    assert result == 4821
+
+
+def test_macos_print_count_no_match_returns_none(monkeypatch):
+    from system_info import printers
+    import subprocess as _sp
+
+    def fake_run(cmd, capture_output, text, timeout, check):
+        return _sp.CompletedProcess(cmd, 0, stdout="something else\n", stderr="")
+
+    monkeypatch.setattr(printers.subprocess, "run", fake_run)
+    assert printers._macos_print_count("Office_Laser") is None
+
+
 def test_collect_printers_macos(monkeypatch):
     from system_info import printers
 
@@ -634,3 +666,72 @@ def test_health_media_type():
     assert _derive_health("Verified") == "ok"
     assert _derive_health("Failing") == "fail"
     assert _derive_health("Not Supported") == "unknown"
+
+
+def test_health_windows_battery_health_percent(monkeypatch):
+    from system_info.health import _collect_windows_battery
+
+    payload = {
+        "FullChargedCapacity": 5100,
+        "DesignedCapacity": 6500,
+        "CycleCount": 124,
+    }
+    monkeypatch.setattr(
+        "system_info.health._run",
+        lambda cmd, timeout=15.0: __import__("json").dumps(payload),
+    )
+    batt = _collect_windows_battery()
+    assert batt is not None
+    assert batt.health_percent == 78
+    assert batt.max_capacity_percent == 78
+    assert batt.cycle_count == 124
+    assert batt.condition == "Warning"
+
+
+def test_health_windows_battery_sentinel_values(monkeypatch):
+    """ACPI returns (uint32)-1 (4294967295) when capacity is unknown; it must be
+    treated as missing rather than producing a bogus health %."""
+    from system_info.health import _collect_windows_battery
+
+    payload = {
+        "FullChargedCapacity": 4294967295,
+        "DesignedCapacity": 4294967295,
+        "CycleCount": 4294967295,
+    }
+    monkeypatch.setattr(
+        "system_info.health._run",
+        lambda cmd, timeout=15.0: __import__("json").dumps(payload),
+    )
+    batt = _collect_windows_battery()
+    assert batt is None
+
+
+def test_health_windows_battery_no_battery_returns_none(monkeypatch):
+    from system_info.health import _collect_windows_battery
+
+    monkeypatch.setattr(
+        "system_info.health._run",
+        lambda cmd, timeout=15.0: __import__("json").dumps(
+            {"FullChargedCapacity": None, "DesignedCapacity": None, "CycleCount": None}
+        ),
+    )
+    assert _collect_windows_battery() is None
+
+
+def test_health_windows_battery_cycle_only(monkeypatch):
+    """Even without capacities, a present cycle count yields a battery doc."""
+    from system_info.health import _collect_windows_battery
+
+    payload = {
+        "FullChargedCapacity": None,
+        "DesignedCapacity": None,
+        "CycleCount": 88,
+    }
+    monkeypatch.setattr(
+        "system_info.health._run",
+        lambda cmd, timeout=15.0: __import__("json").dumps(payload),
+    )
+    batt = _collect_windows_battery()
+    assert batt is not None
+    assert batt.cycle_count == 88
+    assert batt.health_percent is None

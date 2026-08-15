@@ -197,18 +197,45 @@ def _collect_windows_disks() -> list[DiskHealth]:
     return disks
 
 
+# Sentinel used by Windows when ACPI doesn't populate a capacity value.
+_WINDOWS_ACPI_UNSUPPORTED = 4294967295  # (uint32)-1
+
+
+def _sanitize_windows_capacity(value: object) -> int | None:
+    """Return a sane positive capacity or None (0 / sentinel = unsupported)."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    if number is None or number <= 0 or number >= _WINDOWS_ACPI_UNSUPPORTED:
+        return None
+    return number
+
+
 def _collect_windows_battery() -> BatteryHealth | None:
     script = (
         "$cap = Get-CimInstance -Namespace root/WMI -ClassName "
-        "BatteryFullChargedCapacity -ErrorAction SilentlyContinue; "
+        "BatteryFullChargedCapacity -ErrorAction SilentlyContinue | "
+        "Select-Object -First 1; "
         "$stat = Get-CimInstance -Namespace root/WMI -ClassName "
-        "BatteryStaticData -ErrorAction SilentlyContinue; "
+        "BatteryStaticData -ErrorAction SilentlyContinue | "
+        "Select-Object -First 1; "
         "$cyc = Get-CimInstance -Namespace root/WMI -ClassName "
-        "BatteryCycleCount -ErrorAction SilentlyContinue; "
-        "[pscustomobject]@{ "
-        "FullChargedCapacity = $cap.FullChargedCapacity; "
-        "DesignedCapacity = $stat.DesignedCapacity; "
-        "CycleCount = $cyc.CycleCount } | ConvertTo-Json -Compress"
+        "BatteryCycleCount -ErrorAction SilentlyContinue | "
+        "Select-Object -First 1; "
+        # Win32_Battery.DesignCapacity is a broadly-available fallback when the
+        # root/WMI static-data class is missing or unpopulated.
+        "$bios = Get-CimInstance -ClassName Win32_Battery "
+        "-ErrorAction SilentlyContinue | Select-Object -First 1; "
+        "$full = $null; $design = $null; $cycle = $null; "
+        "if ($null -ne $cap) { $full = [int64]$cap.FullChargedCapacity }; "
+        "if ($null -ne $stat) { $design = [int64]$stat.DesignedCapacity }; "
+        "if ($null -eq $design -or $design -le 0 -or $design -ge 4294967295) { "
+        "if ($null -ne $bios) { $design = [int64]$bios.DesignCapacity } }; "
+        "if ($null -ne $cyc) { $cycle = [int64]$cyc.CycleCount }; "
+        "[pscustomobject]@{ FullChargedCapacity = $full; "
+        "DesignedCapacity = $design; CycleCount = $cycle } | "
+        "ConvertTo-Json -Compress"
     )
     raw = _run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
@@ -223,16 +250,8 @@ def _collect_windows_battery() -> BatteryHealth | None:
     if not isinstance(payload, dict):
         return None
 
-    full = payload.get("FullChargedCapacity")
-    designed = payload.get("DesignedCapacity")
-    try:
-        full_int = int(full) if full is not None else None
-    except (TypeError, ValueError):
-        full_int = None
-    try:
-        designed_int = int(designed) if designed is not None else None
-    except (TypeError, ValueError):
-        designed_int = None
+    full_int = _sanitize_windows_capacity(payload.get("FullChargedCapacity"))
+    designed_int = _sanitize_windows_capacity(payload.get("DesignedCapacity"))
 
     health_percent = None
     if full_int is not None and designed_int:
@@ -244,6 +263,8 @@ def _collect_windows_battery() -> BatteryHealth | None:
         cycle = payload.get("CycleCount")
         if cycle is not None:
             cycle_count = int(cycle)
+            if cycle_count <= 0 or cycle_count >= _WINDOWS_ACPI_UNSUPPORTED:
+                cycle_count = None
     except (TypeError, ValueError):
         cycle_count = None
 
