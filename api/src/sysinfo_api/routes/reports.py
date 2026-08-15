@@ -173,9 +173,10 @@ def get_report(report_id: str, user: CurrentUser = None) -> dict:
     doc = db.get_report(report_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Report not found")
-    if user.get("role") == security.ROLE_USER:
-        if not _report_belongs_to_groups(doc, user.get("groups") or []):
-            raise HTTPException(status_code=403, detail="Report is outside your groups")
+    if user.get("role") == security.ROLE_USER and not _report_belongs_to_groups(
+        doc, user.get("groups") or []
+    ):
+        raise HTTPException(status_code=403, detail="Report is outside your groups")
     annotate_online(doc)
     return doc
 
