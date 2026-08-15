@@ -8,9 +8,9 @@
 ;   - Copies system-info.exe
 ;   - Asks for API URL, API key, optional PC name + update manifest URL
 ;   - Writes %APPDATA%\system-info\config.env
-;   - Launches --watch immediately so the PC is online right away; on that first
-;     run the app self-registers an HKCU Run entry so --watch starts at logon
-;     with no admin rights (no scheduled task, no elevation needed)
+;   - Offers a finish-page checkbox to start the app (system tray) now
+;   - Creates Start Menu (and optional Desktop) shortcuts to start it later
+;   - On first run the app self-registers an HKCU Run entry so --watch starts at logon
 
 #define MyAppName "System Info Reporter"
 #ifndef MyAppVersion
@@ -44,10 +44,17 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Source: "..\..\dist\system-info.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "release-manifest.example.json"; DestDir: "{app}"; DestName: "release-manifest.example.json"; Flags: ignoreversion
 
+[Tasks]
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
+
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--watch"; Comment: "Run {#MyAppName} in the system tray"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--watch"; Comment: "Run {#MyAppName} in the system tray"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--watch"; Comment: "Start {#MyAppName} in the system tray"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--watch"; Comment: "Start {#MyAppName} in the system tray"; Tasks: desktopicon
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
+
+[Run]
+; Finish-page checkbox so the user can start the app (tray) right after install.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--watch"; Description: "Start {#MyAppName} now"; Flags: nowait postinstall skipifsilent
 
 [Code]
 var
@@ -113,11 +120,11 @@ var
   ExePath: string;
   PID: Integer;
 begin
-  { Start the always-on watcher right after install (non-blocking, silent).
-    Its first run self-registers the HKCU Run entry so --watch starts at every
-    logon with no admin rights (no scheduled task / no elevation needed). }
+  { Start the always-on watcher (used for silent installs). Interactive
+    installs use the [Run] finish-page checkbox instead of this so the user
+    can choose. SW_SHOWNORMAL lets the tray icon appear. }
   ExePath := ExpandConstant('{app}\{#MyAppExeName}');
-  Exec(ExePath, '--watch', ExpandConstant('{app}'), SW_HIDE, ewNoWait, PID);
+  Exec(ExePath, '--watch', ExpandConstant('{app}'), SW_SHOWNORMAL, ewNoWait, PID);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -125,7 +132,10 @@ begin
   if CurStep = ssPostInstall then
   begin
     WriteConfigFile;
-    LaunchWatcher;
+    { Interactive installs start via the [Run] checkbox on the finish page.
+      Silent installs have no finish page, so launch the tray watcher here. }
+    if WizardSilent then
+      LaunchWatcher;
   end;
 end;
 

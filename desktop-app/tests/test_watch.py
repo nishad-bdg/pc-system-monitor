@@ -94,7 +94,7 @@ def test_heartbeat_and_full_report_intervals_are_sane():
     "manifest, staged, expected_fragment",
     [
         (None, None, "Already up to date"),
-        ({"version": "9.9.9"}, "/x/apply-update.cmd", "staged"),
+        ({"version": "9.9.9"}, "/x/apply-update-restart.cmd", "restart"),
         ({"version": "9.9.9"}, None, "could not be applied"),
     ],
 )
@@ -102,17 +102,21 @@ def test_handle_update_request(monkeypatch, manifest, staged, expected_fragment)
     import system_info.update as update_mod
 
     monkeypatch.setattr(update_mod, "check_for_update", lambda *a, **k: manifest)
-    monkeypatch.setattr(update_mod, "apply_windows_update", lambda *a, **k: staged)
+    monkeypatch.setattr(update_mod, "apply_update_and_restart", lambda *a, **k: staged)
 
     loop = WatchLoop(_args())
     message, title = loop.handle_update_request()
 
-    assert expected_fragment in message
+    assert expected_fragment in message.lower()
     if not manifest:
         assert "no update" in title
+        assert getattr(loop, "_exit_for_update", False) is False
     elif staged:
-        assert "restart the app to apply" in message.lower()
+        assert "system tray" in message.lower()
+        assert loop._exit_for_update is True
         assert "update ready" in title
+    else:
+        assert getattr(loop, "_exit_for_update", False) is False
 
 
 def test_handle_update_request_handles_exceptions(monkeypatch):
@@ -251,3 +255,25 @@ def test_handle_restart_failure_reports_false(monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", boom)
     loop = WatchLoop(_args())
     assert loop.handle_restart() is False
+
+
+def test_full_report_stops_when_update_staged(monkeypatch):
+    loop = WatchLoop(_args())
+    monkeypatch.setattr("system_info.cli.collect_all", lambda args: {})
+    monkeypatch.setattr("system_info.cli.save_report", lambda *a, **k: None)
+    monkeypatch.setattr("system_info.update.maybe_auto_update", lambda quiet=True: True)
+    stopped = []
+    monkeypatch.setattr(loop, "_stop_for_update", lambda: stopped.append(True))
+    loop.full_report()
+    assert stopped == [True]
+
+
+def test_full_report_leaves_watcher_running_when_no_update(monkeypatch):
+    loop = WatchLoop(_args())
+    monkeypatch.setattr("system_info.cli.collect_all", lambda args: {})
+    monkeypatch.setattr("system_info.cli.save_report", lambda *a, **k: None)
+    monkeypatch.setattr("system_info.update.maybe_auto_update", lambda quiet=True: False)
+    stopped = []
+    monkeypatch.setattr(loop, "_stop_for_update", lambda: stopped.append(True))
+    loop.full_report()
+    assert stopped == []

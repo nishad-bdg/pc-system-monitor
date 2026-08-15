@@ -117,11 +117,14 @@ class WatchLoop:
         full_args = watch_args(self.args, no_save=True)
         data = cli.collect_all(full_args)
         cli.save_report(data, self.args.api_url, self.args.api_key)
-        # Quiet release check, same as one-shot hourly runs.
+        # Quiet release check, same as one-shot hourly runs. If a newer
+        # build is staged the updater batch waits for this process to exit,
+        # swaps the exe, and relaunches `--watch` (tray icon).
         from .update import maybe_auto_update
 
         try:
-            maybe_auto_update(quiet=True)
+            if maybe_auto_update(quiet=True):
+                self._stop_for_update()
         except Exception:
             pass
 
@@ -262,10 +265,12 @@ class WatchLoop:
         """Run a manual update check (tray "Check for updates…").
 
         Returns a (message, title) pair ready to surface as a tray
-        notification: up-to-date, update staged, or a failure message.
+        notification. A staged update sets `_exit_for_update` so the tray
+        thread can stop this process; the updater batch then relaunches
+        `--watch` and the new tray icon appears.
         """
         try:
-            from .update import apply_windows_update, check_for_update
+            from .update import apply_update_and_restart, check_for_update
 
             manifest = check_for_update()
             if not manifest:
@@ -274,10 +279,11 @@ class WatchLoop:
                     f"{PRODUCT_NAME} — no update",
                 )
             new_version = str(manifest.get("version") or "unknown")
-            staged = apply_windows_update(manifest)
+            staged = apply_update_and_restart(manifest)
             if staged:
+                self._exit_for_update = True
                 return (
-                    f"Update v{new_version} staged. Restart the app to apply.",
+                    f"Update v{new_version} is installing. The app will restart in the system tray.",
                     f"{PRODUCT_NAME} — update ready",
                 )
             return (
@@ -335,6 +341,9 @@ def _tray_icon(loop: "WatchLoop"):
             outcome = loop.handle_update_request()
             message, title = outcome
             _notify(icon, message, title)
+            if getattr(loop, "_exit_for_update", False):
+                time.sleep(1.5)
+                loop._stop_for_update()
 
         import threading
 

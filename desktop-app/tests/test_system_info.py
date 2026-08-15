@@ -277,6 +277,46 @@ def test_is_newer_version():
     assert is_newer("v1.0.0", "0.9.9")
 
 
+def test_maybe_auto_update_restarts_into_watch(monkeypatch):
+    from system_info.update import maybe_auto_update
+
+    called = {}
+
+    def fake_restart(manifest):
+        called["manifest"] = manifest
+        return "/x/apply-update-restart.cmd"
+
+    monkeypatch.setattr("system_info.update.check_for_update", lambda: {"version": "9.9.9"})
+    monkeypatch.setattr("system_info.update.apply_update_and_restart", fake_restart)
+    monkeypatch.setattr("system_info.update.apply_windows_update", lambda m: (_ for _ in ()).throw(AssertionError("must restart, not stage-only")))
+    assert maybe_auto_update() is True
+    assert called["manifest"]["version"] == "9.9.9"
+
+
+def test_apply_update_and_restart_script_relaunches_tray(monkeypatch, tmp_path):
+    import subprocess
+    from pathlib import Path
+
+    from system_info import update as update_mod
+
+    pending = tmp_path / "system-info.new.exe"
+    pending.write_bytes(b"new")
+    exe = tmp_path / "system-info.exe"
+    monkeypatch.setattr(update_mod, "is_frozen", lambda: True)
+    monkeypatch.setattr("system_info.update.os.name", "nt")
+    monkeypatch.setattr(update_mod, "_download_new_exe", lambda manifest: pending)
+    monkeypatch.setattr(update_mod, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(update_mod.sys, "executable", str(exe))
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: object())
+
+    path = update_mod.apply_update_and_restart({"version": "9.9.9"})
+    assert path
+    script = Path(path).read_text(encoding="utf-8")
+    assert "--watch" in script
+    assert "start" in script.lower()
+    assert str(exe) in script
+
+
 def test_collect_network_usage(monkeypatch):
     from system_info import network
 

@@ -193,6 +193,8 @@ if not errorlevel 1 (
 if exist "{backup}" del /f /q "{backup}"
 if exist "{current}" move /y "{current}" "{backup}"
 move /y "{pending}" "{current}"
+ping 127.0.0.1 -n 2 >nul
+cd /d "{target_dir}"
 start "" "{current}" --watch
 del /f /q "%~f0"
 """
@@ -219,11 +221,15 @@ del /f /q "%~f0"
 
 
 def maybe_auto_update(quiet: bool = True) -> bool:
-    """Check manifest and start Windows update if newer. Returns True if started."""
+    """Check manifest, swap the exe, and relaunch `--watch` (tray) on Windows.
+
+    Returns True if an updater was started. The running process should exit
+    soon after so the batch can replace the locked exe and start the new one.
+    """
     manifest = check_for_update()
     if not manifest:
         return False
-    path = apply_windows_update(manifest)
+    path = apply_update_and_restart(manifest)
     if path and not quiet:
         print(f"[update] applying {manifest.get('version')} via {path}")
     return bool(path)
