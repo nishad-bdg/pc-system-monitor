@@ -6,8 +6,9 @@ Supported clients:
   - Outlook for Mac             via account plists, plus modern Outlook
     (Office 365) via ProfilePreferences.plist SortedAccounts entries like
     '<email>_ActiveSyncExchange_HxS' (extracts the email + mode/server)
-  - New Outlook for Windows     via account JSON under the packaged app state
-  - Classic Outlook (Windows)   best-effort: outlook.xml + registry string scan
+  - New Outlook for Windows     via Olk + packaged-app JSON (SmtpAddress / UPN)
+  - Classic Outlook (Windows)   Office Identity registry, Autodiscover cache,
+    outlook.xml, and profile SMTP property tags
 
 Only non-secret config is collected (email address, username, protocol, host,
 port, TLS mode). Passwords are encrypted by the OS keychain / credential
@@ -583,6 +584,8 @@ def _collect_outlook_cache_files_windows() -> list[EmailAccount]:
                         protocol="exchange",
                     )
                 )
+            if path.name.lower() == "outlook.xml":
+                continue
             try:
                 text = path.read_text(encoding="utf-8", errors="ignore")
             except OSError:
@@ -624,6 +627,8 @@ if ($out.Count -eq 0) { "[]" } else { $out | ConvertTo-Json -Compress }
 
 def _collect_outlook_classic_windows() -> list[EmailAccount]:
     accounts: list[EmailAccount] = []
+    accounts.extend(_collect_office_identity_windows())
+    accounts.extend(_collect_outlook_cache_files_windows())
 
     # Send-account config usually lives in %APPDATA%\Microsoft\Outlook\outlook.xml
     appdata = os.getenv("APPDATA") or ""
@@ -635,7 +640,9 @@ def _collect_outlook_classic_windows() -> list[EmailAccount]:
             text = ""
         if text:
             for email_match in _EMAIL_RE.finditer(text):
-                email = email_match.group(0)
+                email = _plausible_email(email_match.group(0))
+                if not email:
+                    continue
                 start = max(0, email_match.start() - 400)
                 window = text[start : email_match.end() + 200]
                 host = ""
@@ -655,27 +662,32 @@ def _collect_outlook_classic_windows() -> list[EmailAccount]:
                     )
                 )
 
-    # Fallback: scan the Outlook profile registry blob for readable strings.
+    # Fallback: scan Outlook profile registry for SMTP / email property tags.
     raw = _run_powershell(
         r"""
-$keys = Get-ChildItem "HKCU:\Software\Microsoft\Office" -ErrorAction SilentlyContinue |
-    Where-Object { $_.PSChildName -match '^\d+\.\d+$' } |
-    ForEach-Object { Get-ChildItem "$($_.PSPath)\Outlook\Profiles" -Recurse -ErrorAction SilentlyContinue }
-$out = @()
-foreach ($k in $keys) {
-  if ($k.PSChildName -ne '9375CFF0413111d3B88A00104B2A6676') { continue }
-  foreach ($v in $k.GetValueNames()) {
-    $bytes = (Get-ItemProperty -Path $k.PSPath -Name $v).$v
-    if ($bytes -is [byte[]]) {
-      $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
-      $utf16 = [System.Text.Encoding]::Unicode.GetString($bytes)
-      $text = "$ascii $utf16"
-      $matches = [regex]::Matches($text, '[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}')
-      foreach ($m in $matches) { $out += $m.Value }
+$emails = New-Object System.Collections.Generic.List[string]
+$versions = Get-ChildItem "HKCU:\Software\Microsoft\Office" -ErrorAction SilentlyContinue |
+    Where-Object { $_.PSChildName -match '^\d+\.\d+$' }
+foreach ($ver in $versions) {
+  $profiles = Join-Path $ver.PSPath "Outlook\Profiles"
+  Get-ChildItem $profiles -ErrorAction SilentlyContinue | ForEach-Object {
+    Get-ChildItem $_.PSPath -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+      foreach ($name in @('001f6613','001f3003','001e660a','001f660a','EmailAddress','SMTP Address')) {
+        try {
+          $val = (Get-ItemProperty -LiteralPath $_.PSPath -Name $name -ErrorAction SilentlyContinue).$name
+        } catch { continue }
+        if ($null -eq $val) { continue }
+        $text = if ($val -is [byte[]]) {
+          [System.Text.Encoding]::Unicode.GetString($val).Trim([char]0)
+        } else { [string]$val }
+        [regex]::Matches($text, '[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}') | ForEach-Object {
+          $emails.Add($_.Value) | Out-Null
+        }
+      }
     }
   }
 }
-$out | Sort-Object -Unique | ConvertTo-Json -Compress
+@($emails | Select-Object -Unique) | ConvertTo-Json -Compress
 """
     )
     if raw:
@@ -685,14 +697,14 @@ $out | Sort-Object -Unique | ConvertTo-Json -Compress
             parsed = []
         if isinstance(parsed, str):
             parsed = [parsed]
-        for email in parsed or []:
-            email = str(email).strip()
-            if email and not any(a.email == email for a in accounts):
+        for item in parsed or []:
+            email = _plausible_email(item)
+            if email and not any(a.email.lower() == email.lower() for a in accounts):
                 accounts.append(
                     EmailAccount(
                         client="outlook_classic",
                         email=email,
-                        protocol="smtp",
+                        protocol="exchange",
                     )
                 )
     return accounts
