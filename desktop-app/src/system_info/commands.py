@@ -203,6 +203,7 @@ def handle_pending_commands(
     api_url: str,
     api_key: str = "",
     on_update_applied=None,
+    on_reconnect=None,
     pc_name: str = "",
 ) -> None:
     """Execute any pending remote commands and ack the outcome (HTTP fallback).
@@ -210,12 +211,29 @@ def handle_pending_commands(
     `on_update_applied` (callable, optional) is invoked after a previously
     staged app update so a running watcher can exit and let the updater batch
     swap the exe + relaunch. `collect` runs inline (this is already the
-    worker thread).
+    worker thread). `on_reconnect` (callable, optional) kicks the agent
+    WebSocket so it reconnects immediately instead of waiting for backoff;
+    if it returns False the reconnect command is left pending.
     """
     for cmd in commands or []:
         command_type = (cmd.get("type") or "").strip()
         command_id = str(cmd.get("id") or "").strip()
         if not command_type or not command_id:
+            continue
+        if command_type == "reconnect":
+            if not on_reconnect:
+                ack_command(
+                    command_id, "failed", api_url, api_key, "watcher not running"
+                )
+                continue
+            try:
+                kicked = on_reconnect()
+            except Exception:
+                kicked = False
+            if kicked is False:
+                # Agent socket not started yet; keep pending for the next poll.
+                continue
+            ack_command(command_id, "done", api_url, api_key)
             continue
         ok, error = execute_command(
             command_type, api_url=api_url, api_key=api_key, pc_name=pc_name
@@ -254,11 +272,32 @@ class WatchCommandSocket(threading.Thread):
         self.pc_name = pc_name
         self.on_update_applied = on_update_applied
         self._stop = threading.Event()
+        self._wake = threading.Event()
+        self._skip_wait = False
         self._ws = None
         self._ws_lock = threading.Lock()
 
     def stop(self) -> None:
         self._stop.set()
+        self._wake.set()
+
+    def kick(self) -> bool:
+        """Drop the current socket (if any) and reconnect without the backoff wait.
+
+        Used when an admin asks an offline-looking PC to reconnect: heartbeat
+        delivers `reconnect`, this skips the 30s delay so `/ws/agent` comes
+        back as soon as the PC has internet.
+        """
+        with self._ws_lock:
+            self._skip_wait = True
+            ws = self._ws
+            self._wake.set()
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
+        return True
 
     def _ws_url(self) -> str:
         base = self.api_url.rstrip("/")
@@ -271,14 +310,21 @@ class WatchCommandSocket(threading.Thread):
     def run(self) -> None:
         import websocket  # deferred so module stays importable without the dep
 
-        delay = WS_RECONNECT_DELAY
         while not self._stop.is_set():
+            with self._ws_lock:
+                self._skip_wait = False
             try:
                 self._session()
-                delay = WS_RECONNECT_DELAY
             except Exception:
-                time.sleep(min(delay, WS_RECONNECT_DELAY))
-            self._stop.wait(min(delay, WS_RECONNECT_DELAY))
+                pass
+            if self._stop.is_set():
+                break
+            with self._ws_lock:
+                skip = self._skip_wait
+                if skip:
+                    continue
+                self._wake.clear()
+            self._wake.wait(WS_RECONNECT_DELAY)
 
     def _session(self) -> None:
         import websocket
@@ -319,6 +365,10 @@ class WatchCommandSocket(threading.Thread):
                     command_type = str(command.get("type") or "").strip()
                     command_id = str(command.get("id") or "").strip()
                     if command_type and command_id:
+                        if command_type == "reconnect":
+                            # Socket is already up; ack without dropping it.
+                            self._send_ack(ws, command_id, True, None)
+                            continue
                         if command_type == "collect":
                             # Full collect takes 10–30s; do not block ping
                             # or other commands on this socket thread.

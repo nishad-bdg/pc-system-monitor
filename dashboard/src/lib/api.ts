@@ -956,7 +956,7 @@ export function sendCommand(
   apiUrl: string,
   apiToken: string,
   deviceId: string,
-  type: "restart" | "shutdown" | "collect",
+  type: "restart" | "shutdown" | "collect" | "reconnect",
 ): Promise<Command> {
   return apiRequest(apiUrl, apiToken, "/commands", {
     method: "POST",

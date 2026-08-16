@@ -98,6 +98,7 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
             deviceId={machine.deviceId}
             pcName={machine.name}
             osSystem={host.os?.system}
+            online={liveOnline}
           />
         </div>
       </div>

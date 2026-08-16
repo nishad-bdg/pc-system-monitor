@@ -92,6 +92,7 @@ class WatchLoop:
                     self.args.api_url,
                     self.args.api_key,
                     on_update_applied=self._stop_for_update,
+                    on_reconnect=self._kick_agent_ws,
                     pc_name=pc_name,
                 )
             except Exception:
@@ -116,6 +117,13 @@ class WatchLoop:
         sample["device_id"] = device_id
         sample["pc_name"] = pc_name
         agent.send_metrics(sample)
+
+    def _kick_agent_ws(self) -> bool:
+        """Force `/ws/agent` to reconnect now (admin Connect / reconnect command)."""
+        agent = getattr(self, "_agent_ws", None)
+        if agent is None:
+            return False
+        return bool(agent.kick())
 
     def _stop_for_update(self) -> None:
         """A forced update was staged: stop this process and let it die.
@@ -193,13 +201,11 @@ class WatchLoop:
         """Run the loop (optionally with a tray icon) until stopped."""
         if self._stop.is_set():
             return
-        self._worker = threading.Thread(target=self._loop, daemon=True)
-        self._worker.start()
 
         # Immediate command delivery: keep a /ws/agent socket open so remote
-        # restart/shutdown/update commands arrive instantly instead of waiting
-        # for the next heartbeat poll. A staged update exits the whole watcher
-        # so the updater batch can swap the exe and relaunch --watch.
+        # restart/shutdown/update/reconnect commands arrive instantly instead
+        # of waiting for the next heartbeat poll. Start the socket before the
+        # worker so a pending reconnect on the first heartbeat can kick it.
         from .commands import WatchCommandSocket
 
         pc_name = resolve_pc_name(self.args.pc_name)
@@ -213,6 +219,9 @@ class WatchLoop:
         )
         agent.start()
         self._agent_ws = agent
+
+        self._worker = threading.Thread(target=self._loop, daemon=True)
+        self._worker.start()
 
         _run_tray_or_wait(self, _tray_icon(self))
 

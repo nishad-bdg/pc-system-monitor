@@ -1,10 +1,11 @@
 """Remote-command endpoints (WebSocket-push control of desktop agents).
 
-Admins (JWT) enqueue a command (`restart` / `shutdown` / `update` / `collect`)
-for a device. The command is persisted in Mongo and pushed **immediately** to
-the desktop agent over its `/ws/agent` WebSocket channel; the agent executes
-and acks (`done` / `failed`). When the agent is offline, the command stays
-pending and is echoed back on the agent's next heartbeat poll as a fallback.
+Admins (JWT) enqueue a command (`restart` / `shutdown` / `update` / `collect`
+/ `reconnect`) for a device. The command is persisted in Mongo and pushed
+**immediately** to the desktop agent over its `/ws/agent` WebSocket channel;
+the agent executes and acks (`done` / `failed`). When the agent is offline,
+the command stays pending and is echoed back on the agent's next heartbeat
+poll as a fallback.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -15,7 +16,7 @@ from ..security import AdminOrSuperUser, ApiKey, CurrentUser, SuperAdminUser
 
 router = APIRouter(prefix="/commands", tags=["commands"])
 
-COMMAND_TYPES = {"restart", "shutdown", "update", "collect"}
+COMMAND_TYPES = {"restart", "shutdown", "update", "collect", "reconnect"}
 ACK_STATUSES = {db.COMMAND_STATUS_DONE, db.COMMAND_STATUS_FAILED}
 
 

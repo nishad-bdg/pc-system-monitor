@@ -8,7 +8,14 @@ import { pingDevice, sendCommand } from "@/lib/api";
 const ADMIN_ROLES = new Set(["admin", "super_admin"]);
 
 type ActionType = "restart" | "shutdown";
-type BusyKind = "ping" | "collect" | ActionType;
+type BusyKind = "ping" | "collect" | "connect" | ActionType;
+
+const CONNECT_POLL_MS = 3000;
+const CONNECT_ATTEMPTS = 20; // ~60s — covers one heartbeat + WS backoff
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 const ACTION_LABELS: Record<ActionType, { button: string; title: string; body: string }> = {
   restart: {
@@ -23,17 +30,19 @@ const ACTION_LABELS: Record<ActionType, { button: string; title: string; body: s
   },
 };
 
-/** Remote Ping / Collect now / Restart / Shutdown (admin + super_admin). Ping and Collect now work on any OS. */
+/** Remote Ping / Connect / Collect now / Restart / Shutdown (admin + super_admin). Ping, Connect, and Collect now work on any OS. */
 export function RemoteActions({
   apiUrl,
   deviceId,
   pcName,
   osSystem,
+  online = true,
 }: {
   apiUrl: string;
   deviceId: string | null;
   pcName: string;
   osSystem?: string | null;
+  online?: boolean;
 }) {
   const { data: session } = useSession();
   const role = session?.user?.role ?? "";
@@ -71,6 +80,40 @@ export function RemoteActions({
       setMessage({
         ok: false,
         text: err instanceof Error ? err.message : "Could not ping this PC",
+      });
+    } finally {
+      setBusyKind(null);
+    }
+  };
+
+  const runConnect = async () => {
+    setBusyKind("connect");
+    setMessage(null);
+    try {
+      const first = await pingDevice(apiUrl, apiToken, deviceId);
+      if (first.connected) {
+        const latency = first.rtt_ms != null ? ` (${first.rtt_ms} ms)` : "";
+        setMessage({ ok: true, text: `${pcName} is already connected${latency}.` });
+        return;
+      }
+      await sendCommand(apiUrl, apiToken, deviceId, "reconnect");
+      for (let i = 0; i < CONNECT_ATTEMPTS; i += 1) {
+        await sleep(CONNECT_POLL_MS);
+        const res = await pingDevice(apiUrl, apiToken, deviceId);
+        if (res.connected) {
+          const latency = res.rtt_ms != null ? ` (${res.rtt_ms} ms)` : "";
+          setMessage({ ok: true, text: `${pcName} is connected${latency}.` });
+          return;
+        }
+      }
+      setMessage({
+        ok: false,
+        text: `${pcName} did not connect. The app may not be running, or this PC has no internet.`,
+      });
+    } catch (err) {
+      setMessage({
+        ok: false,
+        text: err instanceof Error ? err.message : "Could not reconnect this PC",
       });
     } finally {
       setBusyKind(null);
@@ -128,6 +171,16 @@ export function RemoteActions({
         >
           {busyKind === "ping" ? "Pinging…" : "Ping"}
         </button>
+        {!online && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={runConnect}
+            className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+          >
+            {busyKind === "connect" ? "Connecting…" : "Connect"}
+          </button>
+        )}
         <button
           type="button"
           disabled={busy}
@@ -161,9 +214,11 @@ export function RemoteActions({
         <p className="text-xs text-slate-400">
           {busyKind === "ping"
             ? "Pinging…"
-            : busyKind === "collect"
-              ? "Sending collect…"
-              : "Sending command…"}
+            : busyKind === "connect"
+              ? "Connecting… if the app is running with internet, this PC should come online within a minute."
+              : busyKind === "collect"
+                ? "Sending collect…"
+                : "Sending command…"}
         </p>
       )}
       {!busy && message && (
