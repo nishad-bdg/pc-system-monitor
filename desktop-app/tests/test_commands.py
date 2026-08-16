@@ -577,3 +577,123 @@ def test_ws_send_metrics_uses_open_socket():
 def test_ws_send_metrics_without_socket():
     sock = commands.WatchCommandSocket("https://x", "sk-key", "d1")
     assert sock.send_metrics({"cpu_percent": 1.0}) is False
+
+
+def test_handle_pending_commands_reconnect_kicks(monkeypatch):
+    acks = []
+    kicked = {"n": 0}
+
+    def fake_ack(cid, status, url, key="", error=None):
+        acks.append((cid, status, error))
+        return True
+
+    monkeypatch.setattr(commands, "ack_command", fake_ack)
+    commands.handle_pending_commands(
+        [{"id": "cmd-r", "type": "reconnect"}],
+        "http://x",
+        "sk-key",
+        on_reconnect=lambda: kicked.__setitem__("n", kicked["n"] + 1) or True,
+    )
+    assert kicked["n"] == 1
+    assert acks == [("cmd-r", "done", None)]
+
+
+def test_handle_pending_commands_reconnect_without_callback(monkeypatch):
+    acks = []
+
+    def fake_ack(cid, status, url, key="", error=None):
+        acks.append((cid, status, error))
+        return True
+
+    monkeypatch.setattr(commands, "ack_command", fake_ack)
+    commands.handle_pending_commands(
+        [{"id": "cmd-r", "type": "reconnect"}],
+        "http://x",
+        "sk-key",
+    )
+    assert acks == [("cmd-r", "failed", "watcher not running")]
+
+
+def test_handle_pending_commands_reconnect_leaves_pending_when_kick_fails(monkeypatch):
+    acks = []
+
+    def fake_ack(cid, status, url, key="", error=None):
+        acks.append((cid, status, error))
+        return True
+
+    monkeypatch.setattr(commands, "ack_command", fake_ack)
+    commands.handle_pending_commands(
+        [{"id": "cmd-r", "type": "reconnect"}],
+        "http://x",
+        "sk-key",
+        on_reconnect=lambda: False,
+    )
+    assert acks == []
+
+
+def test_kick_closes_open_socket_and_skips_wait():
+    sock = commands.WatchCommandSocket("https://x", "sk-key", "d1")
+
+    class FakeWs:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    fake = FakeWs()
+    sock._ws = fake
+    assert sock.kick() is True
+    assert fake.closed is True
+    assert sock._wake.is_set()
+    assert sock._skip_wait is True
+
+
+def test_ws_agent_reconnect_acks_without_dropping(monkeypatch):
+    import json as _json
+
+    sent = []
+    http_acks = []
+
+    class FakeWs:
+        def __init__(self, inbox):
+            self.inbox = list(inbox)
+            self.closed = False
+
+        def send(self, data):
+            sent.append(_json.loads(data))
+
+        def recv(self):
+            if not self.inbox:
+                raise OSError("closed")
+            return self.inbox.pop(0)
+
+        def close(self):
+            self.closed = True
+
+    command_msg = _json.dumps(
+        {"type": "command", "command": {"id": "cmd-r", "type": "reconnect"}, "ts": 1}
+    )
+    monkeypatch.setattr(
+        commands,
+        "ack_command",
+        lambda cid, status, url, key="", error=None: http_acks.append((cid, status)) or True,
+    )
+    fake_ws = FakeWs([command_msg])
+
+    def fake_create_connection(url, subprotocols=None, timeout=5, enable_multithread=False):
+        return fake_ws
+
+    import websocket as _ws_module
+
+    monkeypatch.setattr(_ws_module, "create_connection", fake_create_connection)
+    monkeypatch.setattr(_ws_module, "WebSocket", lambda: None)
+
+    sock = commands.WatchCommandSocket("https://x", "sk-key", "d1")
+    sock._session()
+
+    ack = [m for m in sent if m.get("type") == "command.ack"][-1]
+    assert ack["command_id"] == "cmd-r"
+    assert ack["status"] == "done"
+    assert http_acks == [("cmd-r", "done")]
+    assert sock._skip_wait is False

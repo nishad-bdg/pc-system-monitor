@@ -7,7 +7,8 @@ Receives commands from the API over two channels:
    "command": {...}}` the moment an admin requests it, so the machine acts at
    once. The agent replies `{"type":"command.ack", ...}` over the same socket.
    `collect` runs on a daemon thread and HTTP-acks when the save finishes so
-   ping/command traffic is not blocked for 10–30s.
+   ping/command traffic is not blocked for 10–30s. `reconnect` acks without
+   dropping a live socket; heartbeat fallback calls `kick()` to skip backoff.
 
 2. **Heartbeat poll (fallback):** the heartbeat response also echoes pending
    commands, so a one-shot `--heartbeat` run or a briefly-disconnected agent
@@ -21,7 +22,6 @@ import json
 import os
 import subprocess
 import threading
-import time
 
 import requests
 
@@ -308,8 +308,6 @@ class WatchCommandSocket(threading.Thread):
         return f"ws://{base}/ws/agent"
 
     def run(self) -> None:
-        import websocket  # deferred so module stays importable without the dep
-
         while not self._stop.is_set():
             with self._ws_lock:
                 self._skip_wait = False

@@ -129,6 +129,27 @@ def test_send_live_metrics_noop_without_agent():
     loop.send_live_metrics()
 
 
+def test_kick_agent_ws_returns_false_without_agent():
+    loop = WatchLoop(_args())
+    assert loop._kick_agent_ws() is False
+
+
+def test_kick_agent_ws_calls_agent_kick():
+    class FakeAgent:
+        def __init__(self):
+            self.kicked = 0
+
+        def kick(self):
+            self.kicked += 1
+            return True
+
+    loop = WatchLoop(_args())
+    agent = FakeAgent()
+    loop._agent_ws = agent
+    assert loop._kick_agent_ws() is True
+    assert agent.kicked == 1
+
+
 @pytest.mark.parametrize(
     "manifest, staged, expected_fragment",
     [
