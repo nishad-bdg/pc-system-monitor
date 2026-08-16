@@ -440,8 +440,10 @@ def test_collect_printers_macos(monkeypatch):
     payload = info.to_dict()
     assert payload["count"] == 3
     assert payload["usb"][0]["port"].startswith("usb://")
+    assert payload["usb"][0]["connection"] == "usb"
     assert "ip" in payload["network"][0]
     assert "print_count" in payload["network"][0]
+    assert payload["network"][0]["connection"] == "network"
 
 
 def test_collect_printers_windows(monkeypatch):

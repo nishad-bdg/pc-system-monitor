@@ -164,13 +164,12 @@ Dashboard: if `expired` → **Expired**; else if `expiry_date` → **N days rema
 
 Grouped as **usb / network / other**.
 
-Each printer: `{ name, port, ip, print_count }`.
+Each printer: `{ name, port, connection, ip, print_count }`. `connection` is `usb | network | other` (also used to group the lists).
 
-- **ip:** extracted from network port/URI when IPv4 present; else `null`.
-- **print_count:** best-effort (macOS IPP/`ipptool` — test file written to a
-  temp file because `ipptool` rejects stdin `-`; Windows `Get-PrinterProperty`);
-  else `null`.
-- macOS: CUPS `lpstat -v`; Windows: PowerShell `Get-Printer`.
+- **ip:** extracted from the network port/URI or Windows `Get-PrinterPort` address when a valid IPv4 is present (octets 0–255); else `null`.
+- **print_count:** best-effort. macOS IPP/`ipptool` (test file written to a temp file because `ipptool` rejects stdin `-`). Windows `Get-PrinterProperty` allowlist only (`PageCount`, `PrintCount`, `TotalPages`, `Impressions`, `PagesPrinted`, `Config:PageCount`) — a device/driver counter, **not** pages printed from this PC; job IDs / queue length / names that merely contain “count” are ignored. Else `null`.
+- macOS: CUPS `lpstat -v`.
+- Windows: `Get-Printer` for names/ports; **`Get-PrinterPort` is authoritative** for `PrinterHostAddress` / `DeviceURL`. Classification uses the resolved address **and** the port name (USB00n, Standard TCP/IP, custom TCP/IP, WSD, IPP/IPPS, SMB `\\server\share`, hostname ports). `FILE:`, `LPT1:`, `PORTPROMPT:` (Microsoft Print to PDF) stay `other`.
 
 ### Network bandwidth
 
