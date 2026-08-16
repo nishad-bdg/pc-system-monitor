@@ -2272,6 +2272,85 @@ def test_broadcast_command_rejects_bad_type(monkeypatch):
     assert resp.status_code == 422
 
 
+def test_batch_command_requires_admin(monkeypatch):
+    _patch_db(monkeypatch, user={
+        "_id": "64b000000000000000000001",
+        "username": "ops1",
+        "role": "user",
+        "groups": ["g1"],
+    })
+    resp = client.post(
+        "/commands/batch",
+        json={"type": "reconnect", "device_ids": ["dev-1"]},
+        headers=_auth_header(role="user"),
+    )
+    assert resp.status_code == 403
+
+
+def test_batch_command_reconnects_listed_devices(monkeypatch):
+    from sysinfo_api import realtime
+
+    _patch_db(monkeypatch)
+    created = []
+
+    def fake_create(device_id, command_type, requested_by):
+        created.append((device_id, command_type))
+        return f"64b0000000000000000000{len(created)}"
+
+    monkeypatch.setattr(db, "create_command", fake_create)
+
+    def fake_get(cid):
+        idx = int(str(cid)[-1])
+        return {
+            "_id": cid,
+            "device_id": created[idx - 1][0],
+            "type": "reconnect",
+            "status": "pending",
+            "requested_by": "64b000000000000000000001",
+            "created_at": 100.0,
+            "acked_at": None,
+        }
+
+    monkeypatch.setattr(db, "get_command", fake_get)
+    pushed = []
+
+    async def fake_push(command):
+        pushed.append(command.get("device_id"))
+
+    monkeypatch.setattr(realtime, "push_command_to_agent", fake_push)
+    resp = client.post(
+        "/commands/batch",
+        json={"type": "reconnect", "device_ids": ["dev-1", "dev-1", "dev-2", ""]},
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["total"] == 2
+    assert created == [("dev-1", "reconnect"), ("dev-2", "reconnect")]
+    assert pushed == ["dev-1", "dev-2"]
+
+
+def test_batch_command_rejects_restart(monkeypatch):
+    _patch_db(monkeypatch)
+    resp = client.post(
+        "/commands/batch",
+        json={"type": "restart", "device_ids": ["dev-1"]},
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 422
+
+
+def test_batch_command_empty_list(monkeypatch):
+    _patch_db(monkeypatch)
+    resp = client.post(
+        "/commands/batch",
+        json={"type": "reconnect", "device_ids": []},
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 201
+    assert resp.json()["total"] == 0
+
+
 # ---- agent websocket (immediate command push) ----
 
 def test_websocket_agent_requires_api_key(monkeypatch):

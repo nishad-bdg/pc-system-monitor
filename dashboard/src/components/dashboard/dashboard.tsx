@@ -20,6 +20,7 @@ import { StatusDot } from "./status-dot";
 import { PrintingBadge } from "./printing-badge";
 import { LoadWarningBadge, isHighLiveLoad } from "./load-warning-badge";
 import { UpdateAppsButton } from "./update-apps-button";
+import { ConnectAllButton } from "./connect-all-button";
 import { useRealtime } from "../realtime-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -65,6 +66,20 @@ export function Dashboard() {
     (selectedKey && filtered.find((m) => m.key === selectedKey)) ||
     filtered[0] ||
     null;
+
+  const connectAllIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          filtered
+            .map((m) => m.deviceId)
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ),
+    [filtered],
+  );
+
+  const canRemote = session?.user?.role === "admin" || session?.user?.role === "super_admin";
 
   return (
     <DashboardShell
@@ -224,6 +239,13 @@ export function Dashboard() {
           >
             {isFetching ? "Refreshing…" : "Refresh"}
           </button>
+          {canRemote && (
+            <ConnectAllButton
+              apiUrl={API_URL}
+              apiToken={apiToken ?? ""}
+              deviceIds={connectAllIds}
+            />
+          )}
           {session?.user?.role === "super_admin" && (
             <UpdateAppsButton apiUrl={API_URL} apiToken={apiToken ?? ""} />
           )}

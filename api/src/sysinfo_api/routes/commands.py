@@ -5,18 +5,20 @@ Admins (JWT) enqueue a command (`restart` / `shutdown` / `update` / `collect`
 **immediately** to the desktop agent over its `/ws/agent` WebSocket channel;
 the agent executes and acks (`done` / `failed`). When the agent is offline,
 the command stays pending and is echoed back on the agent's next heartbeat
-poll as a fallback.
+poll as a fallback. `POST /commands/batch` enqueues `reconnect` for a list of
+device ids (Connect all), including offline agents.
 """
 
 from fastapi import APIRouter, HTTPException
 
 from .. import db, realtime, security
-from ..models import CommandAck, CommandBroadcast, CommandCreate, DevicePing
+from ..models import CommandAck, CommandBatch, CommandBroadcast, CommandCreate, DevicePing
 from ..security import AdminOrSuperUser, ApiKey, CurrentUser, SuperAdminUser
 
 router = APIRouter(prefix="/commands", tags=["commands"])
 
 COMMAND_TYPES = {"restart", "shutdown", "update", "collect", "reconnect"}
+BATCH_TYPES = {"reconnect"}
 ACK_STATUSES = {db.COMMAND_STATUS_DONE, db.COMMAND_STATUS_FAILED}
 
 
@@ -102,6 +104,43 @@ async def broadcast_command(
             "type": command_type,
         })
     return {"total": len(sent), "sent": sent, "connected": len(device_ids)}
+
+
+@router.post("/batch", status_code=201)
+async def create_commands_batch(
+    body: CommandBatch, user: AdminOrSuperUser = CurrentUser
+) -> dict:
+    """Enqueue one command per device_id (admin/super_admin).
+
+    Offline agents keep the command `pending` and run it on the next
+    heartbeat — unlike `/broadcast`, which only targets live sockets.
+    """
+    command_type = (body.type or "").strip()
+    if command_type not in BATCH_TYPES:
+        raise HTTPException(status_code=422, detail="Unsupported command type")
+    seen: set[str] = set()
+    device_ids: list[str] = []
+    for raw in body.device_ids or []:
+        device_id = (raw or "").strip()
+        if not device_id or device_id in seen:
+            continue
+        seen.add(device_id)
+        device_ids.append(device_id)
+    sent: list[dict] = []
+    for device_id in device_ids:
+        command_id = db.create_command(device_id, command_type, user.get("_id", ""))
+        if command_id is None:
+            continue
+        record = db.get_command(str(command_id))
+        if record is None:
+            continue
+        await realtime.push_command_to_agent(record)
+        sent.append({
+            "device_id": device_id,
+            "command_id": str(command_id),
+            "type": command_type,
+        })
+    return {"total": len(sent), "sent": sent}
 
 
 @router.get("")

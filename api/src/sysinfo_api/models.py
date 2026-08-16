@@ -55,6 +55,16 @@ class CommandBroadcast(BaseModel):
     type: str = "update"
 
 
+class CommandBatch(BaseModel):
+    """Enqueue the same command for an explicit list of device_ids.
+
+    Unlike broadcast, offline agents are included so they pick the command
+    up on the next heartbeat (used by Connect all).
+    """
+    type: str = "reconnect"
+    device_ids: list[str] = []
+
+
 class CommandAck(BaseModel):
     status: str  # "done" | "failed"
     error: str | None = None

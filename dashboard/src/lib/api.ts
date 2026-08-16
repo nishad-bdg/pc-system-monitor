@@ -1002,3 +1002,15 @@ export function broadcastCommand(
     body: JSON.stringify({ type }),
   });
 }
+
+export function sendCommandBatch(
+  apiUrl: string,
+  apiToken: string,
+  type: "reconnect",
+  deviceIds: string[],
+): Promise<{ total: number; sent: Command[] }> {
+  return apiRequest(apiUrl, apiToken, "/commands/batch", {
+    method: "POST",
+    body: JSON.stringify({ type, device_ids: deviceIds }),
+  });
+}
