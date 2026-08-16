@@ -351,6 +351,8 @@ def _start_tray_watchdog(loop: "WatchLoop", tray) -> None:
     """
     import threading as _threading
 
+    from .win_runtime import log_watch_error
+
     if tray is None:
         return
 
