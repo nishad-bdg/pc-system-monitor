@@ -183,6 +183,56 @@ def _macos_print_count(name: str) -> int | None:
     return None
 
 
+def _windows_printer_ports() -> dict[str, str]:
+    """Map port name -> host/IP from Get-PrinterPort (Windows).
+
+    Returns ``{name: address}``; the address is the raw ``PrinterHostAddress``
+    or ``PortNumber``-carrying ``DeviceURL`` when present. This is the
+    authoritative source for where a port points, unlike parsing the port
+    *name*, which WSD ports and renamed TCP/IP ports hide the IP in.
+    """
+    script = (
+        "Get-PrinterPort -ErrorAction SilentlyContinue | "
+        "Select-Object Name, PrinterHostAddress, PortNumber, DeviceURL | "
+        "ConvertTo-Json -Compress"
+    )
+    raw = _run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+        ],
+        timeout=20.0,
+    )
+    if not raw.strip():
+        return {}
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return {}
+    if isinstance(payload, dict):
+        payload = [payload]
+    if not isinstance(payload, list):
+        return {}
+    result: dict[str, str] = {}
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("Name") or "").strip()
+        if not name:
+            continue
+        address = str(item.get("PrinterHostAddress") or "").strip()
+        if address and address.lower() not in {"", "0", "n/a", "na"}:
+            result[name] = address
+            continue
+        url = str(item.get("DeviceURL") or "").strip()
+        if url and url.lower() not in {"", "n/a"}:
+            result[name] = url
+    return result
+
+
 def _windows_print_counts() -> dict[str, int]:
     """Map printer name -> count from Get-PrinterProperty when exposed."""
     script = r"""
@@ -289,6 +339,7 @@ def _collect_windows() -> list[Printer]:
         return []
 
     counts = _windows_print_counts()
+    port_map = _windows_printer_ports()
     printers: list[Printer] = []
     for item in payload:
         if not isinstance(item, dict):
@@ -298,12 +349,26 @@ def _collect_windows() -> list[Printer]:
         if not name:
             continue
         connection = classify_connection(port)
+        # Prefer the authoritative Get-PrinterPort address; fall back to
+        # parsing the port name only when the port map has nothing.
+        host = port_map.get(port)
+        ip = extract_printer_ip(host, connection) if host else extract_printer_ip(port, connection)
+        # A renamed port (e.g. "LOBBY-PRINTER") has no network hint in its
+        # name even though the port points at a remote host — promote it to
+        # network so the resolved host IP is surfaced.
+        if (
+            connection == "other"
+            and host
+            and _IPV4_RE.search(host or "")
+        ):
+            connection = "network"
+            ip = extract_printer_ip(host, connection)
         printers.append(
             Printer(
                 name=name,
                 port=port,
                 connection=connection,
-                ip=extract_printer_ip(port, connection),
+                ip=ip,
                 print_count=counts.get(name),
             )
         )

@@ -464,6 +464,55 @@ def test_collect_printers_windows(monkeypatch):
     assert info.network[0].print_count == 100
     assert [p.name for p in info.other] == ["Microsoft Print to PDF"]
 
+
+def test_collect_printers_windows_uses_printer_port_host(monkeypatch):
+    from system_info import printers
+
+    monkeypatch.setattr(printers.os, "name", "nt")
+    printers_payload = json.dumps(
+        [
+            # WSD port: no IP in the name, but the port's host address has it.
+            {"Name": "Floor Printer WSD", "PortName": "WSD-1234.device"},
+            # Renamed TCP/IP port: name hides the IP.
+            {"Name": "Lobby Printer", "PortName": "LOBBY-PRINTER"},
+            {"Name": "Reg Lar IP Port", "PortName": "IP_10.0.0.5"},
+        ]
+    )
+    ports_payload = json.dumps(
+        [
+            {
+                "Name": "WSD-1234.device",
+                "PrinterHostAddress": "192.168.1.77",
+                "PortNumber": 0,
+                "DeviceURL": "WSD-1234.device",
+            },
+            {
+                "Name": "LOBBY-PRINTER",
+                "PrinterHostAddress": "192.168.1.99",
+                "PortNumber": 9100,
+                "DeviceURL": "",
+            },
+            {
+                "Name": "IP_10.0.0.5",
+                "PrinterHostAddress": "",
+                "PortNumber": 9100,
+                "DeviceURL": "",
+            },
+        ]
+    )
+
+    def fake_run(cmd, timeout=8.0):
+        return ports_payload if "Get-PrinterPort" in cmd[4] else printers_payload
+
+    monkeypatch.setattr(printers, "_run", fake_run)
+    monkeypatch.setattr(printers, "_windows_print_counts", lambda: {})
+    info = printers.collect_printers()
+    assert info.count == 3
+    by_name = {p.name: p for p in info.network}
+    assert by_name["Floor Printer WSD"].ip == "192.168.1.77"
+    assert by_name["Lobby Printer"].ip == "192.168.1.99"
+    assert by_name["Reg Lar IP Port"].ip == "10.0.0.5"
+
 def test_resolve_pc_name_macos_ignores_explicit(monkeypatch):
     from system_info import device
 
