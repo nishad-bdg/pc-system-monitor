@@ -235,7 +235,8 @@ class WatchCommandSocket(threading.Thread):
 
     Reconnects forever with a capped backoff; sends `hello` on connect so the
     server registers this agent socket, then waits for `command` messages,
-    executes them and replies with `command.ack`. `stop()` closes the loop.
+    executes them and replies with `command.ack`. The watch loop also pushes
+    live `metrics` samples on this socket. `stop()` closes the loop.
     """
 
     def __init__(
@@ -253,6 +254,8 @@ class WatchCommandSocket(threading.Thread):
         self.pc_name = pc_name
         self.on_update_applied = on_update_applied
         self._stop = threading.Event()
+        self._ws = None
+        self._ws_lock = threading.Lock()
 
     def stop(self) -> None:
         self._stop.set()
@@ -286,6 +289,8 @@ class WatchCommandSocket(threading.Thread):
             timeout=REQUEST_TIMEOUT,
             enable_multithread=True,
         )
+        with self._ws_lock:
+            self._ws = ws
         try:
             ws.send(json.dumps({"type": "hello", "device_id": self.device_id, "pc_name": self.pc_name}))
             while not self._stop.is_set():
@@ -331,10 +336,26 @@ class WatchCommandSocket(threading.Thread):
                             self.on_update_applied()
                             return
         finally:
+            with self._ws_lock:
+                if self._ws is ws:
+                    self._ws = None
             try:
                 ws.close()
             except Exception:
                 pass
+
+    def send_metrics(self, sample: dict) -> bool:
+        """Push a live CPU/RAM/network sample over the open agent socket."""
+        payload = {"type": "metrics", **sample}
+        with self._ws_lock:
+            ws = self._ws
+            if ws is None:
+                return False
+            try:
+                ws.send(json.dumps(payload))
+                return True
+            except Exception:
+                return False
 
     def _start_collect(self, command_id: str) -> None:
         def _job() -> None:

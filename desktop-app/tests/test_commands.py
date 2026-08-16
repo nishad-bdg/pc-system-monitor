@@ -556,3 +556,24 @@ def test_ws_agent_collect_http_acks_in_background(monkeypatch):
     while _time.time() < deadline and not http_acks:
         _time.sleep(0.01)
     assert http_acks == [("cmd-c", "done")]
+
+
+def test_ws_send_metrics_uses_open_socket():
+    sent = []
+
+    class FakeWs:
+        def send(self, data):
+            sent.append(data)
+
+    sock = commands.WatchCommandSocket("https://x", "sk-key", "d1", pc_name="PC1")
+    sock._ws = FakeWs()
+    assert sock.send_metrics({"cpu_percent": 9.0, "device_id": "d1"}) is True
+    payload = json.loads(sent[0])
+    assert payload["type"] == "metrics"
+    assert payload["cpu_percent"] == 9.0
+    assert payload["device_id"] == "d1"
+
+
+def test_ws_send_metrics_without_socket():
+    sock = commands.WatchCommandSocket("https://x", "sk-key", "d1")
+    assert sock.send_metrics({"cpu_percent": 1.0}) is False

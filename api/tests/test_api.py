@@ -2357,6 +2357,72 @@ def test_websocket_agent_resends_pending_on_hello(monkeypatch):
         assert received["command"]["type"] == "shutdown"
 
 
+def test_websocket_agent_metrics_broadcast(monkeypatch):
+    from sysinfo_api import realtime
+    import time as _time
+
+    _patch_db(monkeypatch)
+    key = security.generate_api_key()
+    monkeypatch.setattr(
+        db, "find_api_key_by_hash", lambda h: {"_id": "x", "prefix": key[:20], "active": True}
+    )
+    monkeypatch.setattr(db, "list_pending_commands", lambda device_id: [])
+    received = []
+
+    async def fake_broadcast(sample):
+        received.append(sample)
+
+    monkeypatch.setattr(realtime, "broadcast_metrics", fake_broadcast)
+    with client.websocket_connect("/ws/agent", subprotocols=[key]) as ws:
+        ws.send_json({"type": "hello", "device_id": "dev-1", "pc_name": "PC1"})
+        ws.send_json({
+            "type": "metrics",
+            "device_id": "spoofed",
+            "cpu_percent": 12.5,
+            "ram_percent": 40,
+            "ram_used": 100,
+            "ram_total": 250,
+            "bytes_sent": 10,
+            "bytes_recv": 20,
+            "send_rate_bps": 1.5,
+            "recv_rate_bps": 2.5,
+        })
+        deadline = _time.time() + 2
+        while _time.time() < deadline and not received:
+            _time.sleep(0.05)
+    assert len(received) == 1
+    assert received[0]["device_id"] == "dev-1"
+    assert received[0]["cpu_percent"] == 12.5
+    assert received[0]["ram_percent"] == 40
+
+
+def test_broadcast_metrics_skips_empty_device():
+    import asyncio as _asyncio
+    from sysinfo_api import realtime
+
+    sent = []
+
+    async def fake_send(payload):
+        sent.append(payload)
+
+    realtime._clients.clear()
+    original = realtime._send
+    realtime._send = fake_send
+    try:
+        _asyncio.run(realtime.broadcast_metrics({"cpu_percent": 1}))
+        _asyncio.run(realtime.broadcast_metrics({
+            "device_id": "dev-9",
+            "cpu_percent": "11.5",
+            "ram_percent": 20,
+        }))
+    finally:
+        realtime._send = original
+    assert len(sent) == 1
+    assert sent[0]["type"] == "metrics.sample"
+    assert sent[0]["metrics"]["device_id"] == "dev-9"
+    assert sent[0]["metrics"]["cpu_percent"] == 11.5
+
+
 class ObjectIdStr(str):
     """Placeholder _id string so `str(doc["_id"])` round-trips."""
 

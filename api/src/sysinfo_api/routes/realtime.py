@@ -144,7 +144,9 @@ async def websocket_agent_endpoint(ws: WebSocket, token: str = Query(default="")
     subprotocol (Python ws clients can set protocol headers). The first
     message must be a JSON `{"type": "hello", "device_id": "...", ...}` that
     registers the socket; afterwards the server pushes `{"type":"command", ...}`
-    instantly and the agent replies with `{"type":"command.ack", ...}`.
+    instantly and the agent replies with `{"type":"command.ack", ...}`. The
+    agent also sends `{"type":"metrics", ...}` samples (live CPU/RAM/network)
+    which are broadcast to dashboards and not stored.
     """
     key = token or _agent_token(ws)
     record = db.find_api_key_by_hash(security.hash_api_key(key)) if key else None
@@ -191,6 +193,11 @@ async def websocket_agent_endpoint(ws: WebSocket, token: str = Query(default="")
                 continue
             if msg_type == "pong":
                 realtime.resolve_pong(str((msg or {}).get("ping_id") or ""))
+                continue
+            if msg_type == "metrics" and device_id:
+                sample = dict(msg or {})
+                sample["device_id"] = device_id
+                await realtime.broadcast_metrics(sample)
                 continue
     except WebSocketDisconnect:
         pass

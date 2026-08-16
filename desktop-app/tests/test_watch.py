@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from system_info.watch import HEARTBEAT_INTERVAL, HOUR_INTERVAL, WatchLoop
+from system_info.watch import HEARTBEAT_INTERVAL, HOUR_INTERVAL, METRICS_INTERVAL, WatchLoop
 
 
 def _args(**overrides) -> argparse.Namespace:
@@ -88,6 +88,45 @@ def test_heartbeat_and_full_report_intervals_are_sane():
     assert HEARTBEAT_INTERVAL <= 60
     assert HEARTBEAT_INTERVAL * 2 < 300
     assert HOUR_INTERVAL == 3600
+    assert METRICS_INTERVAL == 5
+    assert METRICS_INTERVAL < HEARTBEAT_INTERVAL
+
+
+def test_send_live_metrics(monkeypatch):
+    sent = {}
+
+    class FakeAgent:
+        def send_metrics(self, payload):
+            sent.update(payload)
+            return True
+
+    monkeypatch.setattr(
+        "system_info.live_metrics.collect_live_metrics",
+        lambda: {
+            "cpu_percent": 11.0,
+            "ram_percent": 22.0,
+            "ram_used": 1,
+            "ram_total": 2,
+            "bytes_sent": 3,
+            "bytes_recv": 4,
+            "send_rate_bps": 5.0,
+            "recv_rate_bps": 6.0,
+        },
+    )
+    monkeypatch.setattr("system_info.watch.get_or_create_device_id", lambda n: "d1")
+    monkeypatch.setattr("system_info.watch.resolve_pc_name", lambda n: "PC")
+    loop = WatchLoop(_args())
+    loop._agent_ws = FakeAgent()
+    loop.send_live_metrics()
+    assert sent["device_id"] == "d1"
+    assert sent["pc_name"] == "PC"
+    assert sent["cpu_percent"] == 11.0
+    assert sent["recv_rate_bps"] == 6.0
+
+
+def test_send_live_metrics_noop_without_agent():
+    loop = WatchLoop(_args())
+    loop.send_live_metrics()
 
 
 @pytest.mark.parametrize(

@@ -1,10 +1,10 @@
 """In-process WebSocket broadcaster + presence cache.
 
 Holds the set of connected admin clients and lets handlers push
-`report.created` / `presence.changed` events (with printers) to every open
-socket. Because the app may run multiple uvicorn workers, this is best-effort
-per-process; the dashboard also refetches on reconnect, so no event is
-permanently lost in practice.
+`report.created` / `presence.changed` / `print.job` / `metrics.sample`
+events to every open socket. Because the app may run multiple uvicorn
+workers, this is best-effort per-process; the dashboard also refetches on
+reconnect, so no event is permanently lost in practice.
 
 The presence cache mirrors the `machines` collection in memory so that:
   - a connected `/ws/agent` socket (or heartbeat) flips a dot to green instantly, and
@@ -233,6 +233,44 @@ async def broadcast_print_job(job: dict) -> None:
     await _send({
         "type": "print.job",
         "job": _strip_mongo_ids(job),
+        "ts": time.time(),
+    })
+
+
+def _as_float(value) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _as_int(value) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+async def broadcast_metrics(sample: dict) -> None:
+    """Broadcast a live CPU/RAM/network sample. Not persisted."""
+    device_id = str(sample.get("device_id") or "").strip()
+    if not device_id:
+        return
+    pc_name = str(sample.get("pc_name") or "").strip() or None
+    await _send({
+        "type": "metrics.sample",
+        "metrics": {
+            "device_id": device_id,
+            "pc_name": pc_name,
+            "cpu_percent": _as_float(sample.get("cpu_percent")),
+            "ram_percent": _as_float(sample.get("ram_percent")),
+            "ram_used": _as_int(sample.get("ram_used")),
+            "ram_total": _as_int(sample.get("ram_total")),
+            "bytes_sent": _as_int(sample.get("bytes_sent")),
+            "bytes_recv": _as_int(sample.get("bytes_recv")),
+            "send_rate_bps": _as_float(sample.get("send_rate_bps")),
+            "recv_rate_bps": _as_float(sample.get("recv_rate_bps")),
+        },
         "ts": time.time(),
     })
 

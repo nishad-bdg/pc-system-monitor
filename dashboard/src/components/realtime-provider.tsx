@@ -23,6 +23,20 @@ export type PresenceEntry = {
   pc_name?: string | null;
 };
 
+export type LiveMetricsSample = {
+  device_id: string;
+  pc_name?: string | null;
+  cpu_percent?: number;
+  ram_percent?: number;
+  ram_used?: number;
+  ram_total?: number;
+  bytes_sent?: number;
+  bytes_recv?: number;
+  send_rate_bps?: number;
+  recv_rate_bps?: number;
+  ts?: number;
+};
+
 export type RealtimeEvent = {
   type: string;
   report?: import("@/lib/api").Report;
@@ -31,6 +45,7 @@ export type RealtimeEvent = {
     device_id?: string;
     pc_name?: string | null;
   };
+  metrics?: LiveMetricsSample;
   ts?: number;
 };
 
@@ -38,6 +53,11 @@ type PrintingEntry = {
   count: number;
   lastPrintAt: number;
 };
+
+type StoredMetrics = LiveMetricsSample & { receivedAt: number };
+
+/** Drop live gauges if the agent misses a few 5s samples. */
+const LIVE_METRICS_STALE_MS = 20_000;
 
 type RealtimeContextValue = {
   connected: boolean;
@@ -52,6 +72,8 @@ type RealtimeContextValue = {
   isPrinting: (deviceId?: string | null) => boolean;
   /** Live count of recent `print.job` events for a device. */
   printingCount: (deviceId?: string | null) => number;
+  /** Latest live CPU/RAM/network sample, or null if missing/stale. */
+  metricsFor: (deviceId?: string | null) => LiveMetricsSample | null;
   /** Force-refetch every active query (Refresh button). */
   refreshAll: () => void;
 };
@@ -64,6 +86,7 @@ const RealtimeContext = createContext<RealtimeContextValue>({
   lastSeenFor: (): number | undefined => undefined,
   isPrinting: () => false,
   printingCount: () => 0,
+  metricsFor: () => null,
   refreshAll: () => {},
 });
 
@@ -72,7 +95,8 @@ const RealtimeContext = createContext<RealtimeContextValue>({
  *  - keeps a live presence map from `presence.changed` events (the server
  *    pushes a heartbeat online instantly; the client flips to offline after
  *    ONLINE_TIMEOUT_SECONDS of silence — Messenger-style), and
- *  - invalidates reports queries on `report.created` so the fleet updates.
+ *  - invalidates reports queries on `report.created` so the fleet updates, and
+ *  - keeps live CPU/RAM/network gauges from `metrics.sample` (not stored).
  * Reconnects with capped exponential backoff and re-seeds presence.
  */
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
@@ -82,6 +106,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const [connected, setConnected] = useState(false);
   const [presence, setPresence] = useState<Record<string, PresenceEntry>>({});
   const [printing, setPrinting] = useState<Record<string, PrintingEntry>>({});
+  const [metrics, setMetrics] = useState<Record<string, StoredMetrics>>({});
+  const [tick, setTick] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const printTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -158,6 +184,13 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         queryClient.invalidateQueries({ queryKey: ["print-jobs"] });
         queryClient.invalidateQueries({ queryKey: ["print-summary"] });
       }
+      if (event.type === "metrics.sample" && event.metrics?.device_id) {
+        const sample = event.metrics;
+        setMetrics((prev) => ({
+          ...prev,
+          [sample.device_id]: { ...sample, receivedAt: Date.now() },
+        }));
+      }
     },
     [queryClient, setEntry, registerPrint],
   );
@@ -211,6 +244,12 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     };
   }, [apiToken, wsUrl, onEvent]);
 
+  // Re-evaluate stale live gauges so "Live" badges drop ~20s after samples stop.
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 5_000);
+    return () => clearInterval(id);
+  }, []);
+
   // Clear timers on unmount.
   useEffect(() => {
     return () => {
@@ -259,6 +298,17 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     [printing],
   );
 
+  const metricsFor = useCallback(
+    (deviceId?: string | null): LiveMetricsSample | null => {
+      if (!deviceId) return null;
+      const entry = metrics[deviceId];
+      if (!entry) return null;
+      if (Date.now() - entry.receivedAt >= LIVE_METRICS_STALE_MS) return null;
+      return entry;
+    },
+    [metrics, tick],
+  );
+
   return (
     <RealtimeContext.Provider
       value={{
@@ -269,6 +319,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         lastSeenFor,
         isPrinting,
         printingCount,
+        metricsFor,
         refreshAll,
       }}
     >

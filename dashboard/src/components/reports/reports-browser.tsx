@@ -26,6 +26,7 @@ import { DashboardShell } from "@/components/dashboard/shell";
 import { MachineDetail } from "@/components/dashboard/machine-detail";
 import { StatusDot } from "@/components/dashboard/status-dot";
 import { PrintingBadge } from "@/components/dashboard/printing-badge";
+import { LoadWarningBadge, isHighLiveLoad } from "@/components/dashboard/load-warning-badge";
 import { useRealtime } from "@/components/realtime-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -77,7 +78,7 @@ const defaultApplied: AppliedFilters = {
 export function ReportsBrowser() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
-  const { connected, isOnline, lastSeenFor, isPrinting, printingCount, refreshAll } =
+  const { connected, isOnline, lastSeenFor, isPrinting, printingCount, metricsFor, refreshAll } =
     useRealtime();
 
   const [pcName, setPcName] = useState("");
@@ -441,8 +442,12 @@ export function ReportsBrowser() {
             {machines.map((m) => {
               const active = m.key === selected?.key;
               const r = m.latest;
+              const live = metricsFor(m.deviceId);
               const disk = maxDiskPercent(r);
-              const net = networkTotalBytes(r);
+              const net =
+                live?.bytes_sent != null && live?.bytes_recv != null
+                  ? live.bytes_sent + live.bytes_recv
+                  : networkTotalBytes(r);
               const online = isOnline(m.deviceId) ?? r.online;
               const printing = isPrinting(m.deviceId);
               const printCount = printingCount(m.deviceId);
@@ -458,9 +463,15 @@ export function ReportsBrowser() {
                         : "text-slate-200 hover:bg-slate-900"
                     }`}
                   >
-                    {printing && (
-                      <span className="absolute right-2 top-1.5">
-                        <PrintingBadge count={printCount} />
+                    {(printing ||
+                      isHighLiveLoad(live?.cpu_percent) ||
+                      isHighLiveLoad(live?.ram_percent)) && (
+                      <span className="absolute right-2 top-1.5 flex flex-col items-end gap-1">
+                        {printing && <PrintingBadge count={printCount} />}
+                        <LoadWarningBadge
+                          cpu={live?.cpu_percent}
+                          ram={live?.ram_percent}
+                        />
                       </span>
                     )}
                     <div className="flex items-start justify-between gap-2">
@@ -481,8 +492,20 @@ export function ReportsBrowser() {
                         active ? "text-blue-100/90" : "text-slate-400"
                       }`}
                     >
-                      <span>CPU {fmtPercent(r.resources?.cpu_percent)}</span>
-                      <span>RAM {fmtPercent(r.resources?.ram_percent)}</span>
+                      <span
+                        className={
+                          isHighLiveLoad(live?.cpu_percent) ? "font-semibold text-red-300" : undefined
+                        }
+                      >
+                        CPU {fmtPercent(live?.cpu_percent ?? r.resources?.cpu_percent)}
+                      </span>
+                      <span
+                        className={
+                          isHighLiveLoad(live?.ram_percent) ? "font-semibold text-red-300" : undefined
+                        }
+                      >
+                        RAM {fmtPercent(live?.ram_percent ?? r.resources?.ram_percent)}
+                      </span>
                       <span>Disk {fmtPercent(disk)}</span>
                       <span>Net {fmtBytes(net)}</span>
                     </div>
@@ -550,14 +573,20 @@ export function ReportsBrowser() {
               </div>
               <div className="flex flex-wrap gap-3 text-xs text-slate-500">
                 <span>
-                  CPU {fmtPercent(selected.latest.resources?.cpu_percent)}
+                  CPU {fmtPercent(metricsFor(selected.deviceId)?.cpu_percent ?? selected.latest.resources?.cpu_percent)}
                 </span>
                 <span>
-                  RAM {fmtPercent(selected.latest.resources?.ram_percent)}
+                  RAM {fmtPercent(metricsFor(selected.deviceId)?.ram_percent ?? selected.latest.resources?.ram_percent)}
                 </span>
                 <span>Disk {fmtPercent(maxDiskPercent(selected.latest))}</span>
                 <span>
-                  Net {fmtBytes(networkTotalBytes(selected.latest))}
+                  Net {fmtBytes(
+                    metricsFor(selected.deviceId)?.bytes_sent != null &&
+                      metricsFor(selected.deviceId)?.bytes_recv != null
+                      ? (metricsFor(selected.deviceId)!.bytes_sent ?? 0) +
+                        (metricsFor(selected.deviceId)!.bytes_recv ?? 0)
+                      : networkTotalBytes(selected.latest),
+                  )}
                 </span>
               </div>
             </div>

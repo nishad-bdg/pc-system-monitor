@@ -9,6 +9,7 @@ exits after sending data.
 
 Timing:
   - heartbeat + print flush: every HEARTBEAT_INTERVAL (60s)
+  - live CPU/RAM/network sample: every METRICS_INTERVAL (5s) over /ws/agent
   - full hourly report: on start and then every HOUR_INTERVAL (60 min),
     aligned to the wall-clock hour so all PCs report around the same time
 """
@@ -30,6 +31,7 @@ from . import cli
 PRODUCT_NAME = getattr(_version, "PRODUCT_NAME", None) or "System Info Reporter"
 
 HEARTBEAT_INTERVAL = 60  # seconds — must stay well under the 300s online timeout
+METRICS_INTERVAL = 5  # seconds — live CPU/RAM/network gauges
 HOUR_INTERVAL = 3600  # seconds (60 min)
 
 
@@ -101,6 +103,20 @@ class WatchLoop:
             pass
         return bool(response)
 
+    def send_live_metrics(self) -> None:
+        """Push a cheap CPU/RAM/network sample over `/ws/agent` (not Mongo)."""
+        agent = getattr(self, "_agent_ws", None)
+        if agent is None:
+            return
+        from .live_metrics import collect_live_metrics
+
+        pc_name = resolve_pc_name(self.args.pc_name)
+        device_id = get_or_create_device_id(pc_name)
+        sample = collect_live_metrics()
+        sample["device_id"] = device_id
+        sample["pc_name"] = pc_name
+        agent.send_metrics(sample)
+
     def _stop_for_update(self) -> None:
         """A forced update was staged: stop this process and let it die.
 
@@ -151,15 +167,22 @@ class WatchLoop:
             self.full_report()
         except Exception:
             pass
+        last_heartbeat = time.time()
         while not self._stop.is_set():
-            self._stop.wait(HEARTBEAT_INTERVAL)
+            self._stop.wait(METRICS_INTERVAL)
             if self._stop.is_set():
                 break
             now = time.time()
             try:
-                self.heartbeat()
+                self.send_live_metrics()
             except Exception:
                 pass
+            if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                last_heartbeat = now
+                try:
+                    self.heartbeat()
+                except Exception:
+                    pass
             if self.should_full_report(now):
                 try:
                     self.full_report()

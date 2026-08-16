@@ -31,15 +31,18 @@ import {
 } from "@/lib/api";
 import { StatusDot } from "./status-dot";
 import { useRealtime } from "../realtime-provider";
+import type { LiveMetricsSample } from "../realtime-provider";
 import { RemoteActions } from "./remote-actions";
+import { isHighLiveLoad } from "./load-warning-badge";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 export function MachineDetail({ machine }: { machine: MachineSummary }) {
   const host = machine.latest;
-  const { isOnline, lastSeenFor } = useRealtime();
+  const { isOnline, lastSeenFor, metricsFor } = useRealtime();
   const liveOnline = isOnline(machine.deviceId) ?? host.online;
   const liveLastSeen = lastSeenFor(machine.deviceId, host.last_seen);
+  const live = metricsFor(machine.deviceId);
   const [tab, setTab] = useState<
     | "summary"
     | "overview"
@@ -65,12 +68,15 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
     (host.disk?.devices?.length ?? 0) > 0 ||
     (host.disk?.partitions?.length ?? 0) > 0;
 
-  const ramTotal = host.resources?.ram_total;
+  const ramTotal = live?.ram_total ?? host.resources?.ram_total;
   const ramAvailable = host.resources?.ram_available;
   const ramUsedBytes =
-    ramTotal != null && ramAvailable != null
+    live?.ram_used ??
+    (ramTotal != null && ramAvailable != null
       ? Math.max(0, ramTotal - ramAvailable)
-      : (host.resources?.ram_used ?? 0);
+      : (host.resources?.ram_used ?? 0));
+  const cpuPercent = live?.cpu_percent ?? host.resources?.cpu_percent;
+  const ramPercent = live?.ram_percent ?? host.resources?.ram_percent;
 
   return (
     <div className="space-y-6">
@@ -204,34 +210,36 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
       ) : tab === "emails" ? (
         <EmailsTab accounts={machineEmails(host)} />
       ) : tab === "summary" ? (
-        <SummarySection machine={machine} />
+        <SummarySection machine={machine} live={live} />
       ) : (
         <>
-          {host.resources && (
+          {(host.resources || live) && (
             <div className="grid gap-4 sm:grid-cols-3">
               <StatCard
                 label="CPU usage"
-                value={fmtPercent(host.resources.cpu_percent)}
-                sub={`${host.resources.cpu_count ?? "?"} cores · ${
-                  host.resources.cpu_freq_mhz ?? "?"
+                value={fmtPercent(cpuPercent)}
+                sub={`${host.resources?.cpu_count ?? "?"} cores · ${
+                  host.resources?.cpu_freq_mhz ?? "?"
                 } MHz`}
                 accent
+                live={live != null}
+                warn={isHighLiveLoad(live?.cpu_percent)}
               />
               <StatCard
                 label="Memory (RAM)"
-                value={fmtPercent(host.resources.ram_percent)}
-                sub={`${fmtBytes(ramUsedBytes)} / ${fmtBytes(
-                  host.resources.ram_total,
-                )}`}
+                value={fmtPercent(ramPercent)}
+                sub={`${fmtBytes(ramUsedBytes)} / ${fmtBytes(ramTotal)}`}
+                live={live != null}
+                warn={isHighLiveLoad(live?.ram_percent)}
               />
               <StatCard
                 label="Swap"
-                value={fmtPercent(host.resources.swap_percent)}
-                sub={`${fmtBytes(host.resources.swap_used)} / ${fmtBytes(
-                  host.resources.swap_total,
+                value={fmtPercent(host.resources?.swap_percent)}
+                sub={`${fmtBytes(host.resources?.swap_used)} / ${fmtBytes(
+                  host.resources?.swap_total,
                 )}`}
               />
-              {host.resources.battery && (
+              {host.resources?.battery && (
                 <StatCard
                   label="Battery"
                   value={fmtPercent(host.resources.battery.percent)}
@@ -281,7 +289,11 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
 
           {host.disk && hasDisk && <DiskState disk={host.disk} />}
 
-          <NetworkSection network={host.network ?? null} series={bandwidthSeries} />
+          <NetworkSection
+            network={host.network ?? null}
+            series={bandwidthSeries}
+            live={live}
+          />
 
           {host.printers && <PrintersSection printers={host.printers} />}
 
@@ -460,7 +472,13 @@ function ReportHistorySection({ reports }: { reports: Report[] }) {
   );
 }
 
-function SummarySection({ machine }: { machine: MachineSummary }) {
+function SummarySection({
+  machine,
+  live,
+}: {
+  machine: MachineSummary;
+  live?: LiveMetricsSample | null;
+}) {
   const r = machine.latest;
   const res = r.resources;
   const uptime = r.uptime;
@@ -505,9 +523,14 @@ function SummarySection({ machine }: { machine: MachineSummary }) {
         />
         <StatCard
           label="Network total"
-          value={fmtBytes(networkTotalBytes(r))}
+          value={fmtBytes(
+            live?.bytes_sent != null && live?.bytes_recv != null
+              ? live.bytes_sent + live.bytes_recv
+              : networkTotalBytes(r),
+          )}
           sub="Sent + received since boot"
           accent
+          live={live != null}
         />
       </div>
 
@@ -528,13 +551,41 @@ function SummarySection({ machine }: { machine: MachineSummary }) {
             <span className="font-medium text-slate-900">
               {res?.cpu_freq_mhz != null ? `${res.cpu_freq_mhz} MHz` : "—"}
             </span>
+            <span className="text-slate-500">Usage</span>
+            <span
+              className={`font-medium ${
+                isHighLiveLoad(live?.cpu_percent) ? "text-red-700" : "text-slate-900"
+              }`}
+            >
+              {fmtPercent(live?.cpu_percent ?? res?.cpu_percent)}
+              {isHighLiveLoad(live?.cpu_percent)
+                ? " · high"
+                : live
+                  ? " · live"
+                  : ""}
+            </span>
           </div>
         </InfoBlock>
 
         <InfoBlock title="RAM (full spec)">
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
             <span className="text-slate-500">Total</span>
-            <span className="font-medium text-slate-900">{fmtBytes(res?.ram_total)}</span>
+            <span className="font-medium text-slate-900">
+              {fmtBytes(live?.ram_total ?? res?.ram_total)}
+            </span>
+            <span className="text-slate-500">Used</span>
+            <span
+              className={`font-medium ${
+                isHighLiveLoad(live?.ram_percent) ? "text-red-700" : "text-slate-900"
+              }`}
+            >
+              {fmtPercent(live?.ram_percent ?? res?.ram_percent)}
+              {isHighLiveLoad(live?.ram_percent)
+                ? " · high"
+                : live
+                  ? " · live"
+                  : ""}
+            </span>
             <span className="text-slate-500">Available</span>
             <span className="font-medium text-slate-900">{fmtBytes(res?.ram_available)}</span>
             <span className="text-slate-500">Free</span>
@@ -1029,40 +1080,52 @@ function UptimeSection({
 function NetworkSection({
   network,
   series,
+  live,
 }: {
   network: Report["network"] | null;
   series: { time: string; upload: number; download: number }[];
+  live?: LiveMetricsSample | null;
 }) {
   const hasRates = series.some((p) => p.upload > 0 || p.download > 0);
+  const bytesSent = live?.bytes_sent ?? network?.bytes_sent;
+  const bytesRecv = live?.bytes_recv ?? network?.bytes_recv;
+  const sendRate = live?.send_rate_bps ?? network?.send_rate_bps;
+  const recvRate = live?.recv_rate_bps ?? network?.recv_rate_bps;
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
       <h2 className="text-sm font-medium text-slate-700">Network bandwidth</h2>
       <p className="mt-1 text-xs text-slate-500">
-        Totals since boot · NIC rates sampled at report time
+        {live
+          ? "Totals since boot · NIC rates live over WebSocket"
+          : "Totals since boot · NIC rates sampled at report time"}
       </p>
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="Sent total"
-          value={fmtBytes(network?.bytes_sent)}
+          value={fmtBytes(bytesSent)}
           sub="Since boot"
+          live={live != null}
         />
         <StatCard
           label="Received total"
-          value={fmtBytes(network?.bytes_recv)}
+          value={fmtBytes(bytesRecv)}
           sub="Since boot"
+          live={live != null}
         />
         <StatCard
           label="Upload rate"
-          value={fmtRate(network?.send_rate_bps)}
-          sub="Current sample"
+          value={fmtRate(sendRate)}
+          sub={live ? "Live" : "Current sample"}
           accent
+          live={live != null}
         />
         <StatCard
           label="Download rate"
-          value={fmtRate(network?.recv_rate_bps)}
-          sub="Current sample"
+          value={fmtRate(recvRate)}
+          sub={live ? "Live" : "Current sample"}
           accent
+          live={live != null}
         />
       </div>
 
@@ -1624,26 +1687,49 @@ function StatCard({
   value,
   sub,
   accent,
+  live,
+  warn,
 }: {
   label: string;
   value: string;
   sub: string;
   accent?: boolean;
+  live?: boolean;
+  warn?: boolean;
 }) {
   return (
     <div
       className={`rounded-2xl border p-5 shadow-sm shadow-slate-200/50 ${
-        accent
-          ? "border-blue-100 bg-blue-50/70"
-          : "border-slate-200 bg-white"
+        warn
+          ? "border-red-200 bg-red-50/80"
+          : accent
+            ? "border-blue-100 bg-blue-50/70"
+            : "border-slate-200 bg-white"
       }`}
     >
-      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+      <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
         {label}
+        {live && (
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold tracking-wide ${
+              warn
+                ? "bg-red-500 text-white"
+                : "bg-emerald-100 text-emerald-700"
+            }`}
+          >
+            {warn && (
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
+              </span>
+            )}
+            {warn ? "High" : "Live"}
+          </span>
+        )}
       </p>
       <p
         className={`mt-1 text-3xl font-semibold tracking-tight ${
-          accent ? "text-blue-700" : "text-slate-900"
+          warn ? "text-red-700" : accent ? "text-blue-700" : "text-slate-900"
         }`}
       >
         {value}

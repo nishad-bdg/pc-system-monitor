@@ -25,7 +25,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 export function ReportPcDetail({ encodedKey }: { encodedKey: string }) {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
-  const { isOnline, lastSeenFor, refreshAll } = useRealtime();
+  const { isOnline, lastSeenFor, metricsFor, refreshAll } = useRealtime();
   const key = decodeMachineKey(encodedKey);
   const baseFilters = filtersForMachineKey(key);
 
@@ -51,6 +51,14 @@ export function ReportPcDetail({ encodedKey }: { encodedKey: string }) {
     );
   }, [data?.reports, key]);
 
+  const live = metricsFor(machine?.deviceId);
+  const netBytes =
+    live?.bytes_sent != null && live?.bytes_recv != null
+      ? live.bytes_sent + live.bytes_recv
+      : machine
+        ? networkTotalBytes(machine.latest)
+        : undefined;
+
   return (
     <DashboardShell
       title="PC detail"
@@ -66,10 +74,16 @@ export function ReportPcDetail({ encodedKey }: { encodedKey: string }) {
           </p>
           {machine && (
             <ul className="mt-3 space-y-1 text-xs text-slate-400">
-              <li>CPU {fmtPercent(machine.latest.resources?.cpu_percent)}</li>
-              <li>RAM {fmtPercent(machine.latest.resources?.ram_percent)}</li>
+              <li>
+                CPU{" "}
+                {fmtPercent(live?.cpu_percent ?? machine.latest.resources?.cpu_percent)}
+              </li>
+              <li>
+                RAM{" "}
+                {fmtPercent(live?.ram_percent ?? machine.latest.resources?.ram_percent)}
+              </li>
               <li>Disk {fmtPercent(maxDiskPercent(machine.latest))}</li>
-              <li>Net {fmtBytes(networkTotalBytes(machine.latest))}</li>
+              <li>Net {fmtBytes(netBytes)}</li>
               <li>
                 Seen{" "}
                 {fmtRelative(

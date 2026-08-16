@@ -18,6 +18,7 @@ import { DashboardShell } from "./shell";
 import { MachineDetail } from "./machine-detail";
 import { StatusDot } from "./status-dot";
 import { PrintingBadge } from "./printing-badge";
+import { LoadWarningBadge, isHighLiveLoad } from "./load-warning-badge";
 import { UpdateAppsButton } from "./update-apps-button";
 import { useRealtime } from "../realtime-provider";
 
@@ -26,7 +27,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 export function Dashboard() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
-  const { connected, isOnline, lastSeenFor, isPrinting, printingCount, refreshAll } =
+  const { connected, isOnline, lastSeenFor, isPrinting, printingCount, metricsFor, refreshAll } =
     useRealtime();
   const [filter, setFilter] = useState("");
   const [groupFilter, setGroupFilter] = useState("");
@@ -125,7 +126,9 @@ export function Dashboard() {
           <ul className="space-y-1">
             {filtered.map((m) => {
               const active = m.key === selected?.key;
-              const cpu = m.latest.resources?.cpu_percent;
+              const live = metricsFor(m.deviceId);
+              const cpu = live?.cpu_percent ?? m.latest.resources?.cpu_percent;
+              const ram = live?.ram_percent ?? m.latest.resources?.ram_percent;
               const online = isOnline(m.deviceId) ?? m.latest.online;
               const printing = isPrinting(m.deviceId);
               const printCount = printingCount(m.deviceId);
@@ -141,9 +144,15 @@ export function Dashboard() {
                         : "text-slate-200 hover:bg-slate-900"
                     }`}
                   >
-                    {printing && (
-                      <span className="absolute right-2 top-1.5">
-                        <PrintingBadge count={printCount} />
+                    {(printing ||
+                      isHighLiveLoad(live?.cpu_percent) ||
+                      isHighLiveLoad(live?.ram_percent)) && (
+                      <span className="absolute right-2 top-1.5 flex flex-col items-end gap-1">
+                        {printing && <PrintingBadge count={printCount} />}
+                        <LoadWarningBadge
+                          cpu={live?.cpu_percent}
+                          ram={live?.ram_percent}
+                        />
                       </span>
                     )}
                     <div className="flex items-start justify-between gap-2">
@@ -164,9 +173,21 @@ export function Dashboard() {
                         active ? "text-blue-100/90" : "text-slate-400"
                       }`}
                     >
-                      <span>CPU {fmtPercent(cpu)}</span>
+                      <span
+                        className={
+                          isHighLiveLoad(live?.cpu_percent) ? "font-semibold text-red-300" : undefined
+                        }
+                      >
+                        CPU {fmtPercent(cpu)}
+                      </span>
                       <span aria-hidden>·</span>
-                      <span>RAM {fmtPercent(m.latest.resources?.ram_percent)}</span>
+                      <span
+                        className={
+                          isHighLiveLoad(live?.ram_percent) ? "font-semibold text-red-300" : undefined
+                        }
+                      >
+                        RAM {fmtPercent(ram)}
+                      </span>
                     </div>
                     {(m.latest.private_ip ||
                       machineMac(m.latest) ||

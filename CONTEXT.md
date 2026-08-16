@@ -74,7 +74,7 @@ Restart the API after model/query changes; old processes strip unknown fields (e
 uv run system-info --api-key sk-...          # full collect + save
 uv run system-info --no-save                 # print only
 uv run system-info --heartbeat               # lightweight online ping (one-shot)
-uv run system-info --watch                   # always-on daemon (Windows messenger-style, tray Exit)
+uv run system-info --watch                   # always-on daemon: heartbeats, live metrics, hourly reports, tray Exit
 uv run system-info --pc-name Office-PC-3     # Windows custom name
 uv run system-info --printers | --disk | --network | --sys | --security | --health | --emails
 uv run system-info --print-jobs              # flush new print jobs, then exit
@@ -264,7 +264,9 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
   presence online, and **re-sends any `pending` commands**. Server → agent:
   `{"type":"command", command:{id,device_id,type,status,created_at}}` or
   `{"type":"ping", ping_id, ts}`; agent → server: `{"type":"command.ack", ...}`
-  or `{"type":"pong", ping_id}`.
+  or `{"type":"pong", ping_id}`. The watcher also sends
+  `{"type":"metrics", ...}` every 5s (live CPU/RAM/network); the API
+  broadcasts that to dashboards as `metrics.sample`.
 - **Desktop execution** (`commands.py`): `System32\shutdown.exe /r` or `/s`
   with `/t 5 /f` and `CREATE_NO_WINDOW` (**Windows only**). Acks over WS **and**
   HTTP `POST /commands/{id}/ack`; a failed execute acks `failed`. `collect`
@@ -293,9 +295,10 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
 
 - **`POST /heartbeat`** (API key) — desktop pings with `{device_id, pc_name}`; records `last_seen` in the `machines` collection.
 - **`GET/POST /reports`** — every saved report is annotated with `online` + `last_seen` and broadcasts a `report.created` event (full report incl. `printers`) over the WebSocket so the dashboard updates in realtime (print counts included).
-- **`WebSocket /ws`** (`routes/realtime.py`) — the dashboard connects with its JWT passed as the WS **subprotocol** (or `?token=`); only `admin`/`super_admin` roles are allowed; `Origin` must match `CORS_ORIGINS`. On connect the server sends `{"type":"hello"}` then seeds `{"type":"presence.changed","presence":{device_id,online,last_seen,pc_name}}` for every known machine (in-process snapshot). Events: `{"type":"report.created","report":{...},"ts":...}`, `{"type":"presence.changed","presence":{...},"ts":...}`, and `{"type":"print.job","job":{...},"ts":...}`.
+- **`WebSocket /ws`** (`routes/realtime.py`) — the dashboard connects with its JWT passed as the WS **subprotocol** (or `?token=`); only `admin`/`super_admin` roles are allowed; `Origin` must match `CORS_ORIGINS`. On connect the server sends `{"type":"hello"}` then seeds `{"type":"presence.changed","presence":{device_id,online,last_seen,pc_name}}` for every known machine (in-process snapshot). Events: `{"type":"report.created","report":{...},"ts":...}`, `{"type":"presence.changed","presence":{...},"ts":...}`, `{"type":"print.job","job":{...},"ts":...}`, and `{"type":"metrics.sample","metrics":{device_id,cpu_percent,ram_percent,ram_used,ram_total,bytes_sent,bytes_recv,send_rate_bps,recv_rate_bps},"ts":...}`.
 - **Live presence (Messenger-style):** `POST /heartbeat` and `POST /reports` (when `device_id` present) call `realtime.broadcast_presence(device_id, online=True, last_seen, pc_name)` so an open dashboard flips that PC's dot green instantly. The `broadcast_presence`/`update_presence` pair dedupes same-state flips. `realtime.py` keeps an in-process `_presence` map (`device_id -> {online,last_seen,pc_name}`); `presence_snapshot()` seeds newly-connected clients (notably **no initial fetch from Mongo** — the machine's known presence only reaches a fresh dashboard after a heartbeat/report from it, so a PC idle for >`ONLINE_TIMEOUT_SECONDS` starts grey until seen). The `presence.changed` payload goes out via the shared `_send` helper (never through `broadcast()`, which is `report.created`-only).
-- Dashboard `RealtimeProvider` (`src/components/realtime-provider.tsx`) holds one socket, reconnects with capped backoff, and invalidates `reports`/`reports-browse`/`report-pc` queries on each event — no manual Refresh needed. It keeps a live presence map and **client-side flips a dot to offline after `ONLINE_TIMEOUT_SECONDS` (300s)** of silence via per-device timers, so a machine that stops heartbeating goes red even without a server event (Messenger-style). `isOnline(deviceId)` and `lastSeenFor(deviceId, fallback)` feed the Fleet/Reports sidebar rows, report detail, and `machine-detail` identity bar. On `print.job` it invalidates `print-jobs`/`print-summary` so the Print Activity page updates live, and it bumps a per-device **`printing` badge** (60s window, `isPrinting(deviceId)`/`printingCount(deviceId)`) shown as an amber "printing"/"N prints" pill over the PC card in the Fleet + Reports sidebars (`printing-badge.tsx`).
+- **Live CPU / RAM / network:** while `--watch` is running the agent sends a cheap sample every **5s** over `/ws/agent` (`{"type":"metrics", device_id, cpu_percent, ram_percent, ram_used, ram_total, bytes_sent, bytes_recv, send_rate_bps, recv_rate_bps}`). `live_metrics.py` uses non-blocking `psutil.cpu_percent(interval=None)` and rate-since-last-sample — no 3s network window, no WMI. The API broadcasts `metrics.sample` to dashboard `/ws`. **Not stored in Mongo.** Full hourly reports (and Collect now) still persist snapshots.
+- Dashboard `RealtimeProvider` (`src/components/realtime-provider.tsx`) holds one socket, reconnects with capped backoff, and invalidates `reports`/`reports-browse`/`report-pc` queries on each event — no manual Refresh needed. It keeps a live presence map and **client-side flips a dot to offline after `ONLINE_TIMEOUT_SECONDS` (300s)** of silence via per-device timers, so a machine that stops heartbeating goes red even without a server event (Messenger-style). `isOnline(deviceId)` and `lastSeenFor(deviceId, fallback)` feed the Fleet/Reports sidebar rows, report detail, and `machine-detail` identity bar. On `print.job` it invalidates `print-jobs`/`print-summary` so the Print Activity page updates live, and it bumps a per-device **`printing` badge** (60s window, `isPrinting(deviceId)`/`printingCount(deviceId)`) shown as an amber "printing"/"N prints" pill over the PC card in the Fleet + Reports sidebars (`printing-badge.tsx`). On `metrics.sample` it overlays **live CPU %, RAM %, and NIC rates** on Fleet/Reports sidebars and the selected PC Overview/Summary/Network cards (`metricsFor(deviceId)`). Samples are **not** written to Mongo. If no sample arrives for ~20s the UI falls back to the last saved report. When a **live** sample has CPU or RAM **≥ 90%**, Fleet/Reports cards show a blinking red **CPU high** / **RAM high** / **CPU+RAM high** badge (`load-warning-badge.tsx`) and Overview CPU/RAM tiles switch the Live pill to blinking **High**. Hourly report values alone do not trigger the badge.
 - Broadcasting is in-process (best-effort per uvicorn worker); the dashboard also refetches on reconnect so nothing is permanently lost.
 
 ### Print Activity (`/print-jobs`)
@@ -333,7 +336,7 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 
 ### Fleet (`/dashboard`)
 
-- Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports. Each PC row and the detail header show a **green (online) / red (offline)** status dot; data updates live via WebSocket. Each row also shows the desktop **App version** (`v0.2.21`) from the latest report when present. The detail identity bar lists Private IP, Public IP, MAC, and **App version**. For `admin`/`super_admin` the detail header has **Ping** and **Collect now** (any OS) plus **Restart** / **Shut down** (Windows only). For `super_admin` the sidebar footer also shows an **Update all apps** button that pushes a `update` broadcast to every connected desktop app at once.
+- Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports. Each PC row and the detail header show a **green (online) / red (offline)** status dot; data updates live via WebSocket. Each row also shows the desktop **App version** (`v0.2.21`) from the latest report when present. Live CPU/RAM ≥ **90%** shows a blinking red **CPU high** / **RAM high** / **CPU+RAM high** badge on the card (`load-warning-badge.tsx`). The detail identity bar lists Private IP, Public IP, MAC, and **App version**. For `admin`/`super_admin` the detail header has **Ping** and **Collect now** (any OS) plus **Restart** / **Shut down** (Windows only). For `super_admin` the sidebar footer also shows an **Update all apps** button that pushes a `update` broadcast to every connected desktop app at once.
 - Detail tabs (`machine-detail.tsx`): **Summary (default) / Overview / Printers / Uptime / Storage / Health / Emails**.
   - **Summary:** total uptime + session, network total + bandwidth, full CPU spec (model/arch/cores/clock + **brand**), full RAM spec (total/available/free/swap + **bus speed** `ram_speed_mhz` + `ram_type`), storage health (SSD/HDD badge + brand, SMART, Healthy/Failing), battery health (condition, health %, cycle count), internet security, printers + total prints.
   - **Overview:** CPU/RAM/swap tiles, compact UptimeState (session + days tracked) + DiskState (devices/used/free), location/machine, Battery stat card (laptops only), Network bandwidth chart, Printers, Security card.
@@ -396,7 +399,8 @@ Tag `v*` (or Actions → Windows Release) builds the exe + Inno installer and pu
   shows the tray).
 - **Always-on watcher (`--watch`):** persistent tray icon (**Check for
   updates…** is the left-click default, plus **Restart**, **Exit**). Heartbeat
-  + print flush every **60s**, full report hourly. Stays open until tray Exit.
+  + print flush every **60s**, live CPU/RAM/network sample every **5s** over
+  `/ws/agent`, full report hourly. Stays open until tray Exit.
   One named mutex (`Local\RGM.SystemInfoReporter.Watch`) so installer + Run
   key + shortcuts cannot stack copies. If the tray backend fails, the
   heartbeat loop **keeps running** and appends `%APPDATA%\system-info\crash.log`
