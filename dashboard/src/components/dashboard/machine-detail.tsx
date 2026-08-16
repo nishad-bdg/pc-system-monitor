@@ -27,6 +27,7 @@ import {
   machineMac,
   networkTotalBytes,
   Report,
+  fmtAppVersion,
 } from "@/lib/api";
 import { StatusDot } from "./status-dot";
 import { useRealtime } from "../realtime-provider";
@@ -84,6 +85,7 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         <IdentityItem label="Private IP" value={host.private_ip} />
         <IdentityItem label="Public IP" value={host.public_ip} />
         <IdentityItem label="MAC address" value={machineMac(host)} />
+        <IdentityItem label="App version" value={fmtAppVersion(host.app_version)} />
         <div className="ml-auto">
           <RemoteActions
             apiUrl={API_URL}
@@ -270,6 +272,9 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
               <InfoBlock title="Machine">
                 {host.os.system ?? "—"} {host.os.release ?? "—"} ·{" "}
                 {host.os.machine ?? "—"} · {host.os.platform_detail ?? "—"}
+                {fmtAppVersion(host.app_version)
+                  ? ` · Reporter ${fmtAppVersion(host.app_version)}`
+                  : ""}
               </InfoBlock>
             )}
           </div>
@@ -334,6 +339,7 @@ function reportMatchesQuery(r: Report, query: string): boolean {
     fmtTime(r.created_at),
     r.pc_name,
     r.os?.hostname,
+    r.app_version,
     r.private_ip,
     r.public_ip,
     machineMac(r),

@@ -301,6 +301,7 @@ def test_create_report_with_api_key(monkeypatch):
             "public_ip": "8.8.8.8",
             "pc_name": "MacBook-Pro",
             "device_id": "dev-1",
+            "app_version": "0.2.21",
             "uptime": {
                 "boot_time": 1.0,
                 "uptime_seconds": 3600.0,
@@ -327,6 +328,7 @@ def test_create_report_with_api_key(monkeypatch):
     assert "id" in resp.json()
     assert saved["pc_name"] == "MacBook-Pro"
     assert saved["device_id"] == "dev-1"
+    assert saved["app_version"] == "0.2.21"
     assert saved["uptime"]["by_day"]["2026-08-12"] == 3600.0
     assert saved["security"]["count"] == 1
     assert saved["security"]["installed"][0]["name"] == "Windows Defender"

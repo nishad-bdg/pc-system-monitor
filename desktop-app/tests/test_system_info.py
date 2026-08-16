@@ -572,6 +572,7 @@ def test_run_show_sys_only(monkeypatch):
     assert data["location"] is None
     assert data["pc_name"] == "MacBook-Pro"
     assert data["device_id"] == "device-1"
+    assert data["app_version"] == cli.__version__
 
 
 def test_default_to_watch_frozen_windows_with_no_flags(monkeypatch):

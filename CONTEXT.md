@@ -106,6 +106,7 @@ Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`, `SYSTE
 | Field | Source | Notes |
 |-------|--------|--------|
 | `pc_name`, `device_id` | `device.py` | Always on save |
+| `app_version` | `version.py` | Desktop **System Info Reporter** version (e.g. `0.2.21`). Always on save. Dashboard shows it as `v0.2.21` on the machine identity bar, Fleet/Reports sidebar, and Overview Machine card. Older reports without the field show **—**. |
 | `os` | `os_info.py` | Includes hostname |
 | `private_ip`, `public_ip`, `mac_address`, `mac_addresses` | `ip.py` | |
 | `location` | `geo.py` | ip-api.com |
@@ -202,7 +203,7 @@ Detects POP/IMAP accounts configured in mail clients (address + server config on
 
 ### Report model extras
 
-Optional on `Report`: `pc_name`, `device_id`, `disk`, `printers`, `network`, `uptime`, `security`, `health`, `email_accounts` (plus original OS/IP/geo/resources).
+Optional on `Report`: `pc_name`, `device_id`, `app_version`, `disk`, `printers`, `network`, `uptime`, `security`, `health`, `email_accounts` (plus original OS/IP/geo/resources).
 
 ### `GET /reports` query params
 
@@ -318,7 +319,7 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 
 ### Fleet (`/dashboard`)
 
-- Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports. Each PC row and the detail header show a **green (online) / red (offline)** status dot; data updates live via WebSocket. For `admin`/`super_admin` the detail header has **Ping** (any OS) plus **Restart** / **Shut down** (Windows only). For `super_admin` the sidebar footer also shows an **Update all apps** button that pushes a `update` broadcast to every connected desktop app at once.
+- Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports. Each PC row and the detail header show a **green (online) / red (offline)** status dot; data updates live via WebSocket. Each row also shows the desktop **App version** (`v0.2.21`) from the latest report when present. The detail identity bar lists Private IP, Public IP, MAC, and **App version**. For `admin`/`super_admin` the detail header has **Ping** (any OS) plus **Restart** / **Shut down** (Windows only). For `super_admin` the sidebar footer also shows an **Update all apps** button that pushes a `update` broadcast to every connected desktop app at once.
 - Detail tabs (`machine-detail.tsx`): **Summary (default) / Overview / Printers / Uptime / Storage / Health / Emails**.
   - **Summary:** total uptime + session, network total + bandwidth, full CPU spec (model/arch/cores/clock + **brand**), full RAM spec (total/available/free/swap + **bus speed** `ram_speed_mhz` + `ram_type`), storage health (SSD/HDD badge + brand, SMART, Healthy/Failing), battery health (condition, health %, cycle count), internet security, printers + total prints.
   - **Overview:** CPU/RAM/swap tiles, compact UptimeState (session + days tracked) + DiskState (devices/used/free), location/machine, Battery stat card (laptops only), Network bandwidth chart, Printers, Security card.

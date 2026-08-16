@@ -20,6 +20,7 @@ import {
   networkTotalBytes,
   sortMachines,
   subCategoryOf,
+  fmtAppVersion,
 } from "@/lib/api";
 import { DashboardShell } from "@/components/dashboard/shell";
 import { MachineDetail } from "@/components/dashboard/machine-detail";
@@ -485,7 +486,7 @@ export function ReportsBrowser() {
                       <span>Disk {fmtPercent(disk)}</span>
                       <span>Net {fmtBytes(net)}</span>
                     </div>
-                    {(r.private_ip || machineMac(r)) && (
+                    {(r.private_ip || machineMac(r) || r.app_version) && (
                       <div
                         className={`mt-1 truncate font-mono text-[10px] ${
                           active ? "text-blue-100/70" : "text-slate-500"
@@ -493,6 +494,9 @@ export function ReportsBrowser() {
                       >
                         {r.private_ip ?? "—"}
                         {machineMac(r) ? ` · ${machineMac(r)}` : ""}
+                        {fmtAppVersion(r.app_version)
+                          ? ` · ${fmtAppVersion(r.app_version)}`
+                          : ""}
                       </div>
                     )}
                   </button>

@@ -293,6 +293,7 @@ def collect_all(args: argparse.Namespace) -> dict:
     device_id = get_or_create_device_id(pc_name)
     data["pc_name"] = pc_name
     data["device_id"] = device_id
+    data["app_version"] = __version__
     return data
 
 

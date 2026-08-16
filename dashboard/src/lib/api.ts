@@ -130,6 +130,7 @@ export interface Report {
       health_percent?: number | null;
     } | null;
   } | null;
+  app_version?: string | null;
   created_at?: number;
   online?: boolean;
   last_seen?: number;
@@ -286,6 +287,13 @@ export function machineMac(r: Report): string | null {
   const hex = raw.toLowerCase().replace(/[^0-9a-f]/g, "");
   if (hex.length === 12) return hex.match(/.{1,2}/g)!.join(":").toUpperCase();
   return raw;
+}
+
+/** Desktop System Info Reporter version from the latest report (`0.2.21` → `v0.2.21`). */
+export function fmtAppVersion(version?: string | null): string | null {
+  const value = (version || "").trim();
+  if (!value) return null;
+  return /^v/i.test(value) ? value : `v${value}`;
 }
 
 /** Configured email accounts on a report. */
