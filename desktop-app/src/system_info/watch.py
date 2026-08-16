@@ -291,11 +291,23 @@ class WatchLoop:
 def _run_tray_or_wait(loop: "WatchLoop", tray) -> None:
     """Block on the tray icon, or on the stop event if the tray cannot run.
 
-    A missing/broken tray used to either hide the process (headless wait with
-    no icon) or *exit* if `Icon.run` raised — both look like "not running"
-    after install. Keep the heartbeat loop alive and write crash.log instead.
+    Bulletproof tray handling:
+      - `icon.visible` is set ONLY from the setup callback (`_show_tray`),
+        which runs after the win32 tray window + message loop exist. Setting
+        it before `run()` makes `Shell_NotifyIcon(NIM_ADD)` race the window
+        creation, get silently dropped, and the icon never appears while the
+        heartbeat loop keeps running.
+      - A watchdog re-asserts visibility in case the setup thread died
+        silently (pystray's `_start_setup` thread swallows exceptions and
+        `run()` keeps looping), and force-stops the tray if it stays dead so
+        the retry loop below recreates the icon.
+      - If the tray thread dies (Explorer crash/restart, transient shell
+        issue), the icon is re-created and re-run instead of leaving the
+        watcher headless or exiting.
     """
     from .win_runtime import log_watch_error
+
+    _start_tray_watchdog(loop, tray)
 
     if tray is None:
         log_watch_error(
@@ -303,20 +315,82 @@ def _run_tray_or_wait(loop: "WatchLoop", tray) -> None:
         )
         loop._stop.wait()
         return
-    try:
+
+    while not loop._stop.is_set():
         try:
-            tray.run(setup=_show_tray)
-        except TypeError:
-            tray.visible = True
-            tray.run()
-    except Exception as exc:
-        log_watch_error(
-            "system tray failed; watcher stays running without an icon",
-            exc,
-        )
-        loop._stop.wait()
-        return
+            try:
+                tray.run(setup=_show_tray)
+            except TypeError:
+                # Very old pystray builds lack setup=: run() then shows the
+                # icon from its own setup thread, also after the loop exists.
+                tray.run()
+            # run() returns only after the icon has been stopped (Exit/Restart).
+            break
+        except Exception as exc:
+            log_watch_error("system tray failed; recreating icon", exc)
+        tray = _tray_icon(loop)
+        if tray is None:
+            loop._stop.wait()
+            return
+        _start_tray_watchdog(loop, tray)
+        if loop._stop.wait(5):
+            break
     loop._stop.set()
+
+
+def _start_tray_watchdog(loop: "WatchLoop", tray) -> None:
+    """Daemon thread that keeps the tray icon alive without blocking run().
+
+    pystray's win32 backend can end up "running" with no icon if the setup
+    callback thread died (exceptions there are swallowed) or if Explorer drops
+    the icon. The watchdog periodically:
+      1. re-asserts `visible=True` when the loop is up but the icon is not
+         (safe: with a valid `_hwnd` this re-sends NIM_ADD / NIM_MODIFY);
+      2. force-stops a tray whose message loop died, so `run()` returns and
+         `_run_tray_or_wait` recreates the icon from scratch.
+    """
+    import threading as _threading
+
+    if tray is None:
+        return
+
+    def _watch() -> None:
+        silent_streak = 0
+        while not loop._stop.is_set():
+            try:
+                running = bool(getattr(tray, "_running", False))
+                visible = bool(getattr(tray, "visible", False))
+                if running and not visible:
+                    try:
+                        tray.visible = True
+                        silent_streak = 0
+                    except Exception as exc:
+                        silent_streak += 1
+                        if silent_streak >= 3:
+                            log_watch_error(
+                                "tray icon not shown after 3 attempts; re-running tray",
+                                exc,
+                            )
+                            _safe_icon_stop(tray)
+                            return
+                else:
+                    silent_streak = 0
+            except Exception as exc:
+                log_watch_error("tray watchdog error", exc)
+            if loop._stop.wait(10):
+                return
+
+    t = _threading.Thread(target=_watch, name="tray-watchdog", daemon=True)
+    t.start()
+
+
+def _safe_icon_stop(tray) -> None:
+    """Stop a pystray icon without raising, e.g. from the watchdog thread."""
+    try:
+        if getattr(tray, "_running", False):
+            tray.stop()
+    except Exception:
+        pass
 
 
 def _show_tray(icon) -> None:
@@ -398,7 +472,13 @@ def _tray_icon(loop: "WatchLoop"):
                 pystray.MenuItem("Exit", _on_exit),
             ),
         )
-        icon.visible = True
+        # NOTE: do NOT set icon.visible=True here. On the win32 backend the
+        # visible setter sends Shell_NotifyIcon(NIM_ADD) before run() creates
+        # the tray window (_hwnd is still None), so the icon is silently
+        # dropped and the later setup-callback set is short-circuited by the
+        # `_visible == value` guard in pystray/_base.py — the app then runs
+        # with no tray icon. Visibility is set only in the setup callback
+        # (_show_tray), which runs after the window exists.
         # Keep a reference to the icon so the update thread can notify it.
         loop._tray_icon = icon
         return icon

@@ -219,7 +219,7 @@ def test_tray_icon_shows_product_name(monkeypatch):
 
     icon = _tray_icon(WatchLoop(_args()))
     assert icon is not None
-    assert icon.visible is True
+    assert icon.visible is False
     assert created["name"] == "SystemInfoReporter"
     assert created["title"] == PRODUCT_NAME
     labels = [getattr(item, "text", None) for item in created["menu"].items]
@@ -331,15 +331,54 @@ def test_run_tray_or_wait_keeps_running_when_tray_raises(monkeypatch, tmp_path):
             raise RuntimeError("win32 notify icon failed")
 
     loop = WatchLoop(_args())
-    monkeypatch.setattr(loop._stop, "wait", lambda: waited.append(True))
+    monkeypatch.setattr(loop._stop, "wait", lambda *a: waited.append(True))
     monkeypatch.setattr(
         "system_info.win_runtime.crash_log_path", lambda: tmp_path / "crash.log"
     )
     monkeypatch.setattr("system_info.win_runtime.user_config_dir", lambda: tmp_path)
+    # Recreating the icon fails too, so the watcher keeps running headless.
+    monkeypatch.setattr("system_info.watch._tray_icon", lambda loop: None)
     _run_tray_or_wait(loop, Tray())
-    assert waited == [True]
+    assert waited
     assert not loop._stop.is_set()
     assert (tmp_path / "crash.log").is_file()
+
+
+def test_run_tray_or_wait_recovers_by_recreating_icon(monkeypatch, tmp_path):
+    from system_info.watch import WatchLoop, _run_tray_or_wait
+
+    attempt = {"n": 0}
+    waited = []
+
+    class FlakyTray:
+        _running = False
+
+        def run(self, setup=None):
+            attempt["n"] += 1
+            if attempt["n"] == 1:
+                raise RuntimeError("win32 notify icon failed")
+
+    class GoodTray:
+        _running = False
+
+        def run(self, setup=None):
+            attempt["n"] += 1
+            if setup:
+                setup(self)
+
+    def make_icon(loop):
+        return GoodTray() if attempt["n"] >= 1 else FlakyTray()
+
+    loop = WatchLoop(_args())
+    monkeypatch.setattr(loop._stop, "wait", lambda *a: waited.append(True))
+    monkeypatch.setattr(
+        "system_info.win_runtime.crash_log_path", lambda: tmp_path / "crash.log"
+    )
+    monkeypatch.setattr("system_info.win_runtime.user_config_dir", lambda: tmp_path)
+    monkeypatch.setattr("system_info.watch._tray_icon", make_icon)
+    _run_tray_or_wait(loop, FlakyTray())
+    assert attempt["n"] >= 2
+    assert loop._stop.is_set()
 
 
 def test_run_tray_or_wait_without_icon_waits(monkeypatch, tmp_path):

@@ -157,7 +157,7 @@ Dashboard: if `expired` → **Expired**; else if `expiry_date` → **N days rema
 
 `{ cycle_count, condition, max_capacity_percent, health_percent }`
 
-- Windows: `powercfg /batteryreport /xml` first (broad Win8+ support — exposes `DesignCapacity`/`FullChargeCapacity`/`CycleCount` directly, unlike the often-unpopulated `root/WMI` classes), falling back to `root/WMI` BatteryFullChargedCapacity / BatteryStaticData / BatteryCycleCount (`Win32_Battery.DesignCapacity` fallback included; ACPI sentinel `4294967295` is treated as unknown). Unknown `condition` is `null` (not `"unknown"`).
+- Windows: `powercfg /batteryreport /xml` first (broad Win8+ support — exposes `DesignCapacity`/`FullChargeCapacity`/`CycleCount` directly). Cycle count `0`, `-1`, and ACPI sentinel `4294967295` are **unknown** (OEM firmware often writes 0 when unsupported). If powercfg has capacities but no usable cycle count, overlay `root/WMI` `BatteryCycleCount`. Full WMI fallback (`BatteryFullChargedCapacity` / `BatteryStaticData` / `BatteryCycleCount`, `Win32_Battery.DesignCapacity` included) when the report is unavailable. Unknown `condition` is `null` (not `"unknown"`). Dashboard Cycle count shows **—** for null or `<= 0` (covers old stored `0` reports).
 - macOS: `SPPowerDataType` (`sppower_battery_cycle_count`, `sppower_battery_health`, `sppower_battery_health_maximum_capacity` like `"82%"`).
 
 ### Printers

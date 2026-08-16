@@ -4,8 +4,10 @@ Windows:
   - Disks:  `Get-PhysicalDisk` (FriendlyName, MediaType, HealthStatus)
   - Battery: `powercfg /batteryreport /xml` first (broad Win8+ support;
              exposes DesignCapacity, FullChargeCapacity and CycleCount
-             directly), falling back to `root/WMI` BatteryFullChargedCapacity /
-             BatteryStaticData / BatteryCycleCount (+ Win32_Battery) when the
+             directly). CycleCount 0 / -1 / ACPI sentinel are unknown; when
+             powercfg has capacities but no usable cycle count, overlay
+             root/WMI BatteryCycleCount. Full WMI fallback (BatteryFullChargedCapacity /
+             BatteryStaticData / BatteryCycleCount + Win32_Battery) when the
              report is unavailable.
 
 macOS:
@@ -236,10 +238,11 @@ def _sanitize_windows_capacity(value: object) -> int | None:
 
 
 def _sanitize_windows_cycle_count(value: object) -> int | None:
-    """Return a non-negative cycle count, or None if missing/unsupported.
+    """Return a positive cycle count, or None if missing/unsupported.
 
-    Zero is valid for a new battery. The ACPI uint32 sentinel (4294967295)
-    and negative values (e.g. powercfg -1) are treated as unknown.
+    OEM firmware often writes 0 when CycleCount is not exposed (same as the
+    ACPI uint32 sentinel 4294967295 and powercfg -1). Zero is therefore
+    treated as unknown, not as a brand-new battery.
     """
     if value is None:
         return None
@@ -247,7 +250,7 @@ def _sanitize_windows_cycle_count(value: object) -> int | None:
         number = int(value)
     except (TypeError, ValueError):
         return None
-    if number < 0 or number >= _WINDOWS_ACPI_UNSUPPORTED:
+    if number <= 0 or number >= _WINDOWS_ACPI_UNSUPPORTED:
         return None
     return number
 
@@ -370,14 +373,8 @@ def _collect_windows_battery_powercfg() -> BatteryHealth | None:
                 pass
 
 
-def _collect_windows_battery() -> BatteryHealth | None:
-    """Windows battery health. powercfg battery report is authoritative; WMI
-    (root/WMI MSBatteryClass + Win32_Battery) is the fallback.
-    """
-    from_powercfg = _collect_windows_battery_powercfg()
-    if from_powercfg is not None:
-        return from_powercfg
-
+def _collect_windows_battery_wmi() -> BatteryHealth | None:
+    """Battery health via root/WMI + Win32_Battery (fallback / cycle overlay)."""
     script = (
         "$cap = Get-CimInstance -Namespace root/WMI -ClassName "
         "BatteryFullChargedCapacity -ErrorAction SilentlyContinue | "
@@ -428,6 +425,22 @@ def _collect_windows_battery() -> BatteryHealth | None:
         max_capacity_percent=health_percent,
         health_percent=health_percent,
     )
+
+
+def _collect_windows_battery() -> BatteryHealth | None:
+    """Windows battery health. powercfg report is primary; WMI fills cycle
+    count when powercfg has none, or is the full fallback if powercfg fails.
+    """
+    from_powercfg = _collect_windows_battery_powercfg()
+    if from_powercfg is not None:
+        if from_powercfg.cycle_count:
+            return from_powercfg
+        from_wmi = _collect_windows_battery_wmi()
+        wmi_cycle = from_wmi.cycle_count if from_wmi is not None else None
+        if wmi_cycle:
+            from_powercfg.cycle_count = wmi_cycle
+        return from_powercfg
+    return _collect_windows_battery_wmi()
 
 
 # ---- macOS ----

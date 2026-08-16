@@ -1119,6 +1119,7 @@ def test_health_windows_powercfg_xml_with_default_namespace(tmp_path):
 
 
 def test_health_windows_powercfg_xml_cycle_count_zero(tmp_path):
+    """OEM firmware often writes CycleCount 0 when unsupported; treat as unknown."""
     from system_info.health import _parse_battery_xml
 
     path = _write_battery_report_xml(
@@ -1126,7 +1127,7 @@ def test_health_windows_powercfg_xml_cycle_count_zero(tmp_path):
     )
     batt = _parse_battery_xml(path)
     assert batt is not None
-    assert batt.cycle_count == 0
+    assert batt.cycle_count is None
     assert batt.health_percent == 100
     assert batt.condition == "Good"
 
@@ -1160,11 +1161,7 @@ def test_health_windows_powercfg_xml_unknown_health_condition_none(tmp_path):
     from system_info.health import _parse_battery_xml
 
     path = _write_battery_report_xml(tmp_path, _battery_xml_node(cycle=0))
-    batt = _parse_battery_xml(path)
-    assert batt is not None
-    assert batt.cycle_count == 0
-    assert batt.health_percent is None
-    assert batt.condition is None
+    assert _parse_battery_xml(path) is None
 
 
 def test_health_windows_powercfg_xml_condition_good(tmp_path):
@@ -1234,7 +1231,7 @@ def test_health_windows_wmi_cycle_count_zero(monkeypatch):
     )
     batt = _collect_windows_battery()
     assert batt is not None
-    assert batt.cycle_count == 0
+    assert batt.cycle_count is None
     assert batt.health_percent == 100
     assert batt.condition == "Good"
 
@@ -1281,6 +1278,84 @@ def test_health_windows_wmi_missing_capacity_unknown_condition(monkeypatch):
     assert batt.cycle_count == 12
     assert batt.health_percent is None
     assert batt.condition is None
+
+
+def test_health_windows_powercfg_zero_cycle_merges_wmi(monkeypatch):
+    """powercfg often has capacities but CycleCount 0; use a positive WMI count."""
+    from system_info.health import BatteryHealth, _collect_windows_battery
+
+    monkeypatch.setattr(
+        "system_info.health._collect_windows_battery_powercfg",
+        lambda: BatteryHealth(
+            cycle_count=None,
+            condition="Good",
+            max_capacity_percent=78,
+            health_percent=78,
+        ),
+    )
+    monkeypatch.setattr(
+        "system_info.health._collect_windows_battery_wmi",
+        lambda: BatteryHealth(
+            cycle_count=124,
+            condition="Warning",
+            max_capacity_percent=50,
+            health_percent=50,
+        ),
+    )
+    batt = _collect_windows_battery()
+    assert batt is not None
+    assert batt.cycle_count == 124
+    assert batt.health_percent == 78
+    assert batt.condition == "Good"
+    assert batt.max_capacity_percent == 78
+
+
+def test_health_windows_powercfg_positive_cycle_skips_wmi(monkeypatch):
+    from system_info.health import BatteryHealth, _collect_windows_battery
+
+    called = []
+
+    monkeypatch.setattr(
+        "system_info.health._collect_windows_battery_powercfg",
+        lambda: BatteryHealth(
+            cycle_count=240,
+            condition="Good",
+            max_capacity_percent=90,
+            health_percent=90,
+        ),
+    )
+
+    def fake_wmi():
+        called.append(True)
+        return BatteryHealth(cycle_count=1)
+
+    monkeypatch.setattr("system_info.health._collect_windows_battery_wmi", fake_wmi)
+    batt = _collect_windows_battery()
+    assert batt is not None
+    assert batt.cycle_count == 240
+    assert called == []
+
+
+def test_health_windows_powercfg_zero_cycle_wmi_also_zero(monkeypatch):
+    from system_info.health import BatteryHealth, _collect_windows_battery
+
+    monkeypatch.setattr(
+        "system_info.health._collect_windows_battery_powercfg",
+        lambda: BatteryHealth(
+            cycle_count=None,
+            condition="Good",
+            max_capacity_percent=100,
+            health_percent=100,
+        ),
+    )
+    monkeypatch.setattr(
+        "system_info.health._collect_windows_battery_wmi",
+        lambda: BatteryHealth(cycle_count=None, health_percent=100),
+    )
+    batt = _collect_windows_battery()
+    assert batt is not None
+    assert batt.cycle_count is None
+    assert batt.health_percent == 100
 
 
 def test_health_battery_condition_helper():

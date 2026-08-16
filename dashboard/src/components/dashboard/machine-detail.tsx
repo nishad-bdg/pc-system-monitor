@@ -589,7 +589,11 @@ function SummarySection({ machine }: { machine: MachineSummary }) {
               />
               <StatCard
                 label="Cycle count"
-                value={batteryHealth.cycle_count != null ? String(batteryHealth.cycle_count) : "—"}
+                value={
+                  batteryHealth.cycle_count != null && batteryHealth.cycle_count > 0
+                    ? String(batteryHealth.cycle_count)
+                    : "—"
+                }
                 sub="Full charge cycles"
               />
               <StatCard
@@ -781,7 +785,11 @@ function HealthSection({
             />
             <StatCard
               label="Cycle count"
-              value={battery.cycle_count != null ? String(battery.cycle_count) : "—"}
+              value={
+                battery.cycle_count != null && battery.cycle_count > 0
+                  ? String(battery.cycle_count)
+                  : "—"
+              }
               sub="Full charge cycles"
             />
             <StatCard
