@@ -110,7 +110,7 @@ Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`, `SYSTE
 | `os` | `os_info.py` | Includes hostname |
 | `private_ip`, `public_ip`, `mac_address`, `mac_addresses` | `ip.py` | |
 | `location` | `geo.py` | ip-api.com |
-| `resources` | `resources.py` | CPU/RAM/swap + laptop `battery` + RAM `ram_speed_mhz`/`ram_type` |
+| `resources` | `resources.py` | CPU/RAM/swap + laptop `battery` + RAM `ram_speed_mhz`/`ram_type`. CPU **`cpu_brand`** is the vendor (Intel/AMD/Apple). **`cpu_name`** is the marketing model (`Intel Core i5-10400`, `AMD Ryzen 5 5600G`, `Apple M2`), not Windows `platform.processor()` (`Intel64 Family 6 Model …`). |
 | `uptime` | `uptime.py` | Session + UTC day-wise on-seconds (`by_day`) |
 | `network` | `network.py` | NIC totals/rates |
 
@@ -375,7 +375,7 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 
 - Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports. Each PC row and the detail header show a **green (online) / red (offline)** status dot; data updates live via WebSocket. Each row also shows the desktop **App version** (`v0.2.21`) from the latest report when present. Live CPU/RAM ≥ **90%** shows a blinking red **CPU high** / **RAM high** / **CPU+RAM high** badge on the card (`load-warning-badge.tsx`). The detail identity bar lists Private IP, Public IP, MAC, and **App version**. For `admin`/`super_admin` the detail header has **Ping**, **Connect** (offline PCs), and **Collect now** (any OS) plus **Restart** / **Shut down** (Windows only). The sidebar footer **Connect all** button (`admin`/`super_admin`) sends `reconnect` to every PC in the current list. For `super_admin` the sidebar footer also shows an **Update all apps** button that pushes a `update` broadcast to every connected desktop app at once.
 - Detail tabs (`machine-detail.tsx`): **Summary (default) / Overview / Printers / Uptime / Storage / Health / Emails**.
-  - **Summary:** total uptime + session, network total + bandwidth, full CPU spec (model/arch/cores/clock + **brand**), full RAM spec (total/available/free/swap + **bus speed** `ram_speed_mhz` + `ram_type`), storage health (SSD/HDD badge + brand, SMART, Healthy/Failing), battery health (condition, health %, cycle count), internet security, printers + total prints.
+  - **Summary:** total uptime + session, network total + bandwidth, full CPU spec (**name** like `Intel Core i5-10400`, brand, arch/cores/clock), full RAM spec (total/available/free/swap + **bus speed** `ram_speed_mhz` + `ram_type`), storage health (SSD/HDD badge + brand, SMART, Healthy/Failing), battery health (condition, health %, cycle count), internet security, printers + total prints.
   - **Overview:** CPU/RAM/swap tiles, compact UptimeState (session + days tracked) + DiskState (devices/used/free), location/machine, Battery stat card (laptops only), Network bandwidth chart, Printers, Security card.
   - **Printers:** stat cards (connected printers, total prints, avg prints/printer) + per-group lists (USB/Network/Other) with name, port, IP, print counts.
   - **Uptime:** session + UTC day bars with BD labels; day bars load in batches (default 14, Load more for the rest).

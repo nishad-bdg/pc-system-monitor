@@ -28,6 +28,7 @@ import {
   networkTotalBytes,
   Report,
   fmtAppVersion,
+  cpuDisplayName,
 } from "@/lib/api";
 import { StatusDot } from "./status-dot";
 import { useRealtime } from "../realtime-provider";
@@ -219,9 +220,9 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
               <StatCard
                 label="CPU usage"
                 value={fmtPercent(cpuPercent)}
-                sub={`${host.resources?.cpu_count ?? "?"} cores · ${
-                  host.resources?.cpu_freq_mhz ?? "?"
-                } MHz`}
+                sub={`${cpuDisplayName(host) ?? host.resources?.cpu_brand ?? "?"} · ${
+                  host.resources?.cpu_count ?? "?"
+                } cores · ${host.resources?.cpu_freq_mhz ?? "?"} MHz`}
                 accent
                 live={live != null}
                 warn={isHighLiveLoad(live?.cpu_percent)}
@@ -538,10 +539,12 @@ function SummarySection({
       <div className="grid gap-4 lg:grid-cols-2">
         <InfoBlock title="CPU (full spec)">
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+            <span className="text-slate-500">Name</span>
+            <span className="font-medium text-slate-900">
+              {cpuDisplayName(r) || "—"}
+            </span>
             <span className="text-slate-500">Brand</span>
             <span className="font-medium text-slate-900">{res?.cpu_brand || "—"}</span>
-            <span className="text-slate-500">Model</span>
-            <span className="font-medium text-slate-900">{r.os?.processor || "—"}</span>
             <span className="text-slate-500">Architecture</span>
             <span className="font-medium text-slate-900">{r.os?.machine || "—"}</span>
             <span className="text-slate-500">Cores (logical)</span>

@@ -32,6 +32,7 @@ export interface Report {
     cpu_percent?: number;
     cpu_freq_mhz?: number | null;
     cpu_brand?: string | null;
+    cpu_name?: string | null;
     ram_total?: number;
     ram_used?: number;
     ram_available?: number;
@@ -881,6 +882,15 @@ export function subCategoryOf(
 /** Online status of a machine (annotated by the API from heartbeats). */
 export function isOnline(m: Pick<MachineSummary, "latest">): boolean {
   return m.latest.online === true;
+}
+
+/** Marketing CPU name (Core i5-10400), never the Windows Family/Model string. */
+export function cpuDisplayName(r: Report | undefined | null): string | null {
+  const name = r?.resources?.cpu_name?.trim();
+  if (name) return name;
+  const proc = r?.os?.processor?.trim();
+  if (proc && !/family\s+\d+\s+model\s+\d+/i.test(proc)) return proc;
+  return r?.resources?.cpu_brand?.trim() || null;
 }
 
 /** Print total across printer groups on a report. */

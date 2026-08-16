@@ -17,6 +17,7 @@ class SystemResources:
     cpu_percent: float
     cpu_freq_mhz: float | None
     cpu_brand: str | None
+    cpu_name: str | None
     ram_total: int
     ram_used: int
     ram_available: int
@@ -37,6 +38,7 @@ class SystemResources:
             "cpu_percent": self.cpu_percent,
             "cpu_freq_mhz": self.cpu_freq_mhz,
             "cpu_brand": self.cpu_brand,
+            "cpu_name": self.cpu_name,
             "ram_total": self.ram_total,
             "ram_used": self.ram_used,
             "ram_available": self.ram_available,
@@ -324,27 +326,81 @@ def _collect_ram_speed() -> tuple[int | None, str | None]:
     return speed, typ
 
 
-def _collect_cpu_brand() -> str | None:
-    """Best-effort CPU vendor/brand."""
+_CPU_FAMILY_JUNK = re.compile(
+    r"family\s+\d+\s+model\s+\d+",
+    re.IGNORECASE,
+)
+
+
+def _friendly_cpu_name(raw: str | None) -> str | None:
+    """Turn WMI/registry names into a readable model (Core i5-10400, Ryzen 5…).
+
+    Drops `(R)`/`(TM)`, trailing `CPU @ 2.90GHz`, and Windows' useless
+    `Intel64 Family 6 Model 165 Stepping 3, GenuineIntel` string.
+    """
+    text = str(raw or "").strip()
+    if not text or _CPU_FAMILY_JUNK.search(text):
+        return None
+    text = re.sub(r"\((?:R|TM|C)\)", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+CPU\s*@\s*[\d.]+\s*GHz.*$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+@\s*[\d.]+\s*GHz.*$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+with Radeon Graphics.*$", "", text, flags=re.IGNORECASE)
+    text = text.strip(" -")
+    return text or None
+
+
+def _cpu_brand_from_name(name: str | None, manufacturer: str | None = None) -> str | None:
+    blob = f"{name or ''} {manufacturer or ''}".lower()
+    if "intel" in blob or "core i" in blob or "genuineintel" in blob:
+        return "Intel"
+    if "amd" in blob or "ryzen" in blob or "athlon" in blob or "authenticamd" in blob:
+        return "AMD"
+    if "apple" in blob:
+        return "Apple"
+    if "qualcomm" in blob or "snapdragon" in blob:
+        return "Qualcomm"
+    if manufacturer:
+        first = manufacturer.split()[0].strip()
+        return first or None
+    if name and name.split():
+        return name.split()[0]
+    return None
+
+
+def _windows_cpu_name_registry() -> str | None:
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, "ProcessorNameString")
+    except OSError:
+        return None
+    return _friendly_cpu_name(str(value or ""))
+
+
+def _collect_cpu_identity() -> tuple[str | None, str | None]:
+    """Best-effort (brand, marketing name), e.g. ('Intel', 'Intel Core i5-10400')."""
     if platform.system() == "Darwin":
         raw = _run(["system_profiler", "SPHardwareDataType", "-json"])
         if not raw.strip():
-            return None
+            return None, None
         try:
             payload = json.loads(raw)
         except ValueError:
-            return None
+            return None, None
         for item in payload.get("SPHardwareDataType", []):
             if not isinstance(item, dict):
                 continue
-            chip = str(item.get("chip_type") or "").strip()
-            if chip:
-                # "Apple M2" -> "Apple", "Intel Core i7-..." -> "Intel"
-                return chip.split()[0] if chip.split() else chip
-            proc = str(item.get("processor_name") or "").strip()
-            if proc and proc.split():
-                return proc.split()[0]
-        return None
+            chip = _friendly_cpu_name(str(item.get("chip_type") or ""))
+            proc = _friendly_cpu_name(str(item.get("processor_name") or ""))
+            name = chip or proc
+            if name:
+                return _cpu_brand_from_name(name), name
+        return None, None
 
     if os.name == "nt":
         raw = _run(
@@ -353,35 +409,32 @@ def _collect_cpu_brand() -> str | None:
                 "-NoProfile",
                 "-Command",
                 "Get-CimInstance Win32_Processor | "
-                "Select-Object Name | ConvertTo-Json",
+                "Select-Object Name, Manufacturer | ConvertTo-Json",
             ]
         )
-        if not raw.strip():
-            return None
-        try:
-            payload = json.loads(raw)
-        except ValueError:
-            return None
-        if isinstance(payload, dict):
-            payload = [payload]
-        for p in payload:
-            if not isinstance(p, dict):
-                continue
-            name = str(p.get("Name") or "").strip()
-            if not name:
-                continue
-            lowered = name.lower()
-            if "intel" in lowered:
-                return "Intel"
-            if "amd" in lowered or "ryzen" in lowered or "athlon" in lowered:
-                return "AMD"
-            if "qualcomm" in lowered or "snapdragon" in lowered:
-                return "Qualcomm"
-            if name.split():
-                return name.split()[0]
-        return None
+        name = None
+        manufacturer = None
+        if raw.strip():
+            try:
+                payload = json.loads(raw)
+            except ValueError:
+                payload = None
+            if isinstance(payload, dict):
+                payload = [payload]
+            for p in payload or []:
+                if not isinstance(p, dict):
+                    continue
+                name = _friendly_cpu_name(str(p.get("Name") or ""))
+                manufacturer = str(p.get("Manufacturer") or "").strip() or None
+                if name:
+                    break
+        if not name:
+            name = _windows_cpu_name_registry()
+        if name or manufacturer:
+            return _cpu_brand_from_name(name, manufacturer), name
+        return None, None
 
-    return None
+    return None, None
 
 
 def collect_resources() -> SystemResources:
@@ -397,7 +450,7 @@ def collect_resources() -> SystemResources:
     ram_modules = _collect_ram_modules()
     ram_speed_mhz = next((m.get("speed_mhz") for m in ram_modules if m.get("speed_mhz")), None)
     ram_type = next((m.get("ram_type") for m in ram_modules if m.get("ram_type")), None)
-    cpu_brand = _collect_cpu_brand()
+    cpu_brand, cpu_name = _collect_cpu_identity()
 
     return SystemResources(
         cpu_count=psutil.cpu_count(logical=True) or 0,
@@ -405,6 +458,7 @@ def collect_resources() -> SystemResources:
         cpu_percent=psutil.cpu_percent(interval=0.2),
         cpu_freq_mhz=cpu_freq_mhz,
         cpu_brand=cpu_brand,
+        cpu_name=cpu_name,
         ram_total=vm.total,
         ram_used=vm.used,
         ram_available=vm.available,

@@ -22,6 +22,7 @@ import {
   SortOrder,
   sortMachines,
   subCategoryOf,
+  cpuDisplayName,
 } from "@/lib/api";
 import { DashboardShell } from "@/components/dashboard/shell";
 
@@ -685,8 +686,8 @@ export function ReportExportPanel() {
                           <td className="px-4 py-3 text-slate-600">
                             {res?.cpu_brand || "—"}
                           </td>
-                          <td className="max-w-[180px] truncate px-4 py-3 text-slate-600" title={r.os?.processor}>
-                            {r.os?.processor || "—"}
+                          <td className="max-w-[180px] truncate px-4 py-3 text-slate-600" title={cpuDisplayName(r) ?? undefined}>
+                            {cpuDisplayName(r) || "—"}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {res?.cpu_count != null ? `${res.cpu_count} (${res.cpu_count_physical ?? "?"} phys)` : "—"}

@@ -158,14 +158,59 @@ def test_resources_to_dict_keys():
     loc = SystemResources(cpu_count=8, cpu_count_physical=4, cpu_percent=10.0, cpu_freq_mhz=1000.0,
                           ram_total=1024, ram_used=512, ram_available=512, ram_free=256,
                           ram_percent=50.0, swap_total=2048, swap_used=0, swap_percent=0.0, battery=None,
-                          ram_speed_mhz=None, ram_type=None, cpu_brand=None)
+                          ram_speed_mhz=None, ram_type=None, cpu_brand=None, cpu_name=None)
     assert set(loc.to_dict()) == {
             "cpu_count", "cpu_count_physical", "cpu_percent", "cpu_freq_mhz",
-            "cpu_brand",
+            "cpu_brand", "cpu_name",
             "ram_total", "ram_used", "ram_available", "ram_free", "ram_percent",
             "swap_total", "swap_used", "swap_percent", "battery",
             "ram_speed_mhz", "ram_type", "ram_modules",
         }
+
+
+def test_friendly_cpu_name_intel_core():
+    from system_info.resources import _cpu_brand_from_name, _friendly_cpu_name
+
+    assert _friendly_cpu_name(
+        "Intel(R) Core(TM) i5-10400 CPU @ 2.90GHz"
+    ) == "Intel Core i5-10400"
+    assert _friendly_cpu_name(
+        "Intel(R) Core(TM) i3-10100 CPU @ 3.60GHz"
+    ) == "Intel Core i3-10100"
+    assert _friendly_cpu_name(
+        "11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz"
+    ) == "11th Gen Intel Core i7-1185G7"
+    assert _friendly_cpu_name(
+        "AMD Ryzen 5 5600G with Radeon Graphics"
+    ) == "AMD Ryzen 5 5600G"
+    assert _friendly_cpu_name("Apple M2 Pro") == "Apple M2 Pro"
+    assert (
+        _friendly_cpu_name("Intel64 Family 6 Model 165 Stepping 3, GenuineIntel")
+        is None
+    )
+    assert _cpu_brand_from_name("Intel Core i5-10400") == "Intel"
+    assert _cpu_brand_from_name("AMD Ryzen 5 5600G") == "AMD"
+    assert _cpu_brand_from_name("Apple M2 Pro") == "Apple"
+
+
+def test_collect_cpu_identity_windows_cim(monkeypatch):
+    from system_info import resources
+
+    monkeypatch.setattr(resources.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(resources.os, "name", "nt")
+    monkeypatch.setattr(
+        resources,
+        "_run",
+        lambda cmd, timeout=15.0: json.dumps(
+            {
+                "Name": "Intel(R) Core(TM) i5-10400 CPU @ 2.90GHz",
+                "Manufacturer": "GenuineIntel",
+            }
+        ),
+    )
+    brand, name = resources._collect_cpu_identity()
+    assert brand == "Intel"
+    assert name == "Intel Core i5-10400"
 
 
 def test_collect_battery_status_charging(monkeypatch):
@@ -548,7 +593,7 @@ def test_run_show_sys_only(monkeypatch):
         cpu_count=8, cpu_count_physical=4, cpu_percent=10.0, cpu_freq_mhz=1000.0,
         ram_total=1024, ram_used=512, ram_available=512, ram_free=256, ram_percent=50.0,
         swap_total=2048, swap_used=0, swap_percent=0.0, battery=None, ram_speed_mhz=None, ram_type=None,
-        cpu_brand=None))
+        cpu_brand=None, cpu_name=None))
     monkeypatch.setattr(
         cli,
         "collect_uptime",

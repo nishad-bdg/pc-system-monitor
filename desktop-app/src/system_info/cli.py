@@ -417,6 +417,8 @@ def _print(
     if show_sys:
         res = data["resources"]
         print("== CPU ==")
+        print(f"  name:       {res.get('cpu_name') or res.get('cpu_brand') or 'unknown'}")
+        print(f"  brand:      {res.get('cpu_brand') or 'unknown'}")
         print(f"  cores:      {res['cpu_count']} logical / {res['cpu_count_physical']} physical")
         print(f"  usage:      {res['cpu_percent']:.1f}%")
         freq = res["cpu_freq_mhz"]
