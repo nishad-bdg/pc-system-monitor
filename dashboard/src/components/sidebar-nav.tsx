@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 export type NavKey =
+  | "overview"
   | "fleet"
   | "reports"
   | "prints"
@@ -12,6 +13,7 @@ export type NavKey =
   | "users";
 
 const BASE_NAV_ITEMS: { key: NavKey; label: string; href: string; superOnly?: boolean }[] = [
+  { key: "overview", label: "Overview", href: "/overview" },
   { key: "fleet", label: "Fleet", href: "/dashboard" },
   { key: "reports", label: "Reports", href: "/reports" },
   { key: "prints", label: "Print Activity", href: "/print-jobs" },

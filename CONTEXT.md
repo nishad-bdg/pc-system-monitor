@@ -320,7 +320,7 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
 - **`WebSocket /ws`** (`routes/realtime.py`) — the dashboard connects with its JWT passed as the WS **subprotocol** (or `?token=`); only `admin`/`super_admin` roles are allowed; `Origin` must match `CORS_ORIGINS`. On connect the server sends `{"type":"hello"}` then seeds `{"type":"presence.changed","presence":{device_id,online,last_seen,pc_name}}` for every known machine (in-process snapshot). Events: `{"type":"report.created","report":{...},"ts":...}`, `{"type":"presence.changed","presence":{...},"ts":...}`, `{"type":"print.job","job":{...},"ts":...}`, and `{"type":"metrics.sample","metrics":{device_id,cpu_percent,ram_percent,ram_used,ram_total,bytes_sent,bytes_recv,send_rate_bps,recv_rate_bps},"ts":...}`.
 - **Live presence (Messenger-style):** `POST /heartbeat` and `POST /reports` (when `device_id` present) call `realtime.broadcast_presence(device_id, online=True, last_seen, pc_name)` so an open dashboard flips that PC's dot green instantly. The `broadcast_presence`/`update_presence` pair dedupes same-state flips. `realtime.py` keeps an in-process `_presence` map (`device_id -> {online,last_seen,pc_name}`); `presence_snapshot()` seeds newly-connected clients (notably **no initial fetch from Mongo** — the machine's known presence only reaches a fresh dashboard after a heartbeat/report from it, so a PC idle for >`ONLINE_TIMEOUT_SECONDS` starts grey until seen). The `presence.changed` payload goes out via the shared `_send` helper (never through `broadcast()`, which is `report.created`-only).
 - **Live CPU / RAM / network:** while `--watch` is running the agent sends a cheap sample every **5s** over `/ws/agent` (`{"type":"metrics", device_id, cpu_percent, ram_percent, ram_used, ram_total, bytes_sent, bytes_recv, send_rate_bps, recv_rate_bps}`). `live_metrics.py` uses non-blocking `psutil.cpu_percent(interval=None)` and rate-since-last-sample — no 3s network window, no WMI. The API broadcasts `metrics.sample` to dashboard `/ws`. **Not stored in Mongo.** Full hourly reports (and Collect now) still persist snapshots.
-- Dashboard `RealtimeProvider` (`src/components/realtime-provider.tsx`) holds one socket, reconnects with capped backoff, and invalidates `reports`/`reports-browse`/`report-pc` queries on each event — no manual Refresh needed. It keeps a live presence map and **client-side flips a dot to offline after `ONLINE_TIMEOUT_SECONDS` (300s)** of silence via per-device timers, so a machine that stops heartbeating goes red even without a server event (Messenger-style). `isOnline(deviceId)` and `lastSeenFor(deviceId, fallback)` feed the Fleet/Reports sidebar rows, report detail, and `machine-detail` identity bar. On `print.job` it invalidates `print-jobs`/`print-summary` so the Print Activity page updates live, and it bumps a per-device **`printing` badge** (60s window, `isPrinting(deviceId)`/`printingCount(deviceId)`) shown as an amber "printing"/"N prints" pill over the PC card in the Fleet + Reports sidebars (`printing-badge.tsx`). On `metrics.sample` it overlays **live CPU %, RAM %, and NIC rates** on Fleet/Reports sidebars and the selected PC Overview/Summary/Network cards (`metricsFor(deviceId)`). Samples are **not** written to Mongo. If no sample arrives for ~20s the UI falls back to the last saved report. When a **live** sample has CPU or RAM **≥ 90%**, Fleet/Reports cards show a blinking red **CPU high** / **RAM high** / **CPU+RAM high** badge (`load-warning-badge.tsx`) and Overview CPU/RAM tiles switch the Live pill to blinking **High**. Hourly report values alone do not trigger the badge.
+- Dashboard `RealtimeProvider` (`src/components/realtime-provider.tsx`) holds one socket, reconnects with capped backoff, and invalidates `reports`/`reports-browse`/`report-pc` queries on each event — no manual Refresh needed. It keeps a live presence map and **client-side flips a dot to offline after `ONLINE_TIMEOUT_SECONDS` (300s)** of silence via per-device timers, so a machine that stops heartbeating goes red even without a server event (Messenger-style). `isOnline(deviceId)` and `lastSeenFor(deviceId, fallback)` feed the Fleet/Reports sidebar rows, report detail, `machine-detail` identity bar, and the **Overview** page totals/graphs. On `print.job` it invalidates `print-jobs`/`print-summary` so the Print Activity page updates live, and it bumps a per-device **`printing` badge** (60s window, `isPrinting(deviceId)`/`printingCount(deviceId)`) shown as an amber "printing"/"N prints" pill over the PC card in the Fleet + Reports sidebars (`printing-badge.tsx`). On `metrics.sample` it overlays **live CPU %, RAM %, and NIC rates** on Fleet/Reports sidebars and the selected PC Overview/Summary/Network cards (`metricsFor(deviceId)`). Samples are **not** written to Mongo. If no sample arrives for ~20s the UI falls back to the last saved report. When a **live** sample has CPU or RAM **≥ 90%**, Fleet/Reports cards show a blinking red **CPU high** / **RAM high** / **CPU+RAM high** badge (`load-warning-badge.tsx`) and Overview CPU/RAM tiles switch the Live pill to blinking **High**. Hourly report values alone do not trigger the badge.
 - Broadcasting is in-process (best-effort per uvicorn worker); the dashboard also refetches on reconnect so nothing is permanently lost.
 
 ### Print Activity (`/print-jobs`)
@@ -347,6 +347,7 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 | Path | Purpose |
 |------|---------|
 | `/login` | Admin sign-in |
+| `/overview` | **Overview** — live installed / online / offline counts + graphs (WebSocket) |
 | `/dashboard` | **Fleet** — sidebar PC list + live detail for selected machine |
 | `/reports` | **Reports browser** — filters + one row per PC |
 | `/reports/[key]` | PC detail from reports (encoded machine key) |
@@ -355,6 +356,20 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 | `/users` | Manage dashboard users (role + groups) — **super admin only** |
 | `/reports/export` | **Report export** — date presets + filters, CSV download |
 | `/print-jobs` | **Print Activity** — live recent prints + per-hour chart (via WS) |
+
+### Overview (`/overview`)
+
+- Sidebar nav pill **Overview** (all roles). Live **installed / online / offline**
+  counts for the current fleet (`groupMachines` from reports; a `user` only
+  sees their groups). Group filter in the left list scopes the totals.
+- Counts use the same live presence map as Fleet (`presence.changed` over
+  dashboard `/ws`, plus `isOnline(deviceId) ?? latest.online`). New PCs
+  (`report.created`) raise **installed**. Dots and totals flip without Refresh.
+- Three stat cards: **Total installed**, **Total online**, **Total offline**.
+  A donut shows online vs offline. An area chart records online/offline every
+  **5s** and on each presence change (last **15 min**, client-side only — not
+  stored in Mongo). LIVE badge matches Print Activity.
+- Left list is online-first with status dots; rows link to `/reports/[key]`.
 
 ### Fleet (`/dashboard`)
 
