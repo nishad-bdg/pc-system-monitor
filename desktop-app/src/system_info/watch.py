@@ -90,6 +90,7 @@ class WatchLoop:
                     self.args.api_url,
                     self.args.api_key,
                     on_update_applied=self._stop_for_update,
+                    pc_name=pc_name,
                 )
             except Exception:
                 pass

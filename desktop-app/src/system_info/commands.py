@@ -1,4 +1,4 @@
-"""Remote-command execution for the desktop agent (restart / shutdown).
+"""Remote-command execution for the desktop agent.
 
 Receives commands from the API over two channels:
 
@@ -6,10 +6,13 @@ Receives commands from the API over two channels:
    socket open (API key as subprotocol). The API pushes `{"type":"command",
    "command": {...}}` the moment an admin requests it, so the machine acts at
    once. The agent replies `{"type":"command.ack", ...}` over the same socket.
+   `collect` runs on a daemon thread and HTTP-acks when the save finishes so
+   ping/command traffic is not blocked for 10–30s.
 
 2. **Heartbeat poll (fallback):** the heartbeat response also echoes pending
    commands, so a one-shot `--heartbeat` run or a briefly-disconnected agent
    still picks them up. The outcome is reported via HTTP `POST /commands/{id}/ack`.
+   `collect` runs inline here (already on the worker thread).
 """
 
 from __future__ import annotations
@@ -94,7 +97,55 @@ def shutdown_machine() -> bool:
     )
 
 
-def execute_command(command_type: str) -> tuple[bool, str | None]:
+def collect_and_save(api_url: str, api_key: str, pc_name: str = "") -> tuple[bool, str | None]:
+    """Run a full collect and POST /reports. Same payload as the hourly report.
+
+    Does not run auto-update. Builds a one-shot Namespace (all collect flags
+    off, watch=False) so frozen Windows argv defaults cannot force --watch.
+    """
+    import argparse
+
+    from . import cli
+
+    args = argparse.Namespace(
+        heartbeat=False,
+        print_jobs=False,
+        os=False,
+        ip=False,
+        geo=False,
+        sys=False,
+        disk=False,
+        printers=False,
+        network=False,
+        security=False,
+        health=False,
+        emails=False,
+        no_save=True,
+        json=False,
+        watch=False,
+        check_update=False,
+        auto_update=False,
+        version=False,
+        api_url=api_url,
+        api_key=api_key,
+        pc_name=pc_name or "",
+    )
+    try:
+        data = cli.collect_all(args)
+        report_id = cli.save_report(data, api_url, api_key)
+    except Exception:
+        return False, "collect failed"
+    if report_id is None:
+        return False, "save failed"
+    return True, None
+
+
+def execute_command(
+    command_type: str,
+    api_url: str = "",
+    api_key: str = "",
+    pc_name: str = "",
+) -> tuple[bool, str | None]:
     """Execute a single command type locally. Returns (ok, error)."""
     if command_type == "restart":
         ok = restart_machine()
@@ -113,6 +164,10 @@ def execute_command(command_type: str) -> tuple[bool, str | None]:
         except Exception:
             return False, "update failed"
         return ok, None if ok else message
+    if command_type == "collect":
+        if not api_url:
+            return False, "collect requires api_url"
+        return collect_and_save(api_url, api_key, pc_name)
     return False, f"unsupported command: {command_type}"
 
 
@@ -148,19 +203,23 @@ def handle_pending_commands(
     api_url: str,
     api_key: str = "",
     on_update_applied=None,
+    pc_name: str = "",
 ) -> None:
     """Execute any pending remote commands and ack the outcome (HTTP fallback).
 
     `on_update_applied` (callable, optional) is invoked after a previously
     staged app update so a running watcher can exit and let the updater batch
-    swap the exe + relaunch.
+    swap the exe + relaunch. `collect` runs inline (this is already the
+    worker thread).
     """
     for cmd in commands or []:
         command_type = (cmd.get("type") or "").strip()
         command_id = str(cmd.get("id") or "").strip()
         if not command_type or not command_id:
             continue
-        ok, error = execute_command(command_type)
+        ok, error = execute_command(
+            command_type, api_url=api_url, api_key=api_key, pc_name=pc_name
+        )
         ack_command(command_id, "done" if ok else "failed", api_url, api_key, error)
         if command_type == "update" and ok and on_update_applied:
             on_update_applied()
@@ -255,6 +314,11 @@ class WatchCommandSocket(threading.Thread):
                     command_type = str(command.get("type") or "").strip()
                     command_id = str(command.get("id") or "").strip()
                     if command_type and command_id:
+                        if command_type == "collect":
+                            # Full collect takes 10–30s; do not block ping
+                            # or other commands on this socket thread.
+                            self._start_collect(command_id)
+                            continue
                         try:
                             ok, error = execute_command(command_type)
                         except Exception:
@@ -271,6 +335,27 @@ class WatchCommandSocket(threading.Thread):
                 ws.close()
             except Exception:
                 pass
+
+    def _start_collect(self, command_id: str) -> None:
+        def _job() -> None:
+            try:
+                ok, error = execute_command(
+                    "collect",
+                    api_url=self.api_url,
+                    api_key=self.api_key,
+                    pc_name=self.pc_name or "",
+                )
+            except Exception:
+                ok, error = False, "command execution failed"
+            ack_command(
+                command_id,
+                "done" if ok else "failed",
+                self.api_url,
+                self.api_key,
+                error,
+            )
+
+        threading.Thread(target=_job, daemon=True, name="collect-now").start()
 
     def _send_ack(self, ws, command_id: str, ok: bool, error: str | None = None) -> None:
         ack = {"type": "command.ack", "command_id": command_id, "status": "done" if ok else "failed"}

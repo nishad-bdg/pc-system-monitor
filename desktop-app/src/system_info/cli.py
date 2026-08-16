@@ -152,7 +152,10 @@ def run(args: argparse.Namespace) -> int:
 
             try:
                 handle_pending_commands(
-                    response.get("commands"), args.api_url, args.api_key
+                    response.get("commands"),
+                    args.api_url,
+                    args.api_key,
+                    pc_name=pc_name,
                 )
             except Exception:
                 pass

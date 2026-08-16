@@ -939,7 +939,7 @@ export function fetchPrintSummary(
   return apiRequest(apiUrl, apiToken, `/print-jobs/summary?hours=${hours}`);
 }
 
-// ---- remote commands (restart / shutdown) ----
+// ---- remote commands (restart / shutdown / collect) ----
 
 export type Command = {
   id: string;
@@ -956,7 +956,7 @@ export function sendCommand(
   apiUrl: string,
   apiToken: string,
   deviceId: string,
-  type: "restart" | "shutdown",
+  type: "restart" | "shutdown" | "collect",
 ): Promise<Command> {
   return apiRequest(apiUrl, apiToken, "/commands", {
     method: "POST",

@@ -183,6 +183,91 @@ def test_execute_command_unsupported(monkeypatch):
     assert "unsupported" in error
 
 
+def test_collect_and_save_posts_report(monkeypatch):
+    captured = {}
+
+    def fake_collect(args):
+        captured["args"] = args
+        assert args.watch is False
+        assert args.heartbeat is False
+        return {"device_id": "d1", "pc_name": "PC1", "app_version": "0.2.21"}
+
+    def fake_save(data, url, key=""):
+        captured["data"] = data
+        captured["url"] = url
+        captured["key"] = key
+        return "rid-1"
+
+    monkeypatch.setattr("system_info.cli.collect_all", fake_collect)
+    monkeypatch.setattr("system_info.cli.save_report", fake_save)
+    ok, error = commands.collect_and_save("http://x", "sk-key", "PC1")
+    assert ok is True
+    assert error is None
+    assert captured["url"] == "http://x"
+    assert captured["key"] == "sk-key"
+    assert captured["data"]["app_version"] == "0.2.21"
+
+
+def test_collect_and_save_failure(monkeypatch):
+    monkeypatch.setattr("system_info.cli.collect_all", lambda args: {"device_id": "d1"})
+    monkeypatch.setattr("system_info.cli.save_report", lambda *a, **k: None)
+    ok, error = commands.collect_and_save("http://x", "sk-key")
+    assert ok is False
+    assert "save" in error
+
+
+def test_execute_command_collect_failure(monkeypatch):
+    monkeypatch.setattr(
+        commands, "collect_and_save", lambda *a, **k: (False, "save failed")
+    )
+    ok, error = commands.execute_command("collect", api_url="http://x", api_key="sk")
+    assert ok is False
+    assert "save" in error
+
+
+def test_execute_command_collect_requires_api_url():
+    ok, error = commands.execute_command("collect")
+    assert ok is False
+    assert "api_url" in error
+
+
+def test_handle_pending_commands_collect(monkeypatch):
+    acks = []
+
+    def fake_ack(cid, status, url, key="", error=None):
+        acks.append((cid, status))
+        return True
+
+    monkeypatch.setattr(commands, "ack_command", fake_ack)
+    monkeypatch.setattr(commands, "collect_and_save", lambda *a, **k: (True, None))
+    commands.handle_pending_commands(
+        [{"id": "cmd-c", "type": "collect"}],
+        "http://x",
+        "sk-key",
+        pc_name="PC1",
+    )
+    assert acks == [("cmd-c", "done")]
+
+
+def test_handle_pending_commands_collect_failure(monkeypatch):
+    acks = []
+
+    def fake_ack(cid, status, url, key="", error=None):
+        acks.append((cid, status, error))
+        return True
+
+    monkeypatch.setattr(commands, "ack_command", fake_ack)
+    monkeypatch.setattr(
+        commands, "collect_and_save", lambda *a, **k: (False, "save failed")
+    )
+    commands.handle_pending_commands(
+        [{"id": "cmd-c", "type": "collect"}],
+        "http://x",
+        "sk-key",
+    )
+    assert acks == [("cmd-c", "failed", "save failed")]
+
+
 def test_execute_command_update_stages_and_restarts(monkeypatch):
     import system_info.update as update_mod
 
@@ -406,3 +491,68 @@ def test_ws_agent_update_triggers_restart_callback(monkeypatch):
     assert ack["status"] == "done"
     assert ack["command_id"] == "cmd-u"
     assert restarted["called"] is True
+
+
+def test_ws_agent_collect_http_acks_in_background(monkeypatch):
+    import json as _json
+    import threading
+    import time as _time
+
+    started = threading.Event()
+    proceed = threading.Event()
+    http_acks = []
+
+    def fake_collect(api_url, api_key, pc_name=""):
+        started.set()
+        proceed.wait(timeout=2)
+        return True, None
+
+    def fake_http_ack(cid, status, url, key="", error=None):
+        http_acks.append((cid, status))
+        return True
+
+    monkeypatch.setattr(commands, "collect_and_save", fake_collect)
+    monkeypatch.setattr(commands, "ack_command", fake_http_ack)
+
+    sent = []
+
+    class FakeWs:
+        def __init__(self, inbox):
+            self.inbox = list(inbox)
+            self.closed = False
+
+        def send(self, data):
+            sent.append(_json.loads(data))
+
+        def recv(self):
+            if not self.inbox:
+                raise OSError("closed")
+            return self.inbox.pop(0)
+
+        def close(self):
+            self.closed = True
+
+    command_msg = _json.dumps(
+        {"type": "command", "command": {"id": "cmd-c", "type": "collect"}, "ts": 1}
+    )
+    fake_ws = FakeWs([command_msg])
+
+    def fake_create_connection(url, subprotocols=None, timeout=5, enable_multithread=False):
+        return fake_ws
+
+    import websocket as _ws_module
+
+    monkeypatch.setattr(_ws_module, "create_connection", fake_create_connection)
+    monkeypatch.setattr(_ws_module, "WebSocket", lambda: None)
+
+    sock = commands.WatchCommandSocket("https://x", "sk-key", "d1", pc_name="PC1")
+    sock._session()
+
+    assert started.wait(timeout=1)
+    assert [m for m in sent if m.get("type") == "command.ack"] == []
+    assert http_acks == []
+    proceed.set()
+    deadline = _time.time() + 2
+    while _time.time() < deadline and not http_acks:
+        _time.sleep(0.01)
+    assert http_acks == [("cmd-c", "done")]

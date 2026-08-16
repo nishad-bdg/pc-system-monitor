@@ -1977,6 +1977,44 @@ def test_create_command_restart_and_push(monkeypatch):
     assert len(pushed) == 1
 
 
+def test_create_command_collect(monkeypatch):
+    from sysinfo_api import realtime
+
+    _patch_db(monkeypatch)
+    monkeypatch.setattr(
+        db,
+        "create_command",
+        lambda device_id, command_type, requested_by: "64b0000000000000000000cc",
+    )
+
+    def fake_get(command_id):
+        return {
+            "_id": "64b0000000000000000000cc",
+            "device_id": "dev-1",
+            "type": "collect",
+            "status": "pending",
+            "requested_by": "64b000000000000000000001",
+            "created_at": 100.0,
+            "acked_at": None,
+        }
+
+    monkeypatch.setattr(db, "get_command", fake_get)
+    pushed = []
+
+    async def fake_push(command):
+        pushed.append(command)
+
+    monkeypatch.setattr(realtime, "push_command_to_agent", fake_push)
+    resp = client.post(
+        "/commands",
+        json={"device_id": "dev-1", "type": "collect"},
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 201
+    assert resp.json()["type"] == "collect"
+    assert len(pushed) == 1
+
+
 def test_create_command_rejects_bad_type(monkeypatch):
     _patch_db(monkeypatch)
     resp = client.post("/commands", json={"device_id": "dev-1", "type": "boom"}, headers=_auth_header())

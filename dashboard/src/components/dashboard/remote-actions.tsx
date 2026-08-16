@@ -8,6 +8,7 @@ import { pingDevice, sendCommand } from "@/lib/api";
 const ADMIN_ROLES = new Set(["admin", "super_admin"]);
 
 type ActionType = "restart" | "shutdown";
+type BusyKind = "ping" | "collect" | ActionType;
 
 const ACTION_LABELS: Record<ActionType, { button: string; title: string; body: string }> = {
   restart: {
@@ -22,7 +23,7 @@ const ACTION_LABELS: Record<ActionType, { button: string; title: string; body: s
   },
 };
 
-/** Remote Ping / Restart / Shutdown (admin + super_admin). Ping works on any OS. */
+/** Remote Ping / Collect now / Restart / Shutdown (admin + super_admin). Ping and Collect now work on any OS. */
 export function RemoteActions({
   apiUrl,
   deviceId,
@@ -38,12 +39,14 @@ export function RemoteActions({
   const role = session?.user?.role ?? "";
   const apiToken = session?.user?.apiToken ?? "";
   const [pending, setPending] = useState<ActionType | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busyKind, setBusyKind] = useState<BusyKind | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [confirmAction, setConfirmAction] = useState<ActionType | null>(null);
 
   const isWindows = (osSystem ?? "").toLowerCase().startsWith("win");
   if (!deviceId || !ADMIN_ROLES.has(role)) return null;
+
+  const busy = busyKind !== null;
 
   const openConfirm = (action: ActionType) => {
     setMessage(null);
@@ -51,7 +54,7 @@ export function RemoteActions({
   };
 
   const runPing = async () => {
-    setBusy(true);
+    setBusyKind("ping");
     setMessage(null);
     try {
       const res = await pingDevice(apiUrl, apiToken, deviceId);
@@ -70,12 +73,31 @@ export function RemoteActions({
         text: err instanceof Error ? err.message : "Could not ping this PC",
       });
     } finally {
-      setBusy(false);
+      setBusyKind(null);
+    }
+  };
+
+  const runCollect = async () => {
+    setBusyKind("collect");
+    setMessage(null);
+    try {
+      await sendCommand(apiUrl, apiToken, deviceId, "collect");
+      setMessage({
+        ok: true,
+        text: `Asked ${pcName} to send a fresh report. This view updates when it arrives.`,
+      });
+    } catch (err) {
+      setMessage({
+        ok: false,
+        text: err instanceof Error ? err.message : `${pcName} is not connected or the collect command was not sent.`,
+      });
+    } finally {
+      setBusyKind(null);
     }
   };
 
   const run = async (action: ActionType) => {
-    setBusy(true);
+    setBusyKind(action);
     setConfirmAction(null);
     setMessage(null);
     try {
@@ -91,7 +113,7 @@ export function RemoteActions({
         text: err instanceof Error ? err.message : `Could not send the ${action} command`,
       });
     } finally {
-      setBusy(false);
+      setBusyKind(null);
     }
   };
 
@@ -104,7 +126,15 @@ export function RemoteActions({
           onClick={runPing}
           className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
         >
-          {busy && !pending ? "Pinging…" : "Ping"}
+          {busyKind === "ping" ? "Pinging…" : "Ping"}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={runCollect}
+          className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-100 disabled:opacity-50"
+        >
+          {busyKind === "collect" ? "Collecting…" : "Collect now"}
         </button>
         {isWindows && (
           <>
@@ -127,7 +157,15 @@ export function RemoteActions({
           </>
         )}
       </div>
-      {busy && <p className="text-xs text-slate-400">{pending ? "Sending command…" : "Pinging…"}</p>}
+      {busy && (
+        <p className="text-xs text-slate-400">
+          {busyKind === "ping"
+            ? "Pinging…"
+            : busyKind === "collect"
+              ? "Sending collect…"
+              : "Sending command…"}
+        </p>
+      )}
       {!busy && message && (
         <p
           className={`text-xs ${
