@@ -41,6 +41,7 @@ class DiskHealth:
     internal: bool | None = None
     health: str = "unknown"  # ok | warning | fail | unknown
     size_bytes: int | None = None  # total capacity of the physical disk
+    serial: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -52,6 +53,7 @@ class DiskHealth:
             "internal": self.internal,
             "health": self.health,
             "size_bytes": self.size_bytes,
+            "serial": self.serial,
         }
 
 
@@ -124,6 +126,25 @@ def _derive_health(smart: str | None) -> str:
     return "unknown"
 
 
+def _clean_serial(value) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    lowered = text.lower()
+    if lowered in {
+        "unknown",
+        "none",
+        "n/a",
+        "null",
+        "0",
+        "00000000",
+        "to be filled by o.e.m.",
+        "default string",
+    }:
+        return None
+    return text
+
+
 def _extract_brand(name: str, manufacturer: str | None = None) -> str | None:
     """Best-effort vendor from a device name / manufacturer.
 
@@ -168,7 +189,7 @@ def _collect_windows_disks() -> list[DiskHealth]:
     script = (
         "Get-PhysicalDisk -ErrorAction SilentlyContinue | "
         "Select-Object FriendlyName, DeviceId, MediaType, HealthStatus, "
-        "BusType, Manufacturer, Size | ConvertTo-Json -Compress"
+        "BusType, Manufacturer, Size, SerialNumber | ConvertTo-Json -Compress"
     )
     raw = _run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
@@ -217,6 +238,7 @@ def _collect_windows_disks() -> list[DiskHealth]:
                 internal=_win_disk_internal(item.get("BusType")),
                 health=health,
                 size_bytes=size_bytes,
+                serial=_clean_serial(item.get("SerialNumber")),
             )
         )
     return disks
@@ -445,6 +467,34 @@ def _collect_windows_battery() -> BatteryHealth | None:
 
 # ---- macOS ----
 
+def _macos_disk_serials() -> dict[str, str]:
+    """Serials keyed by lowercased device name from NVMe / SATA profiler."""
+    serials: dict[str, str] = {}
+    for datatype in ("SPNVMeDataType", "SPSerialATADataType"):
+        raw = _run(["system_profiler", datatype, "-json"])
+        if not raw.strip():
+            continue
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            continue
+        for item in payload.get(datatype, []) or []:
+            if not isinstance(item, dict):
+                continue
+            serial = _clean_serial(item.get("device_serial") or item.get("serial_number"))
+            if not serial:
+                continue
+            for key in (
+                item.get("_name"),
+                item.get("device_model"),
+                item.get("device_name"),
+            ):
+                name = str(key or "").strip().lower()
+                if name:
+                    serials[name] = serial
+    return serials
+
+
 def _collect_macos_disks() -> list[DiskHealth]:
     raw = _run(["system_profiler", "SPStorageDataType", "-json"])
     if not raw.strip():
@@ -478,6 +528,7 @@ def _collect_macos_disks() -> list[DiskHealth]:
         except (TypeError, ValueError):
             volume_bytes = None
         current = seen.get(key)
+        serial = _clean_serial(physical.get("device_serial") or physical.get("serial_number"))
         if current is None:
             seen[key] = DiskHealth(
                 name=name,
@@ -488,10 +539,21 @@ def _collect_macos_disks() -> list[DiskHealth]:
                 internal=True if internal_raw in ("yes", "true") else False,
                 health=_derive_health(smart),
                 size_bytes=volume_bytes,
+                serial=serial,
             )
-        elif volume_bytes and (not current.size_bytes or volume_bytes > current.size_bytes):
-            current.size_bytes = volume_bytes
-    return sorted(seen.values(), key=lambda d: d.name.lower())
+        else:
+            if volume_bytes and (not current.size_bytes or volume_bytes > current.size_bytes):
+                current.size_bytes = volume_bytes
+            if serial and not current.serial:
+                current.serial = serial
+    disks = sorted(seen.values(), key=lambda d: d.name.lower())
+    extras = _macos_disk_serials()
+    if extras:
+        for disk in disks:
+            if disk.serial:
+                continue
+            disk.serial = extras.get(disk.name.lower())
+    return disks
 
 
 def _collect_macos_battery() -> BatteryHealth | None:
