@@ -164,7 +164,7 @@ def test_resources_to_dict_keys():
             "cpu_brand",
             "ram_total", "ram_used", "ram_available", "ram_free", "ram_percent",
             "swap_total", "swap_used", "swap_percent", "battery",
-            "ram_speed_mhz", "ram_type",
+            "ram_speed_mhz", "ram_type", "ram_modules",
         }
 
 
