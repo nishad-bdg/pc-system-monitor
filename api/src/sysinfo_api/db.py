@@ -757,6 +757,34 @@ def ping() -> bool:
         return False
 
 
+def _print_jobs_query(
+    device_id: str | None = None,
+    pc_name: str | None = None,
+    from_ts: float | None = None,
+    to_ts: float | None = None,
+    group_ids: list[str] | None = None,
+) -> dict:
+    clauses: list[dict] = []
+    if device_id:
+        clauses.append({"device_id": device_id})
+    if pc_name:
+        clauses.append({"pc_name": {"$regex": pc_name, "$options": "i"}})
+    if from_ts is not None or to_ts is not None:
+        completed: dict = {}
+        if from_ts is not None:
+            completed["$gte"] = from_ts
+        if to_ts is not None:
+            completed["$lte"] = to_ts
+        clauses.append({"completed_at": completed})
+    if group_ids is not None:
+        clauses.append(_groups_filter(group_ids))
+    if not clauses:
+        return {}
+    if len(clauses) == 1:
+        return clauses[0]
+    return {"$and": clauses}
+
+
 def save_print_jobs(documents: list[dict]) -> int:
     """Insert print-job documents. Returns count inserted (0 on Mongo error)."""
     if not documents:
@@ -775,39 +803,52 @@ def list_print_jobs(
     from_ts: float | None = None,
     to_ts: float | None = None,
     group_ids: list[str] | None = None,
+    skip: int = 0,
 ) -> list[dict]:
-    """Most recent print-job events, newest first."""
+    """Most recent print-job events, newest first. `skip` pages past older rows."""
     records: list[dict] = []
-    clauses: list[dict] = []
-    if device_id:
-        clauses.append({"device_id": device_id})
-    if pc_name:
-        clauses.append({"pc_name": {"$regex": pc_name, "$options": "i"}})
-    if from_ts is not None or to_ts is not None:
-        completed: dict = {}
-        if from_ts is not None:
-            completed["$gte"] = from_ts
-        if to_ts is not None:
-            completed["$lte"] = to_ts
-        clauses.append({"completed_at": completed})
-    if group_ids is not None:
-        group_clause = _groups_filter(group_ids)
-        clauses.append(group_clause)
-
-    if not clauses:
-        query: dict = {}
-    elif len(clauses) == 1:
-        query = clauses[0]
-    else:
-        query = {"$and": clauses}
+    query = _print_jobs_query(
+        device_id=device_id,
+        pc_name=pc_name,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        group_ids=group_ids,
+    )
     try:
-        cursor = _print_jobs().find(query).sort("created_at", -1).limit(max(1, min(limit, 500)))
+        cursor = (
+            _print_jobs()
+            .find(query)
+            .sort("created_at", -1)
+            .skip(max(0, skip))
+            .limit(max(1, min(limit, 500)))
+        )
         for doc in cursor:
             doc["_id"] = str(doc["_id"])
             records.append(doc)
     except (ConnectionFailure, PyMongoError):
         return records
     return records
+
+
+def count_print_jobs(
+    device_id: str | None = None,
+    pc_name: str | None = None,
+    from_ts: float | None = None,
+    to_ts: float | None = None,
+    group_ids: list[str] | None = None,
+) -> int:
+    """Total print jobs matching the same filters as `list_print_jobs`."""
+    query = _print_jobs_query(
+        device_id=device_id,
+        pc_name=pc_name,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        group_ids=group_ids,
+    )
+    try:
+        return int(_print_jobs().count_documents(query))
+    except (ConnectionFailure, PyMongoError):
+        return 0
 
 
 def print_jobs_hourly_counts(

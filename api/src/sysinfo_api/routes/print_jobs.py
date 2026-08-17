@@ -51,25 +51,44 @@ async def create_print_jobs(batch: PrintJobsBatch, api_key: ApiKey) -> dict:
     return {"count": len(documents)}
 
 
+def _effective_group_ids(user: dict, group_id: str | None) -> list[str] | None:
+    """User's group scope, optionally narrowed to one `group_id`."""
+    scoped = _user_group_ids(user)
+    if group_id:
+        if scoped is not None and group_id not in scoped:
+            return []
+        return [group_id]
+    return scoped
+
+
 @router.get("")
 def get_print_jobs(
     limit: int = 50,
+    skip: int = 0,
     device_id: str | None = None,
     pc_name: str | None = None,
     from_ts: float | None = None,
     to_ts: float | None = None,
+    group_id: str | None = None,
     user: CurrentUser = None,
 ) -> dict:
-    """Recent print jobs (admin JWT). Newest first."""
-    records = db.list_print_jobs(
-        min(max(limit, 1), 500),
+    """Recent print jobs (admin JWT). Newest first. `skip` + `limit` paginate;
+    `total` is the full match count (not the page size)."""
+    group_ids = _effective_group_ids(user, group_id)
+    limit = min(max(limit, 1), 500)
+    skip = max(skip, 0)
+    if group_id and group_ids == []:
+        return {"total": 0, "skip": skip, "limit": limit, "jobs": []}
+    filters = dict(
         device_id=device_id or None,
         pc_name=pc_name or None,
         from_ts=from_ts,
         to_ts=to_ts,
-        group_ids=_user_group_ids(user),
+        group_ids=group_ids,
     )
-    return {"total": len(records), "jobs": records}
+    total = db.count_print_jobs(**filters)
+    records = db.list_print_jobs(limit, skip=skip, **filters)
+    return {"total": total, "skip": skip, "limit": limit, "jobs": records}
 
 
 @router.get("/summary")

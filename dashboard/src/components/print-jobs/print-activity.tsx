@@ -33,6 +33,7 @@ import { PrintingBadge } from "@/components/dashboard/printing-badge";
 import { useRealtime } from "@/components/realtime-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const TABLE_PAGE_SIZE = 25;
 const MAX_BAR = "#059669";
 const MIN_BAR = "#d97706";
 const OTHER_BAR = "#2563eb";
@@ -98,12 +99,31 @@ export function PrintActivity() {
   const { connected, isPrinting, printingCount } = useRealtime();
   const [openKeys, setOpenKeys] = useState<Record<string, boolean>>({});
   const [groupFilter, setGroupFilter] = useState("");
+  const [page, setPage] = useState(1);
 
-  const { data: jobsResp, isLoading, isError } = useQuery({
-    queryKey: ["print-jobs"],
-    queryFn: () => fetchPrintJobs(API_URL, apiToken ?? "", 500),
+  const groupQuery = groupFilter || undefined;
+
+  const { data: feedResp, isLoading, isError } = useQuery({
+    queryKey: ["print-jobs", "feed", groupFilter],
+    queryFn: () =>
+      fetchPrintJobs(API_URL, apiToken ?? "", 500, 0, { groupId: groupQuery }),
     enabled: !!apiToken,
     refetchInterval: 60_000,
+  });
+
+  const { data: tableResp, isFetching: tableFetching } = useQuery({
+    queryKey: ["print-jobs", "page", page, groupFilter],
+    queryFn: () =>
+      fetchPrintJobs(
+        API_URL,
+        apiToken ?? "",
+        TABLE_PAGE_SIZE,
+        (page - 1) * TABLE_PAGE_SIZE,
+        { groupId: groupQuery },
+      ),
+    enabled: !!apiToken,
+    refetchInterval: 60_000,
+    placeholderData: (prev) => prev,
   });
 
   const { data: summary } = useQuery({
@@ -137,17 +157,14 @@ export function PrintActivity() {
     [reportsData?.reports],
   );
 
-  const jobs = jobsResp?.jobs ?? [];
+  const jobs = feedResp?.jobs ?? [];
+  const tableJobs = tableResp?.jobs ?? [];
+  const tableTotal = tableResp?.total ?? 0;
+  const tablePages = Math.max(1, Math.ceil(tableTotal / TABLE_PAGE_SIZE));
+  const safePage = Math.min(page, tablePages);
+  const tableStart = tableTotal === 0 ? 0 : (safePage - 1) * TABLE_PAGE_SIZE;
 
-  const scopedJobs = useMemo(() => {
-    if (!groupFilter) return jobs;
-    return jobs.filter((j) => {
-      const m = machineForJob(j, machines);
-      return m
-        ? machineInGroup(m, groupFilter, orgGroups, subCategories)
-        : false;
-    });
-  }, [jobs, groupFilter, machines, orgGroups, subCategories]);
+  const scopedJobs = jobs;
 
   const pcGroups = useMemo(
     () => groupJobsByPc(scopedJobs),
@@ -255,7 +272,10 @@ export function PrintActivity() {
         <select
           id="print-group-filter"
           value={groupFilter}
-          onChange={(e) => setGroupFilter(e.target.value)}
+          onChange={(e) => {
+            setGroupFilter(e.target.value);
+            setPage(1);
+          }}
           className="mb-3 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
         >
           <option value="">All groups</option>
@@ -401,7 +421,10 @@ export function PrintActivity() {
               Group
               <select
                 value={groupFilter}
-                onChange={(e) => setGroupFilter(e.target.value)}
+                onChange={(e) => {
+                  setGroupFilter(e.target.value);
+                  setPage(1);
+                }}
                 className="mt-1 block min-w-48 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
               >
                 <option value="">All groups</option>
@@ -527,11 +550,12 @@ export function PrintActivity() {
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
           <h2 className="text-sm font-medium text-slate-700">Recent prints</h2>
-          {scopedJobs.length === 0 ? (
+          {tableTotal === 0 ? (
             <p className="mt-3 text-sm text-slate-500">
               Waiting for print jobs…
             </p>
           ) : (
+            <>
             <div className="mt-3 overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead>
@@ -545,7 +569,7 @@ export function PrintActivity() {
                   </tr>
                 </thead>
                 <tbody>
-                  {scopedJobs.map((j: PrintJob) => (
+                  {tableJobs.map((j: PrintJob) => (
                     <tr
                       key={j._id}
                       className="border-b border-slate-100 last:border-0 hover:bg-slate-50/80"
@@ -573,6 +597,33 @@ export function PrintActivity() {
                 </tbody>
               </table>
             </div>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-slate-500">
+                {tableFetching ? "Loading… · " : ""}
+                Showing {tableStart + 1}–
+                {Math.min(tableStart + TABLE_PAGE_SIZE, tableTotal)} of{" "}
+                {tableTotal} · Page {safePage} of {tablePages}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={safePage <= 1}
+                  onClick={() => setPage(Math.max(1, safePage - 1))}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  disabled={safePage >= tablePages}
+                  onClick={() => setPage(Math.min(tablePages, safePage + 1))}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+            </>
           )}
         </div>
       </div>

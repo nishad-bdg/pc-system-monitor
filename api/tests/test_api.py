@@ -1791,15 +1791,61 @@ def test_print_jobs_list_with_jwt(monkeypatch):
     monkeypatch.setattr(
         db,
         "list_print_jobs",
-        lambda limit=50, device_id=None, pc_name=None, from_ts=None, to_ts=None, group_ids=None: [
+        lambda limit=50, device_id=None, pc_name=None, from_ts=None, to_ts=None, group_ids=None, skip=0: [
             {"_id": "1", "device_id": "dev-1", "printer": "HP", "document": "a.pdf", "created_at": 1.0}
         ],
     )
+    monkeypatch.setattr(db, "count_print_jobs", lambda **kw: 1)
     resp = client.get("/print-jobs?limit=5", headers=_auth_header())
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] == 1
+    assert body["skip"] == 0
+    assert body["limit"] == 5
     assert body["jobs"][0]["printer"] == "HP"
+
+
+def test_print_jobs_list_paginates(monkeypatch):
+    _patch_db(monkeypatch)
+    seen: dict = {}
+
+    def fake_list(limit=50, device_id=None, pc_name=None, from_ts=None, to_ts=None, group_ids=None, skip=0):
+        seen["limit"] = limit
+        seen["skip"] = skip
+        return [
+            {"_id": "2", "device_id": "dev-1", "printer": "HP", "document": "b.pdf", "created_at": 2.0}
+        ]
+
+    monkeypatch.setattr(db, "list_print_jobs", fake_list)
+    monkeypatch.setattr(db, "count_print_jobs", lambda **kw: 42)
+    resp = client.get("/print-jobs?limit=10&skip=10", headers=_auth_header())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 42
+    assert body["skip"] == 10
+    assert body["limit"] == 10
+    assert seen == {"limit": 10, "skip": 10}
+    assert body["jobs"][0]["_id"] == "2"
+
+
+def test_print_jobs_list_group_id_out_of_scope_empty(monkeypatch):
+    _patch_db(
+        monkeypatch,
+        user={
+            "_id": "64b000000000000000000001",
+            "username": "admin",
+            "role": "user",
+            "groups": ["aaaaaaaaaaaaaaaaaaaaaaaa"],
+        },
+    )
+    resp = client.get(
+        "/print-jobs?group_id=bbbbbbbbbbbbbbbbbbbbbbbb",
+        headers=_auth_header(role="user"),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 0
+    assert body["jobs"] == []
 
 
 def test_print_jobs_summary(monkeypatch):

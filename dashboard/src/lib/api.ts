@@ -999,6 +999,8 @@ export type PrintJob = {
 
 export type PrintJobsResponse = {
   total: number;
+  skip?: number;
+  limit?: number;
   jobs: PrintJob[];
 };
 
@@ -1016,8 +1018,15 @@ export function fetchPrintJobs(
   apiUrl: string,
   apiToken: string,
   limit = 100,
+  skip = 0,
+  filters?: { groupId?: string },
 ): Promise<PrintJobsResponse> {
-  return apiRequest(apiUrl, apiToken, `/print-jobs?limit=${limit}`);
+  const params = new URLSearchParams({
+    limit: String(limit),
+    skip: String(skip),
+  });
+  if (filters?.groupId) params.set("group_id", filters.groupId);
+  return apiRequest(apiUrl, apiToken, `/print-jobs?${params}`);
 }
 
 export function fetchPrintSummary(
