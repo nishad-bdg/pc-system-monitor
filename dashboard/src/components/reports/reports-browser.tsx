@@ -29,6 +29,7 @@ import { StatusDot } from "@/components/dashboard/status-dot";
 import { PrintingBadge } from "@/components/dashboard/printing-badge";
 import { LoadWarningBadge, isHighLiveLoad } from "@/components/dashboard/load-warning-badge";
 import { ActivationBadge } from "@/components/dashboard/activation-badge";
+import { deviceIdsOf } from "@/components/dashboard/sidebar-remote-actions";
 import { useRealtime } from "@/components/realtime-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -226,6 +227,7 @@ export function ReportsBrowser() {
       nav="reports"
       role={session?.user?.role}
       widthClass="w-80"
+      connectDeviceIds={deviceIdsOf(machines)}
       subtitle={
         <>
           {machines.length} PC{machines.length === 1 ? "" : "s"}

@@ -26,6 +26,7 @@ import {
 } from "@/lib/api";
 import { DashboardShell } from "@/components/dashboard/shell";
 import { StatusDot } from "@/components/dashboard/status-dot";
+import { deviceIdsOf } from "@/components/dashboard/sidebar-remote-actions";
 import { useRealtime } from "@/components/realtime-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -165,6 +166,7 @@ export function FleetOverview() {
       nav="overview"
       role={session?.user?.role}
       widthClass="w-80"
+      connectDeviceIds={deviceIdsOf(filtered)}
       subtitle={
         <>
           {counts.installed} installed

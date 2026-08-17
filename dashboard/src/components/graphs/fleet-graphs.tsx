@@ -29,6 +29,7 @@ import {
 } from "@/components/dashboard/shell";
 import { StatusDot } from "@/components/dashboard/status-dot";
 import { PrintingBadge } from "@/components/dashboard/printing-badge";
+import { deviceIdsOf } from "@/components/dashboard/sidebar-remote-actions";
 import { useRealtime } from "@/components/realtime-provider";
 import type { LiveMetricsSample } from "@/components/realtime-provider";
 
@@ -226,6 +227,7 @@ export function FleetGraphs() {
       nav="graphs"
       role={session?.user?.role}
       widthClass="w-80"
+      connectDeviceIds={deviceIdsOf(listed)}
       subtitle={
         <>
           {filtered.length} PC{filtered.length === 1 ? "" : "s"}

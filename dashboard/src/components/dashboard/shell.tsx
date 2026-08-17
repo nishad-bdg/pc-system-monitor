@@ -9,6 +9,7 @@ import {
 } from "react";
 import { UserNav } from "./user-nav";
 import { SidebarNav, NavKey } from "@/components/sidebar-nav";
+import { SidebarRemoteActions } from "./sidebar-remote-actions";
 
 const SidebarDrawerContext = createContext<{
   setOpen: (open: boolean) => void;
@@ -93,6 +94,7 @@ export function DashboardShell({
   role,
   sidebar,
   sidebarFooter,
+  connectDeviceIds,
   header,
   children,
   widthClass = "w-72",
@@ -103,6 +105,8 @@ export function DashboardShell({
   role?: string;
   sidebar: ReactNode;
   sidebarFooter?: ReactNode;
+  /** When set, Connect all targets these PCs (current list). Otherwise the whole fleet. */
+  connectDeviceIds?: string[];
   header: ReactNode;
   children: ReactNode;
   widthClass?: string;
@@ -148,8 +152,11 @@ export function DashboardShell({
 
           <div className="flex-1 overflow-y-auto">{sidebar}</div>
 
-          {sidebarFooter && (
-            <div className="border-t border-slate-800 p-3">{sidebarFooter}</div>
+          {(sidebarFooter || role === "admin" || role === "super_admin") && (
+            <div className="space-y-2 border-t border-slate-800 p-3">
+              {sidebarFooter}
+              <SidebarRemoteActions deviceIds={connectDeviceIds} />
+            </div>
           )}
         </aside>
 

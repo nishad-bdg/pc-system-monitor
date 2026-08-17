@@ -93,7 +93,7 @@ Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`, `SYSTE
 - `GET /reports`, `GET /reports/{id}`, and `GET /reports/export` annotate every report with `online` (bool) + `last_seen`. Old reports without a `device_id` are marked offline.
 - The dashboard shows a **green (online) / red (offline)** dot next to each PC in the Fleet sidebar, Reports browser, and detail header. The client timer starts from **when the presence event was received**, not by comparing `last_seen` to the browser clock (avoids false-offline from clock skew).
 - **Windows activation** is on the hourly/Collect report (`os.windows_activation`), not the 5s live metrics stream. Dashboard: identity bar **Windows** (green Activated / amber Not activated or grace), Summary **Operating system** card, Overview Machine card. Fleet/Reports sidebar shows an amber badge when `licensed` is false. Older reports without the field omit it until Collect now / a new desktop build.
-- Admin **Ping** (`POST /commands/ping`) live-checks the agent socket (any OS); **Connect** (`POST /commands` type `reconnect`) asks an offline PC to reopen `/ws/agent` if the desktop app is running and has internet; **Connect all** (`POST /commands/batch` type `reconnect`) does the same for every PC currently shown in the Fleet sidebar list; **Collect now** (`POST /commands` type `collect`) asks that PC to send a fresh report. See Remote control.
+- Admin **Ping** (`POST /commands/ping`) live-checks the agent socket (any OS); **Connect** (`POST /commands` type `reconnect`) asks an offline PC to reopen `/ws/agent` if the desktop app is running and has internet; **Connect all** (`POST /commands/batch` type `reconnect`) does the same for every PC in the current sidebar list (or the whole fleet on pages without a PC list); **Collect now** (`POST /commands` type `collect`) asks that PC to send a fresh report. See Remote control. **Connect all** (`admin`/`super_admin`) and **Update all apps** (`super_admin`) appear in the **sidebar footer of every dashboard page**.
 
 ### Identity
 
@@ -277,11 +277,14 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
   the 30s backoff. The dashboard then polls Ping for about a minute. Success:
   connected (+ RTT). Failure: the app may not be running, or the PC has no
   internet. Connect is **not** part of Update all apps.
-- **Connect all** (any OS): Fleet sidebar **Connect all** button
-  (`admin`/`super_admin`) calls `POST /commands/batch` with `type:
-  "reconnect"` and the `device_id`s of every PC **currently shown in the
-  sidebar list** (name/group filters apply; PCs without a `device_id` are
-  skipped). Unlike **Update all apps**, offline agents are included — the
+- **Connect all** (any OS): sidebar **Connect all** button on **every**
+  dashboard page (`admin`/`super_admin`, `sidebar-remote-actions.tsx`) calls
+  `POST /commands/batch` with `type: "reconnect"`. On Overview / Graphs /
+  Fleet / Reports it uses the `device_id`s of every PC **currently shown in
+  that page's sidebar list** (name/group filters apply; PCs without a
+  `device_id` are skipped). On other pages (Print Activity, Groups, Export,
+  Users, API Keys, PC detail) it targets the whole accessible fleet. Unlike
+  **Update all apps**, offline agents are included — the
   command stays `pending` until the next heartbeat. No per-PC Ping polling;
   presence dots flip green over `/ws` as each agent reconnects. Copy: asked
   N PCs to reconnect; if the app is running with internet they should come
@@ -324,8 +327,9 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
 - **Offline fallback:** without a socket the command stays `pending`; it is
   re-sent on agent `hello` at reconnect **and** echoed in the `commands` field of
   the heartbeat poll response (`GET/POST /heartbeat`).
-- **Force-update all apps (`update` command):** the Fleet sidebar **Update all
-  apps** button (`super_admin` only) calls `POST /commands/broadcast {type:
+- **Force-update all apps (`update` command):** the sidebar **Update all
+  apps** button on **every** dashboard page (`super_admin` only) calls
+  `POST /commands/broadcast {type:
   "update"}` → a per-device command is pushed to **every connected agent
   socket** at once. Collect and Connect/`reconnect` are **not** part of Update
   all apps. Each agent runs
@@ -359,7 +363,7 @@ Desktops report **completed print jobs** so the dashboard shows who is printing 
   - **macOS:** tails `/var/log/cups/page_log`; watermark = latest completion column; fields printer/user/job/pages/title.
   - Every `--watch` cycle (**60s** heartbeat) also flushes any new print jobs to the API. `system-info --print-jobs` flushes on demand.
 - **API:** `POST /print-jobs` (API key, batch `{device_id, pc_name, jobs:[{printer,document,user,pages,completed_at}]}`) stores in the Mongo `print_jobs` collection and broadcasts a **`print.job`** WS event per job; `GET /print-jobs?limit=` (JWT, group-scoped for `user` role, newest first) and `GET /print-jobs/summary?hours=` (per-hour counts of the last N hours). `source_key` prefix stored like reports.
-- **Dashboard:** `/print-jobs` page (slate+blue, sidebar + detail like Reports) with a **per-hour bar chart** (last 24h), live **recent-prints feed**, per-PC counts, and stat cards (jobs / pages / printers). The WS `print.job` event refreshes it with no manual refresh.
+- **Dashboard:** `/print-jobs` page (slate+blue, sidebar + detail like Reports) with a **per-hour bar chart** (last 24h), live **recent-prints feed**, and stat cards (jobs / pages / printers). The sidebar groups recent jobs **by PC** (newest group first); each group is **collapsible** (most recent PC expanded by default) and shows the live **printing** badge when that PC is printing. The WS `print.job` event refreshes it with no manual refresh.
 
 ---
 
@@ -415,7 +419,7 @@ Page navigation lives in the **sticky top bar** (not the sidebar). Avoid purple/
 
 ### Fleet (`/dashboard`)
 
-- Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports. On mobile, picking a PC closes the list; **← PC list** in the detail header opens it again. Each PC row and the detail header show a **green (online) / red (offline)** status dot; data updates live via WebSocket. Each row also shows the desktop **App version** (`v0.2.21`) from the latest report when present. Live CPU/RAM ≥ **90%** shows a blinking red **CPU high** / **RAM high** / **CPU+RAM high** badge on the card (`load-warning-badge.tsx`). Windows that are **not licensed** show an amber activation badge (`activation-badge.tsx`). The detail identity bar lists Private IP, Public IP, MAC, **App version**, and **Windows** activation when present. For `admin`/`super_admin` the detail header has **Ping**, **Connect** (offline PCs), and **Collect now** (any OS) plus **Restart** / **Shut down** (Windows only). The sidebar footer **Connect all** button (`admin`/`super_admin`) sends `reconnect` to every PC in the current list. For `super_admin` the sidebar footer also shows an **Update all apps** button that pushes a `update` broadcast to every connected desktop app at once.
+- Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports. On mobile, picking a PC closes the list; **← PC list** in the detail header opens it again. Each PC row and the detail header show a **green (online) / red (offline)** status dot; data updates live via WebSocket. Each row also shows the desktop **App version** (`v0.2.21`) from the latest report when present. Live CPU/RAM ≥ **90%** shows a blinking red **CPU high** / **RAM high** / **CPU+RAM high** badge on the card (`load-warning-badge.tsx`). Windows that are **not licensed** show an amber activation badge (`activation-badge.tsx`). The detail identity bar lists Private IP, Public IP, MAC, **App version**, and **Windows** activation when present. For `admin`/`super_admin` the detail header has **Ping**, **Connect** (offline PCs), and **Collect now** (any OS) plus **Restart** / **Shut down** (Windows only). The sidebar footer **Connect all** (`admin`/`super_admin`) and **Update all apps** (`super_admin`) buttons are on **every** page (`DashboardShell`), not only Fleet. Connect all on Fleet sends `reconnect` to every PC in the current list. Update all apps pushes a `update` broadcast to every connected desktop app at once.
 - Detail tabs (`machine-detail.tsx`): **Summary (default) / Overview / Printers / Uptime / Storage / Processes / Health / Emails**.
   - **Summary:** OS + Windows activation, total uptime + session, network total + bandwidth, full CPU spec (**name** like `AMD Ryzen 7 5800X 8-Core Processor` — not the vendor word `AMD` alone; **—** until a report has `cpu_name`), brand, arch/cores/clock), full RAM spec (total/available/free/swap + **bus speed** `ram_speed_mhz` + `ram_type`), storage health (SSD/HDD badge + brand, SMART, Healthy/Failing), battery health (condition, health %, cycle count), internet security, printers + total prints.
   - **Overview:** CPU/RAM/swap tiles, compact UptimeState (session + days tracked) + DiskState (devices/used/free), location/machine (incl. Windows activation), Battery stat card (laptops only), Network bandwidth chart, Printers, Security card.
@@ -448,7 +452,7 @@ Keys look like `id:…`, `mac:…`, `name:…` (URL-encoded for `/reports/[key]`
 
 ### Important ops note
 
-Dashboard **Refresh** only reloads API data. It does **not** push collect commands to desktops. Use **Collect now** on a selected PC (admin) to push a `collect` command over `/ws/agent`. Use **Connect** on an offline PC (admin) to ask it to reopen `/ws/agent` if the desktop app is running with internet. Use **Connect all** in the Fleet sidebar to send that reconnect to every PC currently in the list. New reports are pushed to open dashboards automatically over the WebSocket (no Refresh needed).
+Dashboard **Refresh** only reloads API data. It does **not** push collect commands to desktops. Use **Collect now** on a selected PC (admin) to push a `collect` command over `/ws/agent`. Use **Connect** on an offline PC (admin) to ask it to reopen `/ws/agent` if the desktop app is running with internet. Use **Connect all** in any page sidebar (`admin`/`super_admin`) to send that reconnect to the current list or the whole fleet. Use **Update all apps** (`super_admin`) from any page sidebar. New reports are pushed to open dashboards automatically over the WebSocket (no Refresh needed).
 
 
 ---

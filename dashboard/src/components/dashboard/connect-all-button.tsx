@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { sendCommandBatch } from "@/lib/api";
 
-/** Admin: ask every PC in the current Fleet list to reopen `/ws/agent`.
+/** Admin: ask every targeted PC to reopen `/ws/agent`.
  * Offline agents keep the command pending and reconnect on the next heartbeat
  * if the desktop app is running with internet. */
 export function ConnectAllButton({

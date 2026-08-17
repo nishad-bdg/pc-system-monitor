@@ -21,8 +21,7 @@ import { StatusDot } from "./status-dot";
 import { PrintingBadge } from "./printing-badge";
 import { LoadWarningBadge, isHighLiveLoad } from "./load-warning-badge";
 import { ActivationBadge } from "./activation-badge";
-import { UpdateAppsButton } from "./update-apps-button";
-import { ConnectAllButton } from "./connect-all-button";
+import { deviceIdsOf } from "./sidebar-remote-actions";
 import { useRealtime } from "../realtime-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -69,25 +68,14 @@ export function Dashboard() {
     filtered[0] ||
     null;
 
-  const connectAllIds = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          filtered
-            .map((m) => m.deviceId)
-            .filter((id): id is string => Boolean(id)),
-        ),
-      ),
-    [filtered],
-  );
-
-  const canRemote = session?.user?.role === "admin" || session?.user?.role === "super_admin";
+  const connectAllIds = useMemo(() => deviceIdsOf(filtered), [filtered]);
 
   return (
     <DashboardShell
       title="Fleet"
       nav="fleet"
       role={session?.user?.role}
+      connectDeviceIds={connectAllIds}
       subtitle={
         <>
           {machines.length} machine{machines.length === 1 ? "" : "s"}
@@ -233,26 +221,14 @@ export function Dashboard() {
         </>
       }
       sidebarFooter={
-        <div className="space-y-2">
-          <button
-            type="button"
-            onClick={() => refreshAll()}
-            className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
-            disabled={isFetching}
-          >
-            {isFetching ? "Refreshing…" : "Refresh"}
-          </button>
-          {canRemote && (
-            <ConnectAllButton
-              apiUrl={API_URL}
-              apiToken={apiToken ?? ""}
-              deviceIds={connectAllIds}
-            />
-          )}
-          {session?.user?.role === "super_admin" && (
-            <UpdateAppsButton apiUrl={API_URL} apiToken={apiToken ?? ""} />
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={() => refreshAll()}
+          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+          disabled={isFetching}
+        >
+          {isFetching ? "Refreshing…" : "Refresh"}
+        </button>
       }
       header={
         <div className="border-b border-slate-200 bg-white/80 px-6 py-4 backdrop-blur">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {
@@ -19,14 +19,41 @@ import {
   PrintJob,
 } from "@/lib/api";
 import { DashboardShell } from "@/components/dashboard/shell";
+import { PrintingBadge } from "@/components/dashboard/printing-badge";
 import { useRealtime } from "@/components/realtime-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
+type PcPrintGroup = {
+  key: string;
+  name: string;
+  deviceId?: string;
+  jobs: PrintJob[];
+  last: number;
+};
+
+function groupJobsByPc(jobs: PrintJob[]): PcPrintGroup[] {
+  const map = new Map<string, PcPrintGroup>();
+  for (const j of jobs) {
+    const key = j.device_id || j.pc_name || "unknown";
+    const name = j.pc_name || j.device_id || "Unknown PC";
+    let g = map.get(key);
+    if (!g) {
+      g = { key, name, deviceId: j.device_id, jobs: [], last: 0 };
+      map.set(key, g);
+    }
+    g.jobs.push(j);
+    const t = j.completed_at ?? j.created_at ?? 0;
+    if (t > g.last) g.last = t;
+  }
+  return [...map.values()].sort((a, b) => b.last - a.last);
+}
+
 export function PrintActivity() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
-  const { connected } = useRealtime();
+  const { connected, isPrinting, printingCount } = useRealtime();
+  const [openKeys, setOpenKeys] = useState<Record<string, boolean>>({});
 
   const { data: jobsResp, isLoading, isError } = useQuery({
     queryKey: ["print-jobs"],
@@ -43,6 +70,7 @@ export function PrintActivity() {
   });
 
   const jobs = jobsResp?.jobs ?? [];
+  const groups = useMemo(() => groupJobsByPc(jobs), [jobs]);
 
   const totalPages = useMemo(
     () =>
@@ -55,21 +83,15 @@ export function PrintActivity() {
     [jobs],
   );
 
-  const byPc = useMemo(() => {
-    const map = new Map<string, { count: number; last: number | undefined }>();
-    for (const j of jobs) {
-      const key = j.pc_name || j.device_id || "Unknown PC";
-      const entry = map.get(key) ?? { count: 0, last: undefined };
-      entry.count += 1;
-      if (j.completed_at && (!entry.last || j.completed_at > entry.last)) {
-        entry.last = j.completed_at;
-      }
-      map.set(key, entry);
-    }
-    return [...map.entries()]
-      .map(([name, v]) => ({ name, ...v }))
-      .sort((a, b) => b.count - a.count);
-  }, [jobs]);
+  const isGroupOpen = (key: string, isFirst: boolean) =>
+    openKeys[key] ?? isFirst;
+
+  const toggleGroup = (key: string, isFirst: boolean) => {
+    setOpenKeys((prev) => ({
+      ...prev,
+      [key]: !(prev[key] ?? isFirst),
+    }));
+  };
 
   const sidebar = (
     <>
@@ -99,49 +121,61 @@ export function PrintActivity() {
             agent reports them.
           </p>
         )}
-        <ul className="space-y-2">
-          {jobs.map((j) => (
-            <li key={j._id}>
-              <div className="rounded-lg bg-slate-900/70 px-3 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-xs font-medium text-slate-100">
-                    {j.pc_name || j.device_id || "Unknown PC"}
-                  </span>
-                  <span className="shrink-0 text-[10px] text-slate-500">
-                    {fmtRelative(j.completed_at ?? j.created_at)}
-                  </span>
-                </div>
-                <p className="mt-0.5 truncate text-[11px] text-slate-300">
-                  {j.printer}
-                </p>
-                <p className="truncate font-mono text-[10px] text-slate-500">
-                  {j.document}
-                </p>
-                <div className="mt-0.5 flex gap-2 text-[10px] text-slate-500">
-                  {j.user ? <span>{j.user}</span> : null}
-                  {j.pages ? <span>{j.pages} pages</span> : null}
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </div>
-      <div className="border-t border-slate-800 p-4">
-        <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-          Per PC (recent)
-        </p>
         <ul className="space-y-1">
-          {byPc.map((row) => (
-            <li key={row.name} className="flex items-center justify-between text-xs">
-              <span className="truncate text-slate-300">{row.name}</span>
-              <span className="ml-2 shrink-0 text-slate-500">
-                {row.count} job{row.count === 1 ? "" : "s"}
-              </span>
-            </li>
-          ))}
-          {byPc.length === 0 && (
-            <li className="text-xs text-slate-500">—</li>
-          )}
+          {groups.map((g, i) => {
+            const open = isGroupOpen(g.key, i === 0);
+            const printing = isPrinting(g.deviceId);
+            const printCount = printingCount(g.deviceId);
+            return (
+              <li key={g.key} className="rounded-lg bg-slate-900/70">
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  onClick={() => toggleGroup(g.key, i === 0)}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left"
+                >
+                  <span
+                    className={`shrink-0 text-[10px] text-slate-500 transition-transform ${
+                      open ? "rotate-90" : ""
+                    }`}
+                    aria-hidden
+                  >
+                    ▶
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-100">
+                    {g.name}
+                  </span>
+                  {printing && <PrintingBadge count={printCount} />}
+                  <span className="shrink-0 text-[10px] text-slate-500">
+                    {g.jobs.length} job{g.jobs.length === 1 ? "" : "s"}
+                  </span>
+                </button>
+                {open && (
+                  <ul className="space-y-2 border-t border-slate-800 px-3 py-2">
+                    {g.jobs.map((j) => (
+                      <li key={j._id}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate text-[11px] text-slate-300">
+                            {j.printer}
+                          </span>
+                          <span className="shrink-0 text-[10px] text-slate-500">
+                            {fmtRelative(j.completed_at ?? j.created_at)}
+                          </span>
+                        </div>
+                        <p className="truncate font-mono text-[10px] text-slate-500">
+                          {j.document}
+                        </p>
+                        <div className="mt-0.5 flex gap-2 text-[10px] text-slate-500">
+                          {j.user ? <span>{j.user}</span> : null}
+                          {j.pages ? <span>{j.pages} pages</span> : null}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
         </ul>
       </div>
     </>
