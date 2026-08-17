@@ -50,8 +50,22 @@ export type LiveMetricsSample = {
   bytes_recv?: number;
   send_rate_bps?: number;
   recv_rate_bps?: number;
+  eth_name?: string | null;
+  eth_kind?: "ethernet" | "wifi" | "other" | string;
+  eth_send_rate_bps?: number;
+  eth_recv_rate_bps?: number;
+  eth_link_mbps?: number;
+  cpu_name?: string | null;
+  cpu_brand?: string | null;
   processes?: LiveProcesses;
   ts?: number;
+};
+
+/** Live Ethernet send/receive in Mbps for the last few minutes. */
+export type LiveEthPoint = {
+  t: number;
+  send: number;
+  recv: number;
 };
 
 export type RealtimeEvent = {
@@ -75,6 +89,9 @@ type StoredMetrics = LiveMetricsSample & { receivedAt: number };
 
 /** Drop live gauges if the agent misses a few 5s samples. */
 const LIVE_METRICS_STALE_MS = 20_000;
+/** Keep ~7 minutes of 5s Ethernet samples for the Task Manager-style chart. */
+const ETH_HISTORY_MS = 7 * 60 * 1000;
+const ETH_HISTORY_MAX = 90;
 
 type RealtimeContextValue = {
   connected: boolean;
@@ -91,6 +108,8 @@ type RealtimeContextValue = {
   printingCount: (deviceId?: string | null) => number;
   /** Latest live CPU/RAM/network sample, or null if missing/stale. */
   metricsFor: (deviceId?: string | null) => LiveMetricsSample | null;
+  /** Last ~7 minutes of Ethernet send/receive (Mbps) for a live sparkline. */
+  metricsHistoryFor: (deviceId?: string | null) => LiveEthPoint[];
   /** Force-refetch every active query (Refresh button). */
   refreshAll: () => void;
 };
@@ -104,6 +123,7 @@ const RealtimeContext = createContext<RealtimeContextValue>({
   isPrinting: () => false,
   printingCount: () => 0,
   metricsFor: () => null,
+  metricsHistoryFor: () => [],
   refreshAll: () => {},
 });
 
@@ -128,6 +148,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const wsRef = useRef<WebSocket | null>(null);
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const printTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const ethHistoryRef = useRef<Record<string, LiveEthPoint[]>>({});
 
   const wsUrl = buildWsUrl(API_URL);
 
@@ -203,9 +224,21 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       }
       if (event.type === "metrics.sample" && event.metrics?.device_id) {
         const sample = event.metrics;
-        setMetrics((prev) => ({
-          ...prev,
-          [sample.device_id]: { ...sample, receivedAt: Date.now() },
+        const now = Date.now();
+        const sendBps = sample.eth_send_rate_bps ?? sample.send_rate_bps ?? 0;
+        const recvBps = sample.eth_recv_rate_bps ?? sample.recv_rate_bps ?? 0;
+        const point: LiveEthPoint = {
+          t: now,
+          send: (Math.max(0, sendBps) * 8) / 1_000_000,
+          recv: (Math.max(0, recvBps) * 8) / 1_000_000,
+        };
+        const prev = ethHistoryRef.current[sample.device_id] ?? [];
+        ethHistoryRef.current[sample.device_id] = [...prev, point]
+          .filter((p) => now - p.t <= ETH_HISTORY_MS)
+          .slice(-ETH_HISTORY_MAX);
+        setMetrics((prevMetrics) => ({
+          ...prevMetrics,
+          [sample.device_id]: { ...sample, receivedAt: now },
         }));
       }
     },
@@ -326,6 +359,14 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     [metrics, tick],
   );
 
+  const metricsHistoryFor = useCallback(
+    (deviceId?: string | null): LiveEthPoint[] => {
+      if (!deviceId) return [];
+      return ethHistoryRef.current[deviceId] ?? [];
+    },
+    [metrics, tick],
+  );
+
   return (
     <RealtimeContext.Provider
       value={{
@@ -337,6 +378,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         isPrinting,
         printingCount,
         metricsFor,
+        metricsHistoryFor,
         refreshAll,
       }}
     >

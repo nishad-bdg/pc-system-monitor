@@ -2531,6 +2531,8 @@ def test_broadcast_metrics_skips_empty_device():
             "device_id": "dev-9",
             "cpu_percent": "11.5",
             "ram_percent": 20,
+            "cpu_name": "Intel Core i5-10400",
+            "cpu_brand": "Intel",
             "processes": {
                 "cpu": [{"pid": 4, "name": "chrome", "cpu_percent": 12.5, "memory_rss": 1}],
                 "ram": [],
@@ -2543,8 +2545,26 @@ def test_broadcast_metrics_skips_empty_device():
     assert sent[0]["type"] == "metrics.sample"
     assert sent[0]["metrics"]["device_id"] == "dev-9"
     assert sent[0]["metrics"]["cpu_percent"] == 11.5
+    assert sent[0]["metrics"]["cpu_name"] == "Intel Core i5-10400"
+    assert sent[0]["metrics"]["cpu_brand"] == "Intel"
     assert sent[0]["metrics"]["processes"]["cpu"][0]["name"] == "chrome"
     assert sent[0]["metrics"]["processes"]["network"] == []
+
+    sent.clear()
+    _asyncio.run(realtime.broadcast_metrics({
+        "device_id": "dev-9",
+        "cpu_percent": 1,
+        "eth_name": "Ethernet",
+        "eth_kind": "ethernet",
+        "eth_send_rate_bps": 125000,
+        "eth_recv_rate_bps": 250000,
+        "eth_link_mbps": 1000,
+    }))
+    assert sent[0]["metrics"]["eth_name"] == "Ethernet"
+    assert sent[0]["metrics"]["eth_kind"] == "ethernet"
+    assert sent[0]["metrics"]["eth_send_rate_bps"] == 125000.0
+    assert sent[0]["metrics"]["eth_recv_rate_bps"] == 250000.0
+    assert sent[0]["metrics"]["eth_link_mbps"] == 1000
 
 
 class ObjectIdStr(str):

@@ -316,6 +316,7 @@ def test_collect_cpu_identity_windows_cim(monkeypatch):
             }
         ),
     )
+    monkeypatch.setattr(resources, "_windows_processor_name_string", lambda: None)
     brand, name = resources._collect_cpu_identity()
     assert brand == "Intel"
     assert name == "Intel Core i5-10400"
@@ -335,7 +336,7 @@ def test_collect_cpu_identity_windows_generic_wmi_uses_registry(monkeypatch):
     )
     monkeypatch.setattr(
         resources,
-        "_windows_cpu_name_registry",
+        "_windows_processor_name_string",
         lambda: "AMD Ryzen 7 5800X 8-Core Processor",
     )
     brand, name = resources._collect_cpu_identity()

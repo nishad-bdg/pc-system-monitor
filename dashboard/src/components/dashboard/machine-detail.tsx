@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import {
   LineChart,
   Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -15,7 +17,8 @@ import {
   fmtBatteryTime,
   fmtBytes,
   fmtPercent,
-  fmtRate,
+  fmtBitRate,
+  fmtLinkMbps,
   fmtRelative,
   fmtTime,
   fmtUptime,
@@ -36,7 +39,7 @@ import {
 } from "@/lib/api";
 import { StatusDot } from "./status-dot";
 import { useRealtime } from "../realtime-provider";
-import type { LiveMetricsSample } from "../realtime-provider";
+import type { LiveEthPoint, LiveMetricsSample } from "../realtime-provider";
 import { RemoteActions } from "./remote-actions";
 import { isHighLiveLoad } from "./load-warning-badge";
 
@@ -44,7 +47,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 export function MachineDetail({ machine }: { machine: MachineSummary }) {
   const host = machine.latest;
-  const { isOnline, lastSeenFor, metricsFor } = useRealtime();
+  const { isOnline, lastSeenFor, metricsFor, metricsHistoryFor } = useRealtime();
   const liveOnline = isOnline(machine.deviceId) ?? host.online;
   const liveLastSeen = lastSeenFor(machine.deviceId, host.last_seen);
   const live = metricsFor(machine.deviceId);
@@ -252,7 +255,7 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
               <StatCard
                 label="CPU usage"
                 value={fmtPercent(cpuPercent)}
-                sub={`${cpuDisplayName(host) ?? host.resources?.cpu_brand ?? "?"} · ${
+                sub={`${cpuDisplayName(host, live) ?? host.resources?.cpu_brand ?? "?"} · ${
                   host.resources?.cpu_count ?? "?"
                 } cores · ${host.resources?.cpu_freq_mhz ?? "?"} MHz`}
                 accent
@@ -345,6 +348,7 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
             network={host.network ?? null}
             series={bandwidthSeries}
             live={live}
+            liveSeries={metricsHistoryFor(machine.deviceId)}
           />
 
           {host.printers && <PrintersSection printers={host.printers} />}
@@ -584,6 +588,25 @@ function SummarySection({
           accent
           live={live != null}
         />
+        <StatCard
+          label="Send"
+          value={fmtBitRate(
+            live?.eth_send_rate_bps ?? live?.send_rate_bps ?? network?.send_rate_bps,
+          )}
+          sub={live?.eth_name || (live ? "Live outbound" : "Last report")}
+          live={live != null}
+        />
+        <StatCard
+          label="Receive"
+          value={fmtBitRate(
+            live?.eth_recv_rate_bps ?? live?.recv_rate_bps ?? network?.recv_rate_bps,
+          )}
+          sub={
+            fmtLinkMbps(live?.eth_link_mbps) ||
+            (live ? "Live inbound" : "Last report")
+          }
+          live={live != null}
+        />
       </div>
 
       {r.os && (
@@ -638,7 +661,7 @@ function SummarySection({
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
             <span className="text-slate-500">Name</span>
             <span className="break-words font-medium text-slate-900">
-              {cpuDisplayName(r) || "—"}
+              {cpuDisplayName(r, live) || "—"}
             </span>
             <span className="text-slate-500">Brand</span>
             <span className="font-medium text-slate-900">{res?.cpu_brand || "—"}</span>
@@ -1178,30 +1201,87 @@ function UptimeSection({
   );
 }
 
+function ethKindLabel(kind?: string | null): string {
+  if (kind === "wifi") return "Wi-Fi";
+  if (kind === "other") return "Adapter";
+  return "Ethernet";
+}
+
+function fmtClock(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
 function NetworkSection({
   network,
   series,
   live,
+  liveSeries,
 }: {
   network: Report["network"] | null;
   series: { time: string; upload: number; download: number }[];
   live?: LiveMetricsSample | null;
+  liveSeries?: LiveEthPoint[];
 }) {
   const hasRates = series.some((p) => p.upload > 0 || p.download > 0);
   const bytesSent = live?.bytes_sent ?? network?.bytes_sent;
   const bytesRecv = live?.bytes_recv ?? network?.bytes_recv;
-  const sendRate = live?.send_rate_bps ?? network?.send_rate_bps;
-  const recvRate = live?.recv_rate_bps ?? network?.recv_rate_bps;
+  const sendRate =
+    live?.eth_send_rate_bps ?? live?.send_rate_bps ?? network?.send_rate_bps;
+  const recvRate =
+    live?.eth_recv_rate_bps ?? live?.recv_rate_bps ?? network?.recv_rate_bps;
+  const adapterName = live?.eth_name?.trim() || "";
+  const kindLabel = ethKindLabel(live?.eth_kind);
+  const linkLabel = fmtLinkMbps(live?.eth_link_mbps);
+  const liveChart = (liveSeries ?? []).map((p) => ({
+    time: fmtClock(p.t),
+    send: Number(p.send.toFixed(3)),
+    recv: Number(p.recv.toFixed(3)),
+  }));
+  const liveMax = liveChart.reduce(
+    (m, p) => Math.max(m, p.send, p.recv),
+    0,
+  );
+  const liveDomainMax = Math.max(0.1, Math.ceil(liveMax * 1.2 * 10) / 10);
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
-      <h2 className="text-sm font-medium text-slate-700">Network bandwidth</h2>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-medium text-slate-700">
+          {adapterName ? `${kindLabel} · ${adapterName}` : "Network bandwidth"}
+        </h2>
+        {linkLabel ? (
+          <p className="text-xs font-medium text-slate-500">
+            Link {linkLabel}
+          </p>
+        ) : null}
+      </div>
       <p className="mt-1 text-xs text-slate-500">
         {live
-          ? "Totals since boot · NIC rates live over WebSocket"
+          ? adapterName
+            ? "Send / receive like Task Manager · live over WebSocket"
+            : "Totals since boot · NIC rates live over WebSocket"
           : "Totals since boot · NIC rates sampled at report time"}
       </p>
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <StatCard
+          label="Send"
+          value={fmtBitRate(sendRate)}
+          sub={live ? "Live outbound" : "Sample outbound"}
+          accent
+          live={live != null}
+        />
+        <StatCard
+          label="Receive"
+          value={fmtBitRate(recvRate)}
+          sub={live ? "Live inbound" : "Sample inbound"}
+          live={live != null}
+        />
+      </div>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-2">
         <StatCard
           label="Sent total"
           value={fmtBytes(bytesSent)}
@@ -1214,28 +1294,61 @@ function NetworkSection({
           sub="Since boot"
           live={live != null}
         />
-        <StatCard
-          label="Upload rate"
-          value={fmtRate(sendRate)}
-          sub={live ? "Live" : "Current sample"}
-          accent
-          live={live != null}
-        />
-        <StatCard
-          label="Download rate"
-          value={fmtRate(recvRate)}
-          sub={live ? "Live" : "Current sample"}
-          accent
-          live={live != null}
-        />
       </div>
+
+      {liveChart.length > 1 && (
+        <div className="mt-6">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+            Live send / receive
+          </h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <AreaChart data={liveChart}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey="time" fontSize={11} stroke="#94a3b8" minTickGap={24} />
+              <YAxis
+                fontSize={11}
+                stroke="#94a3b8"
+                unit=" Mbps"
+                domain={[0, liveDomainMax]}
+                width={72}
+              />
+              <Tooltip
+                formatter={(value) => [
+                  `${Number(value ?? 0).toFixed(2)} Mbps`,
+                ]}
+              />
+              <Legend />
+              <Area
+                type="monotone"
+                dataKey="recv"
+                stroke="#2563eb"
+                fill="#93c5fd"
+                fillOpacity={0.45}
+                name="Receive"
+                strokeWidth={2}
+                isAnimationActive={false}
+              />
+              <Area
+                type="monotone"
+                dataKey="send"
+                stroke="#ea580c"
+                fill="#fdba74"
+                fillOpacity={0.4}
+                name="Send"
+                strokeWidth={2}
+                isAnimationActive={false}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
       {hasRates && (
         <div className="mt-6">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-            Bandwidth usage over time
+            Hourly snapshots
           </h3>
-          <ResponsiveContainer width="100%" height={260}>
+          <ResponsiveContainer width="100%" height={220}>
             <LineChart data={series}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis dataKey="time" fontSize={11} stroke="#94a3b8" />
@@ -1245,16 +1358,16 @@ function NetworkSection({
               <Line
                 type="monotone"
                 dataKey="upload"
-                stroke="#2563eb"
-                name="Upload KiB/s"
+                stroke="#ea580c"
+                name="Send KiB/s"
                 strokeWidth={2}
                 dot={false}
               />
               <Line
                 type="monotone"
                 dataKey="download"
-                stroke="#0f766e"
-                name="Download KiB/s"
+                stroke="#2563eb"
+                name="Receive KiB/s"
                 strokeWidth={2}
                 dot={false}
               />

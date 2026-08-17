@@ -627,6 +627,24 @@ export function fmtRate(bps?: number): string {
   return `${fmtBytes(bps)}/s`;
 }
 
+/** Task Manager-style bit rate from a bytes/sec sample. */
+export function fmtBitRate(bytesPerSec?: number | null): string {
+  if (bytesPerSec === undefined || bytesPerSec === null) return "—";
+  const bits = Math.max(0, bytesPerSec) * 8;
+  if (bits >= 1_000_000_000) return `${(bits / 1_000_000_000).toFixed(1)} Gbps`;
+  if (bits >= 100_000) return `${(bits / 1_000_000).toFixed(1)} Mbps`;
+  if (bits >= 1_000) return `${Math.round(bits / 1_000)} Kbps`;
+  return `${Math.round(bits)} bps`;
+}
+
+/** NIC advertised link speed from psutil (Mbps). */
+export function fmtLinkMbps(mbps?: number | null): string {
+  if (mbps === undefined || mbps === null || mbps <= 0) return "";
+  if (mbps >= 1000 && mbps % 1000 === 0) return `${mbps / 1000} Gbps`;
+  if (mbps >= 1000) return `${(mbps / 1000).toFixed(1)} Gbps`;
+  return `${mbps} Mbps`;
+}
+
 export function fmtUptime(seconds?: number | null): string {
   if (seconds === undefined || seconds === null) return "—";
   const total = Math.max(0, Math.floor(seconds));
@@ -942,7 +960,11 @@ export function isUsefulCpuName(value?: string | null): boolean {
 }
 
 /** Marketing CPU name (Ryzen 5 5600G / Core i5-10400). Never vendor-only or Family/Model. */
-export function cpuDisplayName(r: Report | undefined | null): string | null {
+export function cpuDisplayName(
+  r?: Report | null,
+  live?: { cpu_name?: string | null } | null,
+): string | null {
+  if (isUsefulCpuName(live?.cpu_name)) return live!.cpu_name!.trim();
   const name = r?.resources?.cpu_name?.trim();
   if (isUsefulCpuName(name)) return name!;
   const proc = r?.os?.processor?.trim();

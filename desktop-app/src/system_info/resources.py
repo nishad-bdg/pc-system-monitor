@@ -375,18 +375,82 @@ def _cpu_brand_from_name(name: str | None, manufacturer: str | None = None) -> s
     return None
 
 
-def _windows_cpu_name_registry() -> str | None:
+_cpu_identity_cache: tuple[str | None, str | None] | None = None
+
+
+def reset_cpu_identity_cache() -> None:
+    global _cpu_identity_cache
+    _cpu_identity_cache = None
+
+
+def cpu_identity() -> tuple[str | None, str | None]:
+    """Cached (brand, marketing name). Safe to call from the 5s live loop."""
+    global _cpu_identity_cache
+    if _cpu_identity_cache is None:
+        _cpu_identity_cache = _collect_cpu_identity()
+    return _cpu_identity_cache
+
+
+def _pick_cpu_name(*raw: str | None) -> str | None:
+    names = [n for n in (_friendly_cpu_name(value) for value in raw) if n]
+    if not names:
+        return None
+    return max(names, key=len)
+
+
+def _windows_processor_name_string() -> str | None:
+    """HKLM ProcessorNameString (the Windows marketing CPU name)."""
     try:
         import winreg
 
+        access = winreg.KEY_READ
+        if hasattr(winreg, "KEY_WOW64_64KEY"):
+            access |= winreg.KEY_WOW64_64KEY
         with winreg.OpenKey(
             winreg.HKEY_LOCAL_MACHINE,
             r"HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+            0,
+            access,
         ) as key:
             value, _ = winreg.QueryValueEx(key, "ProcessorNameString")
     except OSError:
         return None
-    return _friendly_cpu_name(str(value or ""))
+    text = str(value or "").strip()
+    return text or None
+
+
+def _windows_cpu_name_registry() -> str | None:
+    return _friendly_cpu_name(_windows_processor_name_string())
+
+
+def _windows_cim_cpu() -> tuple[str | None, str | None]:
+    """(raw Name, Manufacturer) from Win32_Processor."""
+    raw = _run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-CimInstance Win32_Processor | "
+            "Select-Object Name, Manufacturer | ConvertTo-Json -Compress",
+        ]
+    )
+    if not raw.strip():
+        return None, None
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None, None
+    if isinstance(payload, dict):
+        payload = [payload]
+    for proc in payload or []:
+        if not isinstance(proc, dict):
+            continue
+        name = str(proc.get("Name") or "").strip() or None
+        manufacturer = str(proc.get("Manufacturer") or "").strip() or None
+        if name or manufacturer:
+            return name, manufacturer
+    return None, None
 
 
 def _collect_cpu_identity() -> tuple[str | None, str | None]:
@@ -402,42 +466,17 @@ def _collect_cpu_identity() -> tuple[str | None, str | None]:
         for item in payload.get("SPHardwareDataType", []):
             if not isinstance(item, dict):
                 continue
-            chip = _friendly_cpu_name(str(item.get("chip_type") or ""))
-            proc = _friendly_cpu_name(str(item.get("processor_name") or ""))
-            name = chip or proc
+            name = _pick_cpu_name(
+                str(item.get("chip_type") or ""),
+                str(item.get("processor_name") or ""),
+            )
             if name:
                 return _cpu_brand_from_name(name), name
         return None, None
 
     if os.name == "nt":
-        raw = _run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "Get-CimInstance Win32_Processor | "
-                "Select-Object Name, Manufacturer | ConvertTo-Json -Compress",
-            ]
-        )
-        name = None
-        manufacturer = None
-        if raw.strip():
-            try:
-                payload = json.loads(raw)
-            except ValueError:
-                payload = None
-            if isinstance(payload, dict):
-                payload = [payload]
-            for p in payload or []:
-                if not isinstance(p, dict):
-                    continue
-                name = _friendly_cpu_name(str(p.get("Name") or ""))
-                manufacturer = str(p.get("Manufacturer") or "").strip() or None
-                if name:
-                    break
-        if not name:
-            name = _windows_cpu_name_registry()
+        cim_name, manufacturer = _windows_cim_cpu()
+        name = _pick_cpu_name(_windows_processor_name_string(), cim_name)
         if name or manufacturer:
             return _cpu_brand_from_name(name, manufacturer), name
         return None, None
@@ -458,7 +497,7 @@ def collect_resources() -> SystemResources:
     ram_modules = _collect_ram_modules()
     ram_speed_mhz = next((m.get("speed_mhz") for m in ram_modules if m.get("speed_mhz")), None)
     ram_type = next((m.get("ram_type") for m in ram_modules if m.get("ram_type")), None)
-    cpu_brand, cpu_name = _collect_cpu_identity()
+    cpu_brand, cpu_name = cpu_identity()
 
     return SystemResources(
         cpu_count=psutil.cpu_count(logical=True) or 0,

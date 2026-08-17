@@ -282,27 +282,55 @@ def _as_process_lists(value) -> dict:
     return out
 
 
+def _as_optional_text(value, limit: int = 160) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return text[:limit]
+
+
 async def broadcast_metrics(sample: dict) -> None:
     """Broadcast a live CPU/RAM/network + top-process sample. Not persisted."""
     device_id = str(sample.get("device_id") or "").strip()
     if not device_id:
         return
     pc_name = str(sample.get("pc_name") or "").strip() or None
+    metrics = {
+        "device_id": device_id,
+        "pc_name": pc_name,
+        "cpu_percent": _as_float(sample.get("cpu_percent")),
+        "ram_percent": _as_float(sample.get("ram_percent")),
+        "ram_used": _as_int(sample.get("ram_used")),
+        "ram_total": _as_int(sample.get("ram_total")),
+        "bytes_sent": _as_int(sample.get("bytes_sent")),
+        "bytes_recv": _as_int(sample.get("bytes_recv")),
+        "send_rate_bps": _as_float(sample.get("send_rate_bps")),
+        "recv_rate_bps": _as_float(sample.get("recv_rate_bps")),
+        "processes": _as_process_lists(sample.get("processes")),
+    }
+    cpu_name = _as_optional_text(sample.get("cpu_name"))
+    cpu_brand = _as_optional_text(sample.get("cpu_brand"), 40)
+    if cpu_name:
+        metrics["cpu_name"] = cpu_name
+    if cpu_brand:
+        metrics["cpu_brand"] = cpu_brand
+    eth_name = _as_optional_text(sample.get("eth_name"), 80)
+    if eth_name:
+        metrics["eth_name"] = eth_name
+        metrics["eth_send_rate_bps"] = _as_float(sample.get("eth_send_rate_bps"))
+        metrics["eth_recv_rate_bps"] = _as_float(sample.get("eth_recv_rate_bps"))
+        kind = str(sample.get("eth_kind") or "").strip().lower()
+        if kind in {"ethernet", "wifi", "other"}:
+            metrics["eth_kind"] = kind
+        try:
+            link = int(sample.get("eth_link_mbps") or 0)
+        except (TypeError, ValueError):
+            link = 0
+        if link > 0:
+            metrics["eth_link_mbps"] = link
     await _send({
         "type": "metrics.sample",
-        "metrics": {
-            "device_id": device_id,
-            "pc_name": pc_name,
-            "cpu_percent": _as_float(sample.get("cpu_percent")),
-            "ram_percent": _as_float(sample.get("ram_percent")),
-            "ram_used": _as_int(sample.get("ram_used")),
-            "ram_total": _as_int(sample.get("ram_total")),
-            "bytes_sent": _as_int(sample.get("bytes_sent")),
-            "bytes_recv": _as_int(sample.get("bytes_recv")),
-            "send_rate_bps": _as_float(sample.get("send_rate_bps")),
-            "recv_rate_bps": _as_float(sample.get("recv_rate_bps")),
-            "processes": _as_process_lists(sample.get("processes")),
-        },
+        "metrics": metrics,
         "ts": time.time(),
     })
 
