@@ -94,12 +94,13 @@ function liveSnapshot(
 }
 
 function GraphsAllPcsBack({ onBack }: { onBack: () => void }) {
-  const { setOpen } = useSidebarDrawer();
+  const { setOpen, setCollapsed } = useSidebarDrawer();
   return (
     <DetailBackButton
       label="All PCs"
       onClick={() => {
         onBack();
+        setCollapsed(false);
         setOpen(true);
       }}
     />

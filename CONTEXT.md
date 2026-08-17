@@ -363,7 +363,7 @@ Desktops report **completed print jobs** so the dashboard shows who is printing 
   - **macOS:** tails `/var/log/cups/page_log`; watermark = latest completion column; fields printer/user/job/pages/title.
   - Every `--watch` cycle (**60s** heartbeat) also flushes any new print jobs to the API. `system-info --print-jobs` flushes on demand.
 - **API:** `POST /print-jobs` (API key, batch `{device_id, pc_name, jobs:[{printer,document,user,pages,completed_at}]}`) stores in the Mongo `print_jobs` collection and broadcasts a **`print.job`** WS event per job; `GET /print-jobs?limit=` (JWT, group-scoped for `user` role, newest first) and `GET /print-jobs/summary?hours=` (per-hour counts of the last N hours). `source_key` prefix stored like reports.
-- **Dashboard:** `/print-jobs` page (slate+blue, sidebar + detail like Reports) with a **per-hour bar chart** (last 24h), a **prints-per-PC bar chart** (PC names on the X axis; pick a **group** to compare only that group's PCs, including zeros), **Most prints** / **Least prints** cards, live **recent-prints feed**, and stat cards (jobs / pages / printers). The sidebar groups recent jobs **by PC** (newest group first) and has the same group filter; each group is **collapsible** (most recent PC expanded by default) and shows the live **printing** badge when that PC is printing. Counts use the recent print-jobs feed (up to 500). The WS `print.job` event refreshes it with no manual refresh.
+- **Dashboard:** `/print-jobs` page (slate+blue, sidebar + detail like Reports) with a **per-hour bar chart** (last 24h), a **prints-per-PC bar chart** (PC names on the X axis; pick a **group** to compare only that group's PCs, including zeros), **Most prints** / **Least prints** cards, live **recent-prints feed**, and stat cards (jobs / pages / printers). The sidebar groups recent jobs **by PC** (newest group first) and has the same group filter; each group is **collapsible** and **expanded by default**. It shows the live **printing** badge when that PC is printing. Counts use the recent print-jobs feed (up to 500). The WS `print.job` event refreshes it with no manual refresh.
 
 ---
 
@@ -372,7 +372,10 @@ Desktops report **completed print jobs** so the dashboard shows who is printing 
 ### Visual direction
 
 Slate + blue: dark fleet sidebar (PC lists / filters), light detail panes.
-Page navigation lives in the **sticky top bar** (not the sidebar). Avoid purple/glow themes.
+The dark sidebar is **collapsible** on desktop (**«** in the sidebar header;
+hamburger in the top bar brings it back). Default is **expanded**
+(`collapsed = false`). On mobile it stays a slide-over. Page navigation lives
+in the **sticky top bar** (not the sidebar). Avoid purple/glow themes.
 
 ### Routes
 

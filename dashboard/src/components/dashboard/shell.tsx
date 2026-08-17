@@ -13,7 +13,8 @@ import { SidebarRemoteActions } from "./sidebar-remote-actions";
 
 const SidebarDrawerContext = createContext<{
   setOpen: (open: boolean) => void;
-}>({ setOpen: () => {} });
+  setCollapsed: (collapsed: boolean) => void;
+}>({ setOpen: () => {}, setCollapsed: () => {} });
 
 export function useSidebarDrawer() {
   return useContext(SidebarDrawerContext);
@@ -47,12 +48,15 @@ export function OpenSidebarBackButton({
   label: string;
   className?: string;
 }) {
-  const { setOpen } = useSidebarDrawer();
+  const { setOpen, setCollapsed } = useSidebarDrawer();
   return (
     <DetailBackButton
       label={label}
       className={className}
-      onClick={() => setOpen(true)}
+      onClick={() => {
+        setCollapsed(false);
+        setOpen(true);
+      }}
     />
   );
 }
@@ -112,7 +116,8 @@ export function DashboardShell({
   widthClass?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const drawer = useMemo(() => ({ setOpen }), []);
+  const [collapsed, setCollapsed] = useState(false);
+  const drawer = useMemo(() => ({ setOpen, setCollapsed }), []);
 
   return (
     <SidebarDrawerContext.Provider value={drawer}>
@@ -127,23 +132,33 @@ export function DashboardShell({
         )}
 
         <aside
-          className={`fixed inset-y-0 left-0 z-40 flex ${widthClass} shrink-0 flex-col border-r border-slate-800 bg-slate-950 text-slate-100 transition-transform duration-200 lg:static lg:translate-x-0 ${
+          className={`fixed inset-y-0 left-0 z-40 flex ${widthClass} shrink-0 flex-col border-r border-slate-800 bg-slate-950 text-slate-100 transition-transform duration-200 ${
             open ? "translate-x-0" : "-translate-x-full"
-          }`}
+          } ${collapsed ? "lg:hidden" : "lg:static lg:translate-x-0"}`}
         >
           <div className="border-b border-slate-800 px-4 py-5">
             <div className="flex items-center justify-between">
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
                 {title}
               </p>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="text-slate-400 hover:text-white lg:hidden"
-                aria-label="Close menu"
-              >
-                ✕
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCollapsed(true)}
+                  className="hidden text-slate-400 hover:text-white lg:inline"
+                  aria-label="Collapse sidebar"
+                >
+                  «
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="text-slate-400 hover:text-white lg:hidden"
+                  aria-label="Close menu"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
             {subtitle && (
               <p className="mt-1 text-xs text-slate-400">{subtitle}</p>
@@ -164,9 +179,14 @@ export function DashboardShell({
           <div className="relative z-50 flex items-center gap-3 border-b border-slate-200 bg-white/80 px-4 py-2.5 backdrop-blur lg:px-6">
             <button
               type="button"
-              onClick={() => setOpen(true)}
-              className="shrink-0 rounded-lg border border-slate-300 p-2 text-slate-600 hover:bg-slate-100 lg:hidden"
-              aria-label="Open menu"
+              onClick={() => {
+                setOpen(true);
+                setCollapsed(false);
+              }}
+              className={`shrink-0 rounded-lg border border-slate-300 p-2 text-slate-600 hover:bg-slate-100 ${
+                collapsed ? "" : "lg:hidden"
+              }`}
+              aria-label="Open sidebar"
             >
               <svg
                 className="h-4 w-4"

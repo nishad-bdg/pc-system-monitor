@@ -208,13 +208,12 @@ export function PrintActivity() {
     [scopedJobs],
   );
 
-  const isGroupOpen = (key: string, isFirst: boolean) =>
-    openKeys[key] ?? isFirst;
+  const isGroupOpen = (key: string) => openKeys[key] ?? true;
 
-  const toggleGroup = (key: string, isFirst: boolean) => {
+  const toggleGroup = (key: string) => {
     setOpenKeys((prev) => ({
       ...prev,
-      [key]: !(prev[key] ?? isFirst),
+      [key]: !(prev[key] ?? true),
     }));
   };
 
@@ -273,8 +272,8 @@ export function PrintActivity() {
           </p>
         )}
         <ul className="space-y-1">
-          {pcGroups.map((g, i) => {
-            const open = isGroupOpen(g.key, i === 0);
+          {pcGroups.map((g) => {
+            const open = isGroupOpen(g.key);
             const printing = isPrinting(g.deviceId);
             const printCount = printingCount(g.deviceId);
             return (
@@ -282,7 +281,7 @@ export function PrintActivity() {
                 <button
                   type="button"
                   aria-expanded={open}
-                  onClick={() => toggleGroup(g.key, i === 0)}
+                  onClick={() => toggleGroup(g.key)}
                   className="flex w-full items-center gap-2 px-3 py-2 text-left"
                 >
                   <span
