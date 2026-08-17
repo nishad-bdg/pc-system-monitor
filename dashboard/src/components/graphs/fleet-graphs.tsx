@@ -21,8 +21,14 @@ import {
   groupOf,
   MachineSummary,
 } from "@/lib/api";
-import { DashboardShell } from "@/components/dashboard/shell";
+import {
+  DashboardShell,
+  DetailBackButton,
+  SidebarSelectButton,
+  useSidebarDrawer,
+} from "@/components/dashboard/shell";
 import { StatusDot } from "@/components/dashboard/status-dot";
+import { PrintingBadge } from "@/components/dashboard/printing-badge";
 import { useRealtime } from "@/components/realtime-provider";
 import type { LiveMetricsSample } from "@/components/realtime-provider";
 
@@ -86,6 +92,18 @@ function liveSnapshot(
   return { cpu, ram, net };
 }
 
+function GraphsAllPcsBack({ onBack }: { onBack: () => void }) {
+  const { setOpen } = useSidebarDrawer();
+  return (
+    <DetailBackButton
+      label="All PCs"
+      onClick={() => {
+        onBack();
+        setOpen(true);
+      }}
+    />
+  );
+}
 function histPoint(
   machines: MachineSummary[],
   metricsFor: (id?: string | null) => LiveMetricsSample | null,
@@ -98,7 +116,8 @@ function histPoint(
 export function FleetGraphs() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
-  const { connected, isOnline, metricsFor, refreshAll } = useRealtime();
+  const { connected, isOnline, isPrinting, printingCount, metricsFor, refreshAll } =
+    useRealtime();
   const [groupFilter, setGroupFilter] = useState("");
   const [pcQuery, setPcQuery] = useState("");
   const [pcKey, setPcKey] = useState("");
@@ -279,11 +298,12 @@ export function FleetGraphs() {
                 const live = metricsFor(m.deviceId);
                 const cpu = live?.cpu_percent ?? m.latest.resources?.cpu_percent;
                 const active = selectedKey === m.key;
+                const printing = isPrinting(m.deviceId);
+                const printCount = printingCount(m.deviceId);
                 return (
                   <li key={m.key}>
-                    <button
-                      type="button"
-                      onClick={() => setPcKey(active ? "" : m.key)}
+                    <SidebarSelectButton
+                      onSelect={() => setPcKey(active ? "" : m.key)}
                       className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left transition ${
                         active
                           ? "bg-blue-600 text-white shadow-sm shadow-blue-900/40"
@@ -300,14 +320,17 @@ export function FleetGraphs() {
                         />
                         <span className="truncate text-sm">{m.name}</span>
                       </span>
-                      <span
-                        className={`shrink-0 text-xs ${
-                          active ? "text-blue-100" : "text-slate-400"
-                        }`}
-                      >
-                        {cpu != null ? `${Math.round(cpu)}%` : "—"}
+                      <span className="flex shrink-0 flex-col items-end gap-1">
+                        {printing && <PrintingBadge count={printCount} />}
+                        <span
+                          className={`text-xs ${
+                            active ? "text-blue-100" : "text-slate-400"
+                          }`}
+                        >
+                          {cpu != null ? `${Math.round(cpu)}%` : "—"}
+                        </span>
                       </span>
-                    </button>
+                    </SidebarSelectButton>
                   </li>
                 );
               })}
@@ -327,19 +350,26 @@ export function FleetGraphs() {
       }
       header={
         <div className="border-b border-slate-200 bg-white/80 px-6 py-4 backdrop-blur">
+          {selectedKey ? (
+            <GraphsAllPcsBack onBack={() => setPcKey("")} />
+          ) : null}
           <h2 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-slate-900">
             <span
               className={`h-2 w-2 rounded-full ${
                 connected ? "bg-emerald-500" : "bg-slate-300"
               }`}
             />
-            Live graphs
+            {selectedKey
+              ? (filtered[0]?.name ?? "PC") + " graphs"
+              : "Live graphs"}
           </h2>
           <p className="mt-1 text-sm text-slate-500">
             CPU, RAM, and network from live WebSocket samples (last 15
-            minutes). Pick a PC in the list or dropdown to show only that
-            machine; All PCs shows every line. Offline PCs use the last saved
-            report.
+            minutes).{" "}
+            {selectedKey
+              ? "Back returns to every PC in the current filter."
+              : "Pick a PC in the list or dropdown to show only that machine."}{" "}
+            Offline PCs use the last saved report.
           </p>
         </div>
       }

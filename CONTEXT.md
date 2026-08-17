@@ -407,12 +407,15 @@ Page navigation lives in the **sticky top bar** (not the sidebar). Avoid purple/
   to the last saved report). Client-side history is the last **15 minutes** at
   **5s**. Network is send+receive bit rate (Mbps) on the preferred NIC.
   Left list: **group filter**, **PC name filter**, and **PC picker** (All PCs
-  or one machine). Click a PC row to graph only that machine; click again for
-  all. Not stored in Mongo.
+  or one machine). Click a PC row to graph only that machine; **← All PCs**
+  in the detail header (or click the row again) returns to every line. On
+  mobile, picking a PC closes the list drawer. Rows show live **printing**
+  the same way as Fleet (amber badge for ~60s after `print.job`). Not stored
+  in Mongo.
 
 ### Fleet (`/dashboard`)
 
-- Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports. Each PC row and the detail header show a **green (online) / red (offline)** status dot; data updates live via WebSocket. Each row also shows the desktop **App version** (`v0.2.21`) from the latest report when present. Live CPU/RAM ≥ **90%** shows a blinking red **CPU high** / **RAM high** / **CPU+RAM high** badge on the card (`load-warning-badge.tsx`). Windows that are **not licensed** show an amber activation badge (`activation-badge.tsx`). The detail identity bar lists Private IP, Public IP, MAC, **App version**, and **Windows** activation when present. For `admin`/`super_admin` the detail header has **Ping**, **Connect** (offline PCs), and **Collect now** (any OS) plus **Restart** / **Shut down** (Windows only). The sidebar footer **Connect all** button (`admin`/`super_admin`) sends `reconnect` to every PC in the current list. For `super_admin` the sidebar footer also shows an **Update all apps** button that pushes a `update` broadcast to every connected desktop app at once.
+- Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports. On mobile, picking a PC closes the list; **← PC list** in the detail header opens it again. Each PC row and the detail header show a **green (online) / red (offline)** status dot; data updates live via WebSocket. Each row also shows the desktop **App version** (`v0.2.21`) from the latest report when present. Live CPU/RAM ≥ **90%** shows a blinking red **CPU high** / **RAM high** / **CPU+RAM high** badge on the card (`load-warning-badge.tsx`). Windows that are **not licensed** show an amber activation badge (`activation-badge.tsx`). The detail identity bar lists Private IP, Public IP, MAC, **App version**, and **Windows** activation when present. For `admin`/`super_admin` the detail header has **Ping**, **Connect** (offline PCs), and **Collect now** (any OS) plus **Restart** / **Shut down** (Windows only). The sidebar footer **Connect all** button (`admin`/`super_admin`) sends `reconnect` to every PC in the current list. For `super_admin` the sidebar footer also shows an **Update all apps** button that pushes a `update` broadcast to every connected desktop app at once.
 - Detail tabs (`machine-detail.tsx`): **Summary (default) / Overview / Printers / Uptime / Storage / Processes / Health / Emails**.
   - **Summary:** OS + Windows activation, total uptime + session, network total + bandwidth, full CPU spec (**name** like `AMD Ryzen 7 5800X 8-Core Processor` — not the vendor word `AMD` alone; **—** until a report has `cpu_name`), brand, arch/cores/clock), full RAM spec (total/available/free/swap + **bus speed** `ram_speed_mhz` + `ram_type`), storage health (SSD/HDD badge + brand, SMART, Healthy/Failing), battery health (condition, health %, cycle count), internet security, printers + total prints.
   - **Overview:** CPU/RAM/swap tiles, compact UptimeState (session + days tracked) + DiskState (devices/used/free), location/machine (incl. Windows activation), Battery stat card (laptops only), Network bandwidth chart, Printers, Security card.
@@ -425,7 +428,7 @@ Page navigation lives in the **sticky top bar** (not the sidebar). Avoid purple/
 
 ### Reports (`/reports`)
 
-- Same slate+blue **sidebar + detail** layout as Fleet.
+- Same slate+blue **sidebar + detail** layout as Fleet. On mobile, picking a PC closes the list; **← PC list** in the detail header opens it again.
 - Sidebar filters: date from/to, PC name, country, OS, **group**, **sub-category** (scoped to linked groups), and **health** (disk health: healthy / has warning-failing; battery: has / none; min battery health %). Each row shows a **green (online) / red (offline)** dot that updates live.
 - **Usage sort** (highest first): Most CPU, Most RAM, Most disk space used, Most network usage (bytes sent+recv), or Last seen.
 - **Min thresholds**: Min CPU %, Min RAM %, Min disk % (filters out PCs below threshold).

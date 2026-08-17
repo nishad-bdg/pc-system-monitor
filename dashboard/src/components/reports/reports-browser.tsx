@@ -23,7 +23,7 @@ import {
   fmtAppVersion,
   isWindowsNotActivated,
 } from "@/lib/api";
-import { DashboardShell } from "@/components/dashboard/shell";
+import { DashboardShell, OpenSidebarBackButton, SidebarSelectButton } from "@/components/dashboard/shell";
 import { MachineDetail } from "@/components/dashboard/machine-detail";
 import { StatusDot } from "@/components/dashboard/status-dot";
 import { PrintingBadge } from "@/components/dashboard/printing-badge";
@@ -456,9 +456,8 @@ export function ReportsBrowser() {
               const lastSeen = lastSeenFor(m.deviceId, r.created_at);
               return (
                 <li key={m.key}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedKey(m.key)}
+                  <SidebarSelectButton
+                    onSelect={() => setSelectedKey(m.key)}
                     className={`relative w-full rounded-lg px-3 py-2.5 text-left transition ${
                       active
                         ? "bg-blue-600 text-white shadow-sm shadow-blue-900/40"
@@ -526,7 +525,7 @@ export function ReportsBrowser() {
                           : ""}
                       </div>
                     )}
-                  </button>
+                  </SidebarSelectButton>
                 </li>
               );
             })}
@@ -549,6 +548,10 @@ export function ReportsBrowser() {
           {selected ? (
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
+                <OpenSidebarBackButton
+                  label="PC list"
+                  className="lg:hidden"
+                />
                 <h2 className="text-xl font-semibold tracking-tight text-slate-900">
                 <span className="inline-flex items-center gap-2">
                   <StatusDot

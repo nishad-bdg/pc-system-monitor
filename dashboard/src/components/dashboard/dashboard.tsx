@@ -15,7 +15,7 @@ import {
   fmtAppVersion,
   isWindowsNotActivated,
 } from "@/lib/api";
-import { DashboardShell } from "./shell";
+import { DashboardShell, OpenSidebarBackButton, SidebarSelectButton } from "./shell";
 import { MachineDetail } from "./machine-detail";
 import { StatusDot } from "./status-dot";
 import { PrintingBadge } from "./printing-badge";
@@ -152,9 +152,8 @@ export function Dashboard() {
               const lastSeen = lastSeenFor(m.deviceId, m.latest.created_at);
               return (
                 <li key={m.key}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedKey(m.key)}
+                  <SidebarSelectButton
+                    onSelect={() => setSelectedKey(m.key)}
                     className={`relative w-full rounded-lg px-3 py-2.5 text-left transition ${
                       active
                         ? "bg-blue-600 text-white shadow-sm shadow-blue-900/40"
@@ -225,7 +224,7 @@ export function Dashboard() {
                           : ""}
                       </div>
                     )}
-                  </button>
+                  </SidebarSelectButton>
                 </li>
               );
             })}
@@ -260,6 +259,10 @@ export function Dashboard() {
           {selected ? (
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
+                <OpenSidebarBackButton
+                  label="PC list"
+                  className="lg:hidden"
+                />
                 <h2 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-slate-900">
                   <StatusDot
                     online={isOnline(selected.deviceId) ?? selected.latest.online}
