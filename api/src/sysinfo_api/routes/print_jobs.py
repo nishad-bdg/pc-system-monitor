@@ -67,13 +67,15 @@ def get_print_jobs(
     skip: int = 0,
     device_id: str | None = None,
     pc_name: str | None = None,
+    search: str | None = None,
     from_ts: float | None = None,
     to_ts: float | None = None,
     group_id: str | None = None,
     user: CurrentUser = None,
 ) -> dict:
     """Recent print jobs (admin JWT). Newest first. `skip` + `limit` paginate;
-    `total` is the full match count (not the page size)."""
+    `total` is the full match count (not the page size). `search` matches
+    `pc_name`, `printer`, `document`, or `user` (case-insensitive substring)."""
     group_ids = _effective_group_ids(user, group_id)
     limit = min(max(limit, 1), 500)
     skip = max(skip, 0)
@@ -82,6 +84,7 @@ def get_print_jobs(
     filters = dict(
         device_id=device_id or None,
         pc_name=pc_name or None,
+        search=search or None,
         from_ts=from_ts,
         to_ts=to_ts,
         group_ids=group_ids,

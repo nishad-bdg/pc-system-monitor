@@ -760,6 +760,7 @@ def ping() -> bool:
 def _print_jobs_query(
     device_id: str | None = None,
     pc_name: str | None = None,
+    search: str | None = None,
     from_ts: float | None = None,
     to_ts: float | None = None,
     group_ids: list[str] | None = None,
@@ -769,6 +770,17 @@ def _print_jobs_query(
         clauses.append({"device_id": device_id})
     if pc_name:
         clauses.append({"pc_name": {"$regex": pc_name, "$options": "i"}})
+    if search:
+        clauses.append(
+            {
+                "$or": [
+                    {"pc_name": {"$regex": search, "$options": "i"}},
+                    {"printer": {"$regex": search, "$options": "i"}},
+                    {"document": {"$regex": search, "$options": "i"}},
+                    {"user": {"$regex": search, "$options": "i"}},
+                ]
+            }
+        )
     if from_ts is not None or to_ts is not None:
         completed: dict = {}
         if from_ts is not None:
@@ -800,6 +812,7 @@ def list_print_jobs(
     limit: int = 50,
     device_id: str | None = None,
     pc_name: str | None = None,
+    search: str | None = None,
     from_ts: float | None = None,
     to_ts: float | None = None,
     group_ids: list[str] | None = None,
@@ -810,6 +823,7 @@ def list_print_jobs(
     query = _print_jobs_query(
         device_id=device_id,
         pc_name=pc_name,
+        search=search,
         from_ts=from_ts,
         to_ts=to_ts,
         group_ids=group_ids,
@@ -833,6 +847,7 @@ def list_print_jobs(
 def count_print_jobs(
     device_id: str | None = None,
     pc_name: str | None = None,
+    search: str | None = None,
     from_ts: float | None = None,
     to_ts: float | None = None,
     group_ids: list[str] | None = None,
@@ -841,6 +856,7 @@ def count_print_jobs(
     query = _print_jobs_query(
         device_id=device_id,
         pc_name=pc_name,
+        search=search,
         from_ts=from_ts,
         to_ts=to_ts,
         group_ids=group_ids,

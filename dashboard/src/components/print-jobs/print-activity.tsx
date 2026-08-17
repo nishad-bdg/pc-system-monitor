@@ -100,6 +100,7 @@ export function PrintActivity() {
   const [openKeys, setOpenKeys] = useState<Record<string, boolean>>({});
   const [groupFilter, setGroupFilter] = useState("");
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
 
   const groupQuery = groupFilter || undefined;
 
@@ -112,14 +113,14 @@ export function PrintActivity() {
   });
 
   const { data: tableResp, isFetching: tableFetching } = useQuery({
-    queryKey: ["print-jobs", "page", page, groupFilter],
+    queryKey: ["print-jobs", "page", page, groupFilter, search],
     queryFn: () =>
       fetchPrintJobs(
         API_URL,
         apiToken ?? "",
         TABLE_PAGE_SIZE,
         (page - 1) * TABLE_PAGE_SIZE,
-        { groupId: groupQuery },
+        { groupId: groupQuery, search: search.trim() || undefined },
       ),
     enabled: !!apiToken,
     refetchInterval: 60_000,
@@ -549,10 +550,47 @@ export function PrintActivity() {
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
-          <h2 className="text-sm font-medium text-slate-700">Recent prints</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-sm font-medium text-slate-700">Recent prints</h2>
+            <label className="relative block" htmlFor="print-search">
+              <svg
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={2}
+                stroke="currentColor"
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z"
+                />
+              </svg>
+              <input
+                id="print-search"
+                type="search"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="Search PC, printer, document, user…"
+                className="w-64 max-w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+              />
+            </label>
+          </div>
+          {search.trim() && tableTotal > 0 && (
+            <p className="mt-2 text-xs text-slate-500">
+              {tableTotal} job{tableTotal === 1 ? "" : "s"} match
+              {tableTotal === 1 ? "es" : ""} “{search.trim()}”.
+            </p>
+          )}
           {tableTotal === 0 ? (
             <p className="mt-3 text-sm text-slate-500">
-              Waiting for print jobs…
+              {search.trim()
+                ? `No print jobs match “${search.trim()}”.`
+                : "Waiting for print jobs…"}
             </p>
           ) : (
             <>

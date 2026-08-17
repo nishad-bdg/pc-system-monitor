@@ -1019,13 +1019,14 @@ export function fetchPrintJobs(
   apiToken: string,
   limit = 100,
   skip = 0,
-  filters?: { groupId?: string },
+  filters?: { groupId?: string; search?: string },
 ): Promise<PrintJobsResponse> {
   const params = new URLSearchParams({
     limit: String(limit),
     skip: String(skip),
   });
   if (filters?.groupId) params.set("group_id", filters.groupId);
+  if (filters?.search) params.set("search", filters.search);
   return apiRequest(apiUrl, apiToken, `/print-jobs?${params}`);
 }
 

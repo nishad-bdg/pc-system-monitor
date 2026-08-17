@@ -1820,7 +1820,7 @@ def test_print_jobs_list_with_jwt(monkeypatch):
     monkeypatch.setattr(
         db,
         "list_print_jobs",
-        lambda limit=50, device_id=None, pc_name=None, from_ts=None, to_ts=None, group_ids=None, skip=0: [
+        lambda limit=50, device_id=None, pc_name=None, search=None, from_ts=None, to_ts=None, group_ids=None, skip=0: [
             {"_id": "1", "device_id": "dev-1", "printer": "HP", "document": "a.pdf", "created_at": 1.0}
         ],
     )
@@ -1838,7 +1838,7 @@ def test_print_jobs_list_paginates(monkeypatch):
     _patch_db(monkeypatch)
     seen: dict = {}
 
-    def fake_list(limit=50, device_id=None, pc_name=None, from_ts=None, to_ts=None, group_ids=None, skip=0):
+    def fake_list(limit=50, device_id=None, pc_name=None, search=None, from_ts=None, to_ts=None, group_ids=None, skip=0):
         seen["limit"] = limit
         seen["skip"] = skip
         return [

@@ -523,7 +523,7 @@ export function ReportExportPanel() {
           r.os?.system || "-",
           r.location?.country || "-",
           printerCount ? String(printerCount) : "-",
-          printTotal > 0 ? printTotal.toLocaleString() : "-",
+          printTotal.toLocaleString(),
           rangePrints.jobs.toLocaleString(),
           rangePrints.pages.toLocaleString(),
         ];
@@ -609,7 +609,7 @@ export function ReportExportPanel() {
               "OS",
               "Country",
               "Printers",
-              "Lifetime prints",
+              "Total prints",
               "Prints in range",
               "Pages in range",
             ],
@@ -1099,7 +1099,7 @@ export function ReportExportPanel() {
                       <th className="px-4 py-3">Country</th>
                       <th className="px-4 py-3">Security</th>
                       <th className="px-4 py-3">Printers</th>
-                      <th className="px-4 py-3">Lifetime prints</th>
+                      <th className="px-4 py-3">Total prints</th>
                       <th className="px-4 py-3">Prints in range</th>
                       <th className="px-4 py-3">Pages in range</th>
                       <th className="px-4 py-3">Battery</th>
@@ -1216,7 +1216,7 @@ export function ReportExportPanel() {
                             {printerCount || "—"}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
-                            {printTotal > 0 ? printTotal.toLocaleString() : "—"}
+                            {printTotal.toLocaleString()}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {rangePrints.jobs.toLocaleString()}
