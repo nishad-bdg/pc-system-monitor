@@ -1313,8 +1313,9 @@ function NetworkSection({
                 width={72}
               />
               <Tooltip
-                formatter={(value) => [
+                formatter={(value, name) => [
                   `${Number(value ?? 0).toFixed(2)} Mbps`,
+                  name,
                 ]}
               />
               <Legend />
