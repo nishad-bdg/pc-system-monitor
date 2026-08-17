@@ -59,6 +59,47 @@ def _user_group_ids(user: dict) -> list[str] | None:
     return user.get("groups") or []
 
 
+def _effective_group_ids(user: dict, group_id: str | None) -> list[str] | None:
+    """User's group scope, optionally narrowed to one `group_id`."""
+    scoped = _user_group_ids(user)
+    if group_id:
+        if scoped is not None and group_id not in scoped:
+            return []
+        return [group_id]
+    return scoped
+
+
+def _index_print_stats(stats: list[dict]) -> dict[str, dict]:
+    """Index print-job totals by device_id and lowercased pc_name."""
+    by_id: dict[str, dict] = {}
+    by_name: dict[str, dict] = {}
+    for row in stats:
+        payload = {
+            "jobs": int(row.get("jobs") or 0),
+            "pages": int(row.get("pages") or 0),
+        }
+        device_id = row.get("device_id")
+        if device_id:
+            by_id[str(device_id)] = payload
+        name = (row.get("pc_name") or "").strip().lower()
+        if name:
+            by_name[name] = payload
+    return {"id": by_id, "name": by_name}
+
+
+def _print_range_for(report: dict, index: dict[str, dict]) -> dict:
+    device_id = report.get("device_id")
+    if device_id and device_id in index["id"]:
+        return index["id"][device_id]
+    name = (report.get("pc_name") or "").strip().lower()
+    if name and name in index["name"]:
+        return index["name"][name]
+    hostname = ((report.get("os") or {}).get("hostname") or "").strip().lower()
+    if hostname and hostname in index["name"]:
+        return index["name"][hostname]
+    return {"jobs": 0, "pages": 0}
+
+
 @router.get("")
 def get_reports(
     limit: int = 20,
@@ -127,9 +168,24 @@ def export_reports_csv(
         battery=battery or None,
         battery_health_min=battery_health_min,
     )
+    group_ids = _effective_group_ids(user, group_id)
+    if group_id and group_ids == []:
+        print_stats: list[dict] = []
+    else:
+        print_stats = db.print_jobs_by_pc(
+            device_id=device_id or None,
+            pc_name=pc_name or None,
+            from_ts=from_ts,
+            to_ts=to_ts,
+            group_ids=group_ids,
+        )
+    print_index = _index_print_stats(print_stats)
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    rows = [flatten_report(enrich_summary(r)) for r in records]
+    rows = [
+        flatten_report(enrich_summary(r, _print_range_for(r, print_index)))
+        for r in records
+    ]
     columns = _column_order(rows)
     writer.writerow(columns)
     for row in rows:
@@ -259,11 +315,12 @@ def _sum_field(items: list | None, field: str) -> float:
     return sum(_safe(item.get(field)) for item in (items or []) if isinstance(item, dict))
 
 
-def enrich_summary(report: dict) -> dict:
+def enrich_summary(report: dict, print_range: dict | None = None) -> dict:
     """Add a `summary.*` block with computed totals for the CSV report.
 
     Columns included: total uptime (sum of tracked days), network total bytes,
-    printer prints, SSD/HDD counts, disk health, and battery health snapshot.
+    lifetime printer `print_count`, dated print jobs/pages for the export
+    range, SSD/HDD counts, disk health, and battery health snapshot.
     """
     enriched = dict(report)
 
@@ -319,6 +376,8 @@ def enrich_summary(report: dict) -> dict:
         "total_uptime_days": round(uptime_secs / 86400, 2),
         "network_total_bytes": network_total,
         "print_count_total": print_total,
+        "prints_in_range": int((print_range or {}).get("jobs") or 0),
+        "print_pages_in_range": int((print_range or {}).get("pages") or 0),
         "printer_count": printer_count,
         "cpu_brand": res.get("cpu_brand"),
         "cpu_name": res.get("cpu_name"),

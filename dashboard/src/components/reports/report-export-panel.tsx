@@ -1,11 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {
   exportReportsCsv,
   fetchGroups,
+  fetchPrintJobsByPc,
   fetchReports,
   fetchSubCategories,
   fmtBytes,
@@ -19,17 +20,22 @@ import {
   machineMac,
   maxDiskPercent,
   networkTotalBytes,
+  PrintJobsByPcRow,
+  Report,
   SortOrder,
   sortMachines,
   subCategoryOf,
   cpuDisplayName,
 } from "@/lib/api";
+import { downloadExportPdf } from "@/lib/export-pdf";
 import { DashboardShell } from "@/components/dashboard/shell";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 const inputClass =
   "w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2";
+
+const EMPTY_PRINT_PCS: PrintJobsByPcRow[] = [];
 
 type RangeKey = "daily" | "weekly" | "monthly" | "yearly" | "custom";
 
@@ -88,6 +94,62 @@ function dateInputToTs(value: string, endOfDay: boolean): number | undefined {
   return Number.isFinite(ts) ? ts : undefined;
 }
 
+function csvCell(value: string | number | null | undefined): string {
+  const s = String(value ?? "");
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function printRangeForMachine(
+  m: { deviceId: string | null; name: string; latest: Report },
+  pcs: PrintJobsByPcRow[],
+): { jobs: number; pages: number } {
+  const did = m.deviceId || m.latest.device_id;
+  if (did) {
+    const hit = pcs.find((p) => p.device_id === did);
+    if (hit) return { jobs: hit.jobs, pages: hit.pages };
+  }
+  const names = new Set(
+    [m.name, m.latest.pc_name, m.latest.os?.hostname]
+      .filter(Boolean)
+      .map((n) => String(n).toLowerCase()),
+  );
+  const hit = pcs.find((p) => p.pc_name && names.has(p.pc_name.toLowerCase()));
+  if (hit) return { jobs: hit.jobs, pages: hit.pages };
+  return { jobs: 0, pages: 0 };
+}
+
+function fmtSecurity(sec: Report["security"] | unknown): string {
+  if (!sec) return "—";
+  if (Array.isArray(sec)) {
+    return (
+      (sec as { name?: string }[])
+        .map((s) => s.name)
+        .filter(Boolean)
+        .join(", ") || "—"
+    );
+  }
+  const installed = (sec as Report["security"])?.installed;
+  if (!installed?.length) return "—";
+  return installed
+    .map((s) => {
+      if (s.expired) return `${s.name} (Expired)`;
+      if (s.expiry_date) {
+        const days = s.days_remaining ?? 0;
+        return `${s.name} (${days}d remaining, ${s.expiry_date})`;
+      }
+      return s.name;
+    })
+    .join(", ");
+}
+
+function fmtRangeSpan(fromTs?: number, toTs?: number): string {
+  const fmt = (ts?: number) =>
+    ts == null ? "" : new Date(ts * 1000).toLocaleString();
+  if (fromTs == null && toTs == null) return "all dates";
+  return `${fmt(fromTs) || "..."} - ${fmt(toTs) || "now"}`;
+}
+
 function Spinner({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg className={`animate-spin ${className}`} fill="none" viewBox="0 0 24 24" aria-hidden>
@@ -137,6 +199,7 @@ export function ReportExportPanel() {
     batteryHealthMin: number;
   } | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [sort, setSort] = useState<MachineSortKey>("last_seen");
   const [order, setOrder] = useState<SortOrder>("desc");
@@ -170,6 +233,24 @@ export function ReportExportPanel() {
             batteryHealthMin: applied.batteryHealthMin || undefined,
           })
         : Promise.resolve({ total: 0, reports: [] }),
+    enabled: !!apiToken && !!applied,
+  });
+
+  const { data: printByPc } = useQuery({
+    queryKey: [
+      "print-jobs-by-pc",
+      applied?.fromTs,
+      applied?.toTs,
+      applied?.groupId,
+      applied?.pcName,
+    ],
+    queryFn: () =>
+      fetchPrintJobsByPc(API_URL, apiToken ?? "", {
+        fromTs: applied?.fromTs,
+        toTs: applied?.toTs,
+        groupId: applied?.groupId || undefined,
+        pcName: applied?.pcName || undefined,
+      }),
     enabled: !!apiToken && !!applied,
   });
 
@@ -220,6 +301,46 @@ export function ReportExportPanel() {
 
   const reports = data?.reports ?? [];
   const totalReports = data?.total ?? 0;
+  const printPcs = printByPc?.pcs ?? EMPTY_PRINT_PCS;
+
+  const printPreviewRows = useMemo(() => {
+    const rows = machines.map((m) => {
+      const st = printRangeForMachine(m, printPcs);
+      return {
+        name: m.name,
+        deviceId: m.deviceId ?? "",
+        jobs: st.jobs,
+        pages: st.pages,
+      };
+    });
+    const seen = new Set(
+      rows.flatMap((r) => [r.deviceId, r.name.toLowerCase()].filter(Boolean)),
+    );
+    for (const p of printPcs) {
+      const did = p.device_id ?? "";
+      const name = p.pc_name ?? "Unknown PC";
+      if ((did && seen.has(did)) || seen.has(name.toLowerCase())) continue;
+      rows.push({ name, deviceId: did, jobs: p.jobs, pages: p.pages });
+    }
+    return rows;
+  }, [machines, printPcs]);
+
+  const printTotals = useMemo(() => {
+    const jobs = printByPc?.total_jobs ?? printPreviewRows.reduce((s, r) => s + r.jobs, 0);
+    const pages = printByPc?.total_pages ?? printPreviewRows.reduce((s, r) => s + r.pages, 0);
+    const withJobs = printPreviewRows.filter((r) => r.jobs > 0);
+    const ranked = (withJobs.length ? withJobs : printPreviewRows).slice();
+    const maxCount = ranked.length ? Math.max(...ranked.map((r) => r.jobs)) : 0;
+    const minCount = ranked.length ? Math.min(...ranked.map((r) => r.jobs)) : 0;
+    return {
+      jobs,
+      pages,
+      maxCount,
+      minCount,
+      maxPcs: ranked.filter((r) => r.jobs === maxCount).map((r) => r.name),
+      minPcs: ranked.filter((r) => r.jobs === minCount).map((r) => r.name),
+    };
+  }, [printByPc, printPreviewRows]);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -295,6 +416,202 @@ export function ReportExportPanel() {
     }
   }
 
+  function onDownloadPrints() {
+    if (!applied) return;
+    const header = ["pc_name", "device_id", "jobs", "pages"];
+    const lines = [
+      header.join(","),
+      ...printPreviewRows.map((r) =>
+        [csvCell(r.name), csvCell(r.deviceId), r.jobs, r.pages].join(","),
+      ),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `print-totals-${applied.range}-${Date.now()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function onDownloadPdf() {
+    if (!applied) return;
+    setExportingPdf(true);
+    setExportError(null);
+    try {
+      const groupName = groups.find((g) => g.id === applied.groupId)?.name;
+      const subName = subCategories.find((s) => s.id === applied.subCategoryId)?.name;
+      const filters: string[] = [];
+      if (applied.pcName) filters.push(`PC: ${applied.pcName}`);
+      if (applied.country) filters.push(`Country: ${applied.country}`);
+      if (applied.os) filters.push(`OS: ${applied.os}`);
+      if (applied.groupId) filters.push(`Group: ${groupName || applied.groupId}`);
+      if (applied.subCategoryId)
+        filters.push(`Sub-category: ${subName || applied.subCategoryId}`);
+      if (applied.diskHealth) filters.push(`Disk: ${applied.diskHealth}`);
+      if (applied.battery) filters.push(`Battery: ${applied.battery}`);
+      if (applied.batteryHealthMin > 0)
+        filters.push(`Min battery health: ${applied.batteryHealthMin}%`);
+
+      const overviewBody = machines.map((m) => {
+        const r = m.latest;
+        const res = r.resources;
+        const prv = r.printers;
+        const printerCount =
+          (prv?.usb?.length ?? 0) +
+          (prv?.network?.length ?? 0) +
+          (prv?.other?.length ?? 0);
+        const printTotal =
+          (prv?.usb ?? []).reduce((s, p) => s + (p.print_count ?? 0), 0) +
+          (prv?.network ?? []).reduce((s, p) => s + (p.print_count ?? 0), 0) +
+          (prv?.other ?? []).reduce((s, p) => s + (p.print_count ?? 0), 0);
+        const rangePrints = printRangeForMachine(m, printPcs);
+        return [
+          m.name,
+          r.private_ip ?? "-",
+          machineMac(r) ?? "-",
+          fmtRelative(r.created_at),
+          String(m.reports.length),
+          fmtPercent(res?.cpu_percent),
+          fmtPercent(res?.ram_percent),
+          fmtPercent(maxDiskPercent(r)),
+          fmtBytes(networkTotalBytes(r)),
+          fmtUptime(r.uptime?.uptime_seconds),
+          r.os?.system || "-",
+          r.location?.country || "-",
+          printerCount ? String(printerCount) : "-",
+          printTotal > 0 ? printTotal.toLocaleString() : "-",
+          rangePrints.jobs.toLocaleString(),
+          rangePrints.pages.toLocaleString(),
+        ];
+      });
+
+      const hardwareBody = machines.map((m) => {
+        const r = m.latest;
+        const res = r.resources;
+        const dis = r.disk;
+        const usedDisk = dis?.devices?.reduce((s, d) => s + (d.used ?? 0), 0) ?? 0;
+        const freeDisk = dis?.devices?.reduce((s, d) => s + (d.free ?? 0), 0) ?? 0;
+        const healthDisks = r.health?.disks ?? [];
+        const ssdBrands =
+          [...new Set(healthDisks.filter((d) => d.media_type === "ssd").map((d) => d.brand).filter(Boolean))].join(", ") ||
+          "-";
+        const hddBrands =
+          [...new Set(healthDisks.filter((d) => d.media_type === "hdd").map((d) => d.brand).filter(Boolean))].join(", ") ||
+          "-";
+        const emails = machineEmails(r)
+          .map((a) => a.email)
+          .filter(Boolean)
+          .join(", ");
+        return [
+          m.name,
+          res?.cpu_brand || "-",
+          cpuDisplayName(r) || "-",
+          res?.cpu_count != null
+            ? `${res.cpu_count} (${res.cpu_count_physical ?? "?"} phys)`
+            : "-",
+          fmtBytes(res?.ram_total),
+          res?.ram_type || "-",
+          res?.ram_speed_mhz != null ? `${res.ram_speed_mhz} MHz` : "-",
+          ssdBrands,
+          hddBrands,
+          fmtBytes(usedDisk),
+          fmtBytes(freeDisk),
+          fmtSecurity(r.security),
+          r.resources?.battery ? fmtPercent(r.resources.battery.percent) : "-",
+          emails || "-",
+        ];
+      });
+
+      await downloadExportPdf({
+        filename: `system-info-report-${applied.range}-${Date.now()}.pdf`,
+        title: "System Info Report",
+        subtitle: [
+          `${rangeLabel || "Custom"} · ${fmtRangeSpan(applied.fromTs, applied.toTs)}`,
+          `${machines.length} PC${machines.length === 1 ? "" : "s"} · ${reports.length} report snapshot${reports.length === 1 ? "" : "s"}`,
+          filters.length ? `Filters: ${filters.join(" · ")}` : "Filters: none",
+          `Generated ${new Date().toLocaleString()}`,
+        ],
+        stats: [
+          { label: "Prints in range", value: printTotals.jobs.toLocaleString() },
+          { label: "Pages in range", value: printTotals.pages.toLocaleString() },
+          {
+            label: "Most prints",
+            value: printTotals.maxPcs.length
+              ? `${printTotals.maxPcs.join(", ")} (${printTotals.maxCount})`
+              : "-",
+          },
+          {
+            label: "Least prints",
+            value: printTotals.minPcs.length
+              ? `${printTotals.minPcs.join(", ")} (${printTotals.minCount})`
+              : "-",
+          },
+        ],
+        tables: [
+          {
+            title: "PCs - overview and prints",
+            head: [
+              "PC",
+              "IP",
+              "MAC",
+              "Last seen",
+              "Reports",
+              "CPU %",
+              "RAM %",
+              "Disk %",
+              "Net",
+              "Uptime",
+              "OS",
+              "Country",
+              "Printers",
+              "Lifetime prints",
+              "Prints in range",
+              "Pages in range",
+            ],
+            body: overviewBody,
+          },
+          {
+            title: "PCs - hardware",
+            head: [
+              "PC",
+              "CPU brand",
+              "CPU model",
+              "Cores",
+              "RAM total",
+              "RAM type",
+              "RAM speed",
+              "SSD",
+              "HDD",
+              "Disk used",
+              "Disk free",
+              "Security",
+              "Battery",
+              "Emails",
+            ],
+            body: hardwareBody,
+          },
+          {
+            title: "Print totals by PC",
+            head: ["PC", "Device ID", "Jobs", "Pages"],
+            body: printPreviewRows.map((r) => [
+              r.name,
+              r.deviceId || "-",
+              String(r.jobs),
+              String(r.pages),
+            ]),
+          },
+        ],
+      });
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "PDF export failed");
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
   const rangeLabel =
     RANGE_LABELS.find((r) => r.key === applied?.range)?.label ?? "";
 
@@ -304,7 +621,7 @@ export function ReportExportPanel() {
       nav="export"
       role={session?.user?.role}
       widthClass="w-80"
-      subtitle="Generate a CSV report with all collected fields"
+      subtitle="Generate a CSV or PDF report with all collected fields"
       sidebar={
         <form onSubmit={onSubmit} className="space-y-4 border-b border-slate-800 px-3 py-3">
           <div>
@@ -534,7 +851,8 @@ export function ReportExportPanel() {
               </h2>
               <p className="mt-1 text-sm text-slate-500">
                 Pick a date range (daily / weekly / monthly / yearly / custom),
-                add filters, then Generate to preview and download as CSV.
+                add filters, then Generate to preview PC-wise reports and print
+                totals, then download as CSV or PDF.
               </p>
             </div>
           )}
@@ -577,13 +895,24 @@ export function ReportExportPanel() {
                   <h3 className="text-sm font-medium text-slate-700">Preview</h3>
                   <p className="mt-0.5 text-xs text-slate-500">
                     {reports.length} report{reports.length === 1 ? "" : "s"} loaded
-                    (up to 500) · CSV includes every field from the full report set
+                    (up to 500) · {machines.length} PC{machines.length === 1 ? "" : "s"} ·
+                    prints in range from completed jobs · CSV has every field ·
+                    PDF is the PC-wise preview plus print totals
                   </p>
                 </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={onDownloadPrints}
+                  disabled={isFetching || exporting || exportingPdf}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                >
+                  Download prints CSV
+                </button>
                 <button
                   type="button"
                   onClick={onDownload}
-                  disabled={exporting || isFetching}
+                  disabled={exporting || exportingPdf || isFetching}
                   className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60"
                 >
                   {exporting ? (
@@ -595,14 +924,80 @@ export function ReportExportPanel() {
                     "Download CSV"
                   )}
                 </button>
+                <button
+                  type="button"
+                  onClick={onDownloadPdf}
+                  disabled={exportingPdf || exporting || isFetching || (machines.length === 0 && printPreviewRows.length === 0)}
+                  className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-60"
+                >
+                  {exportingPdf ? (
+                    <>
+                      <Spinner className="h-4 w-4" />
+                      Building PDF…
+                    </>
+                  ) : (
+                    "Download PDF"
+                  )}
+                </button>
+                </div>
               </div>
+              {printPreviewRows.length > 0 && (
+                <div className="grid gap-3 border-b border-slate-100 px-4 py-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      Prints in range
+                    </p>
+                    <p className="mt-1 text-lg font-semibold text-slate-900">
+                      {printTotals.jobs.toLocaleString()}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      completed jobs · {rangeLabel.toLowerCase() || "selected range"}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      Pages in range
+                    </p>
+                    <p className="mt-1 text-lg font-semibold text-slate-900">
+                      {printTotals.pages.toLocaleString()}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500">sum of job page counts</p>
+                  </div>
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">
+                      Most prints
+                    </p>
+                    <p className="mt-1 truncate text-sm font-semibold text-slate-900">
+                      {printTotals.maxPcs.length ? printTotals.maxPcs.join(", ") : "—"}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-600">
+                      {printTotals.maxPcs.length
+                        ? `${printTotals.maxCount} job${printTotals.maxCount === 1 ? "" : "s"}`
+                        : "no jobs in range"}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-800">
+                      Least prints
+                    </p>
+                    <p className="mt-1 truncate text-sm font-semibold text-slate-900">
+                      {printTotals.minPcs.length ? printTotals.minPcs.join(", ") : "—"}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-600">
+                      {printTotals.minPcs.length
+                        ? `${printTotals.minCount} job${printTotals.minCount === 1 ? "" : "s"}`
+                        : "no jobs in range"}
+                    </p>
+                  </div>
+                </div>
+              )}
               {machines.length === 0 ? (
                 <p className="px-4 py-10 text-center text-sm text-slate-500">
                   No PCs match these filters.
                 </p>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[1400px] text-left text-sm">
+                  <table className="w-full min-w-[1600px] text-left text-sm">
                   <thead className="border-b bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-4 py-3">PC</th>
@@ -633,7 +1028,9 @@ export function ReportExportPanel() {
                       <th className="px-4 py-3">Country</th>
                       <th className="px-4 py-3">Security</th>
                       <th className="px-4 py-3">Printers</th>
-                      <th className="px-4 py-3">Total prints</th>
+                      <th className="px-4 py-3">Lifetime prints</th>
+                      <th className="px-4 py-3">Prints in range</th>
+                      <th className="px-4 py-3">Pages in range</th>
                       <th className="px-4 py-3">Battery</th>
                     </tr>
                   </thead>
@@ -653,6 +1050,7 @@ export function ReportExportPanel() {
                       const printTotal = (prv?.usb ?? []).reduce((s, p) => s + (p.print_count ?? 0), 0) +
                         (prv?.network ?? []).reduce((s, p) => s + (p.print_count ?? 0), 0) +
                         (prv?.other ?? []).reduce((s, p) => s + (p.print_count ?? 0), 0);
+                      const rangePrints = printRangeForMachine(m, printPcs);
                       const healthDisks = r.health?.disks ?? [];
                       const ssdBrands = [...new Set(healthDisks.filter((d) => d.media_type === "ssd").map((d) => d.brand).filter(Boolean))]
                         .join(", ") || "—";
@@ -741,26 +1139,19 @@ export function ReportExportPanel() {
                             {r.location?.country || "—"}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
-                            {sec
-                              ? Array.isArray(sec)
-                                ? sec.map((s: any) => s.name).join(", ")
-                                : (sec as any).installed
-                                    ?.map((s: any) => {
-                                      if (s.expired) return `${s.name} (Expired)`;
-                                      if (s.expiry_date) {
-                                        const days = s.days_remaining ?? 0;
-                                        return `${s.name} (${days}d remaining, ${s.expiry_date})`;
-                                      }
-                                      return s.name;
-                                    })
-                                    .join(", ") || "—"
-                              : "—"}
+                            {fmtSecurity(sec)}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {printerCount || "—"}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {printTotal > 0 ? printTotal.toLocaleString() : "—"}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {rangePrints.jobs.toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {rangePrints.pages.toLocaleString()}
                           </td>
                           <td className="px-4 py-3 text-slate-600" title={bat ? `Plugged: ${bat.power_plugged}` : undefined}>
                             {bat ? `${fmtPercent(bat.percent)}` : "—"}

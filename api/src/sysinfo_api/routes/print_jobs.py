@@ -102,3 +102,38 @@ def print_jobs_summary(
         group_ids=_user_group_ids(user),
     )
     return {"hours": hours, "buckets": counts}
+
+
+@router.get("/by-pc")
+def print_jobs_by_pc(
+    from_ts: float | None = None,
+    to_ts: float | None = None,
+    device_id: str | None = None,
+    pc_name: str | None = None,
+    group_id: str | None = None,
+    user: CurrentUser = None,
+) -> dict:
+    """Print job + page totals per PC for a date range (admin JWT)."""
+    group_ids = _effective_group_ids(user, group_id)
+    if group_id and group_ids == []:
+        return {
+            "from_ts": from_ts,
+            "to_ts": to_ts,
+            "total_jobs": 0,
+            "total_pages": 0,
+            "pcs": [],
+        }
+    pcs = db.print_jobs_by_pc(
+        device_id=device_id or None,
+        pc_name=pc_name or None,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        group_ids=group_ids,
+    )
+    return {
+        "from_ts": from_ts,
+        "to_ts": to_ts,
+        "total_jobs": sum(p["jobs"] for p in pcs),
+        "total_pages": sum(p["pages"] for p in pcs),
+        "pcs": pcs,
+    }

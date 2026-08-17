@@ -851,6 +851,67 @@ def count_print_jobs(
         return 0
 
 
+def print_jobs_by_pc(
+    device_id: str | None = None,
+    pc_name: str | None = None,
+    from_ts: float | None = None,
+    to_ts: float | None = None,
+    group_ids: list[str] | None = None,
+) -> list[dict]:
+    """Job + page totals per PC for the same filters as `list_print_jobs`.
+
+    Groups by `device_id` when present, otherwise `pc_name`. Sorted by jobs
+    descending.
+    """
+    query = _print_jobs_query(
+        device_id=device_id,
+        pc_name=pc_name,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        group_ids=group_ids,
+    )
+    results: list[dict] = []
+    try:
+        pipeline = [
+            {"$match": query},
+            {
+                "$group": {
+                    "_id": {
+                        "$ifNull": [
+                            "$device_id",
+                            {"$ifNull": ["$pc_name", "unknown"]},
+                        ]
+                    },
+                    "jobs": {"$sum": 1},
+                    "pages": {
+                        "$sum": {
+                            "$cond": [
+                                {"$gt": [{"$ifNull": ["$pages", 0]}, 0]},
+                                "$pages",
+                                0,
+                            ]
+                        }
+                    },
+                    "device_id": {"$last": "$device_id"},
+                    "pc_name": {"$last": "$pc_name"},
+                }
+            },
+            {"$sort": {"jobs": -1, "pc_name": 1}},
+        ]
+        for doc in _print_jobs().aggregate(pipeline):
+            results.append(
+                {
+                    "device_id": doc.get("device_id") or None,
+                    "pc_name": doc.get("pc_name") or None,
+                    "jobs": int(doc.get("jobs") or 0),
+                    "pages": int(doc.get("pages") or 0),
+                }
+            )
+    except (ConnectionFailure, PyMongoError):
+        return results
+    return results
+
+
 def print_jobs_hourly_counts(
     hours: int = 24,
     group_ids: list[str] | None = None,

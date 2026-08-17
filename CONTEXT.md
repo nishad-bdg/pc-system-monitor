@@ -253,11 +253,11 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
 
 - `POST /reports` — API key; stores `source_key` prefix.
 - `GET /reports/{id}` — JWT.
-- `GET /reports/export` — JWT; same filters as `/reports` (incl. `group_id`, `sub_category_id`, `disk_health`, `battery`, `battery_health_min`); streams CSV with **every report field flattened** (`a.b.c` columns, arrays as JSON).
+- `GET /reports/export` — JWT; same filters as `/reports` (incl. `group_id`, `sub_category_id`, `disk_health`, `battery`, `battery_health_min`); streams CSV with **every report field flattened** (`a.b.c` columns, arrays as JSON). `summary.print_count_total` is the lifetime printer-driver counter. Dated volume is `summary.prints_in_range` / `summary.print_pages_in_range` (completed `print_jobs` in the same `from_ts`/`to_ts` / group / PC filters).
 - `GET/POST/PATCH/DELETE /api-keys` — admin JWT; `PATCH` renames / toggles active; secret shown only at create. **A key can optionally be linked to a group (`group_id`)**; reports and heartbeats sent with that key auto-assign the PC's machine keys to the group (one-bucket exclusivity, `db.assign_machine_keys_to_group`). Clearing the link on PATCH is expressed with `group_id: ""`.
 - `GET/POST/PATCH/DELETE /groups` — admin JWT; a machine key belongs to **one bucket only** (assigning removes it from other groups AND sub-categories).
 - `GET/POST/PATCH/DELETE /sub-categories` — admin JWT; create/update take `group_ids` (many-to-many); `PATCH` machine_keys remove the keys from all groups and other sub-categories (one-bucket).
-- `POST /print-jobs` — API key; batch `{device_id, pc_name, jobs:[...]}` → Mongo `print_jobs` + WS `print.job`. `GET /print-jobs?limit=&skip=&group_id=` returns `{total, skip, limit, jobs}`; `GET /print-jobs/summary` — JWT (see Print Activity below).
+- `POST /print-jobs` — API key; batch `{device_id, pc_name, jobs:[...]}` → Mongo `print_jobs` + WS `print.job`. `GET /print-jobs?limit=&skip=&group_id=` returns `{total, skip, limit, jobs}`; `GET /print-jobs/summary` — JWT (see Print Activity below); `GET /print-jobs/by-pc?from_ts=&to_ts=&group_id=&pc_name=` — JWT, job + page totals grouped by PC for a date range.
 - `POST /commands` — admin JWT; `{device_id, type: "restart" | "shutdown" | "update" | "collect" | "reconnect"}` → Mongo `commands` collection + push to the agent over `/ws/agent`. `POST /commands/ping` — admin JWT; `{device_id}` live-probes the agent WebSocket (waits ~3s for `pong`; connected with `rtt_ms=null` if the socket exists but the agent is too old to reply). `POST /commands/batch` — admin JWT; `{type: "reconnect", device_ids: [...]}` enqueues the same command for each id (offline agents stay `pending` for the next heartbeat). `POST /commands/broadcast` — **super_admin** only; pushes one `update` command to every connected agent socket at once (force-update all apps). `GET /commands?device_id=&limit=` — admin JWT, newest first. `POST /commands/{id}/ack` — **API key**; sets `status` + `acked_at` (409 if already resolved). See **Remote control** below.
 - Auth, users, health — unchanged pattern.
 
@@ -362,7 +362,7 @@ Desktops report **completed print jobs** so the dashboard shows who is printing 
   - **Windows:** `Microsoft-Windows-PrintService/Operational` Event ID **307** ("document printed") via PowerShell; watermark = last `RecordId`; parse document/user/printer/pages from the localized message.
   - **macOS:** tails `/var/log/cups/page_log`; watermark = latest completion column; fields printer/user/job/pages/title.
   - Every `--watch` cycle (**60s** heartbeat) also flushes any new print jobs to the API. `system-info --print-jobs` flushes on demand.
-- **API:** `POST /print-jobs` (API key, batch `{device_id, pc_name, jobs:[{printer,document,user,pages,completed_at}]}`) stores in the Mongo `print_jobs` collection and broadcasts a **`print.job`** WS event per job; `GET /print-jobs?limit=&skip=&group_id=` (JWT, group-scoped for non-`super_admin`, newest first) returns `{total, skip, limit, jobs}` where `total` is the full match count; `GET /print-jobs/summary?hours=` (per-hour counts of the last N hours). `source_key` prefix stored like reports.
+- **API:** `POST /print-jobs` (API key, batch `{device_id, pc_name, jobs:[{printer,document,user,pages,completed_at}]}`) stores in the Mongo `print_jobs` collection and broadcasts a **`print.job`** WS event per job; `GET /print-jobs?limit=&skip=&group_id=` (JWT, group-scoped for non-`super_admin`, newest first) returns `{total, skip, limit, jobs}` where `total` is the full match count; `GET /print-jobs/summary?hours=` (per-hour counts of the last N hours); `GET /print-jobs/by-pc?from_ts=&to_ts=&group_id=&pc_name=` returns `{total_jobs, total_pages, pcs:[{device_id,pc_name,jobs,pages}]}` for dated PC-wise print volume. `source_key` prefix stored like reports.
 - **Dashboard:** `/print-jobs` page (slate+blue, sidebar + detail like Reports) with a **per-hour bar chart** (last 24h), a **prints-per-PC bar chart** (PC names on the X axis; pick a **group** to compare only that group's PCs, including zeros), **Most prints** / **Least prints** cards, live **recent-prints feed**, and stat cards (jobs / pages / printers). The **Recent prints** table is **paginated** (25 per page; Previous/Next; `GET /print-jobs?skip=&limit=`). The sidebar groups recent jobs **by PC** (newest group first) and has the same group filter; each group is **collapsible** and **expanded by default**. It shows the live **printing** badge when that PC is printing. Counts use the recent print-jobs feed (up to 500). The WS `print.job` event refreshes it with no manual refresh.
 
 ---
@@ -390,7 +390,7 @@ in the **sticky top bar** (not the sidebar). Avoid purple/glow themes.
 | `/api-keys` | Manage desktop API keys (create/copy/rename/toggle/delete) — **super admin only**; optionally link a key to a group (auto-assignment) |
 | `/groups` | Create/rename/delete groups, assign PCs (one bucket per PC); manage **sub-categories** (many-to-many group membership); read-only for `user` role |
 | `/users` | Manage dashboard users (role + groups) — **super admin only** |
-| `/reports/export` | **Report export** — date presets + filters, CSV download |
+| `/reports/export` | **Report export** — date presets + filters, PC-wise preview (incl. prints/pages in range), CSV + PDF download |
 | `/print-jobs` | **Print Activity** — live recent prints + per-hour chart (via WS) |
 
 ### Overview (`/overview`)
@@ -441,6 +441,21 @@ in the **sticky top bar** (not the sidebar). Avoid purple/glow themes.
 - **Min thresholds**: Min CPU %, Min RAM %, Min disk % (filters out PCs below threshold).
 - Sidebar lists matching PCs with CPU/RAM/Disk/Net; main pane shows `MachineDetail`.
 - Permalink: `/reports/[key]`.
+
+### Report Export (`/reports/export`)
+
+- Date presets **Daily / Weekly / Monthly / Yearly / Custom** plus the same
+  PC / group / health filters as Reports.
+- Preview is **one row per PC**. **Lifetime prints** is the printer-driver
+  counter from the latest report. **Prints in range** / **Pages in range**
+  count completed `print_jobs` in the selected dates (`GET /print-jobs/by-pc`).
+- Stat cards: jobs and pages in range, most/least PC.
+- **Download CSV** is one row per report snapshot and includes
+  `summary.prints_in_range` / `summary.print_pages_in_range` for that PC.
+- **Download PDF** is a landscape PC-wise report (overview + hardware + print
+  totals) built in the browser from the preview (`jspdf`).
+- **Download prints CSV** is one row per PC (`pc_name`, `device_id`, `jobs`,
+  `pages`) for the same range.
 
 ### Machine grouping (`groupMachines` in `src/lib/api.ts`)
 

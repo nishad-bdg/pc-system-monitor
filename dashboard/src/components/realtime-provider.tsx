@@ -223,6 +223,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         registerPrint(event.job?.device_id);
         queryClient.invalidateQueries({ queryKey: ["print-jobs"] });
         queryClient.invalidateQueries({ queryKey: ["print-summary"] });
+        queryClient.invalidateQueries({ queryKey: ["print-jobs-by-pc"] });
       }
       if (event.type === "metrics.sample" && event.metrics?.device_id) {
         const sample = event.metrics;

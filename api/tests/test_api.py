@@ -45,6 +45,7 @@ def _patch_db(monkeypatch, user=None):
     monkeypatch.setattr(db, "touch_machine", lambda device_id, pc_name=None, seen_at=None: True)
     monkeypatch.setattr(db, "get_machine_seen_at", lambda device_id: 2_000_000_000.0)
     monkeypatch.setattr(db, "machines_seen_map", lambda: {})
+    monkeypatch.setattr(db, "print_jobs_by_pc", lambda **kw: [])
 
     # Reset in-process WebSocket presence cache so tests stay isolated.
     from sysinfo_api import realtime as _rt
@@ -904,12 +905,40 @@ def test_export_reports_includes_summary_columns(monkeypatch):
     assert "summary.total_uptime_seconds" in body
     assert "summary.network_total_bytes" in body
     assert "summary.print_count_total" in body
+    assert "summary.prints_in_range" in body
+    assert "summary.print_pages_in_range" in body
     assert "summary.battery_health_percent" in body
     line = body.strip().splitlines()[1]
     # total uptime 86400+43200 = 129600; prints 5; network 3000; disk 50%
     assert "129600" in line
     assert "3000" in line
     assert ",5," in line or line.endswith(",5") or ",5,".replace(",5", ",5,") in line
+
+
+def test_export_reports_includes_prints_in_range(monkeypatch):
+    _patch_db(monkeypatch)
+    sample = {
+        "_id": "1",
+        "pc_name": "Office-PC",
+        "device_id": "dev-print",
+        "created_at": 1755000000.0,
+    }
+    monkeypatch.setattr(db, "list_reports", lambda *a, **kw: [sample])
+    monkeypatch.setattr(
+        db,
+        "print_jobs_by_pc",
+        lambda **kw: [
+            {"device_id": "dev-print", "pc_name": "Office-PC", "jobs": 12, "pages": 48}
+        ],
+    )
+    resp = client.get("/reports/export", headers=_auth_header())
+    assert resp.status_code == 200
+    body = resp.text
+    assert "summary.prints_in_range" in body
+    assert "summary.print_pages_in_range" in body
+    line = body.strip().splitlines()[1]
+    assert ",12," in line
+    assert ",48," in line
 
 
 def test_get_report_not_found(monkeypatch):
@@ -1864,6 +1893,50 @@ def test_print_jobs_summary(monkeypatch):
     assert body["hours"] == 24
     assert body["buckets"][0]["count"] == 3
     assert body["buckets"][1]["hour"] == "2026-08-15T11:00"
+
+
+def test_print_jobs_by_pc(monkeypatch):
+    _patch_db(monkeypatch)
+    monkeypatch.setattr(
+        db,
+        "print_jobs_by_pc",
+        lambda **kw: [
+            {"device_id": "dev-1", "pc_name": "Office-PC", "jobs": 7, "pages": 21},
+            {"device_id": "dev-2", "pc_name": "Lab-PC", "jobs": 2, "pages": 4},
+        ],
+    )
+    resp = client.get(
+        "/print-jobs/by-pc?from_ts=1&to_ts=2",
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["from_ts"] == 1
+    assert body["to_ts"] == 2
+    assert body["total_jobs"] == 9
+    assert body["total_pages"] == 25
+    assert body["pcs"][0]["pc_name"] == "Office-PC"
+    assert body["pcs"][1]["jobs"] == 2
+
+
+def test_print_jobs_by_pc_group_id_out_of_scope_empty(monkeypatch):
+    _patch_db(
+        monkeypatch,
+        user={
+            "_id": "64b000000000000000000001",
+            "username": "admin",
+            "role": "user",
+            "groups": ["aaaaaaaaaaaaaaaaaaaaaaaa"],
+        },
+    )
+    resp = client.get(
+        "/print-jobs/by-pc?group_id=bbbbbbbbbbbbbbbbbbbbbbbb",
+        headers=_auth_header(role="user"),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_jobs"] == 0
+    assert body["pcs"] == []
 
 
 # ---- reports annotate online ----
