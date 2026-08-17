@@ -542,6 +542,8 @@ export function ReportExportPanel() {
         const hddBrands =
           [...new Set(healthDisks.filter((d) => d.media_type === "hdd").map((d) => d.brand).filter(Boolean))].join(", ") ||
           "-";
+        const ssdTotal = healthDisks.filter((d) => d.media_type === "ssd").reduce((s, d) => s + (d.size_bytes ?? 0), 0);
+        const hddTotal = healthDisks.filter((d) => d.media_type === "hdd").reduce((s, d) => s + (d.size_bytes ?? 0), 0);
         const emails = machineEmails(r)
           .map((a) => a.email)
           .filter(Boolean)
@@ -558,6 +560,8 @@ export function ReportExportPanel() {
           res?.ram_speed_mhz != null ? `${res.ram_speed_mhz} MHz` : "-",
           ssdBrands,
           hddBrands,
+          ssdTotal ? fmtBytes(ssdTotal) : "-",
+          hddTotal ? fmtBytes(hddTotal) : "-",
           fmtBytes(usedDisk),
           fmtBytes(freeDisk),
           fmtSecurity(r.security),
@@ -627,6 +631,8 @@ export function ReportExportPanel() {
               "RAM speed",
               "SSD",
               "HDD",
+              "SSD total",
+              "HDD total",
               "Disk used",
               "Disk free",
               "Security",
@@ -1090,7 +1096,9 @@ export function ReportExportPanel() {
                       <th className="px-4 py-3">Swap</th>
                       <th className="px-4 py-3">Disk %</th>
                       <th className="px-4 py-3">SSD brand</th>
+                      <th className="px-4 py-3">SSD total</th>
                       <th className="px-4 py-3">HDD brand</th>
+                      <th className="px-4 py-3">HDD total</th>
                       <th className="px-4 py-3">Disk used</th>
                       <th className="px-4 py-3">Disk free</th>
                       <th className="px-4 py-3">Net total</th>
@@ -1127,6 +1135,8 @@ export function ReportExportPanel() {
                         .join(", ") || "—";
                       const hddBrands = [...new Set(healthDisks.filter((d) => d.media_type === "hdd").map((d) => d.brand).filter(Boolean))]
                         .join(", ") || "—";
+                      const ssdTotal = healthDisks.filter((d) => d.media_type === "ssd").reduce((s, d) => s + (d.size_bytes ?? 0), 0);
+                      const hddTotal = healthDisks.filter((d) => d.media_type === "hdd").reduce((s, d) => s + (d.size_bytes ?? 0), 0);
                       return (
                         <tr key={m.key} className="hover:bg-slate-50/80">
                           <td className="px-4 py-3 font-medium text-slate-900">
@@ -1189,7 +1199,13 @@ export function ReportExportPanel() {
                             {ssdBrands}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
+                            {ssdTotal ? fmtBytes(ssdTotal) : "—"}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
                             {hddBrands}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {hddTotal ? fmtBytes(hddTotal) : "—"}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {fmtBytes(usedDisk)}
