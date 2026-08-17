@@ -29,6 +29,7 @@ import { StatusDot } from "@/components/dashboard/status-dot";
 import { PrintingBadge } from "@/components/dashboard/printing-badge";
 import { LoadWarningBadge, isHighLiveLoad } from "@/components/dashboard/load-warning-badge";
 import { ActivationBadge } from "@/components/dashboard/activation-badge";
+import { ConnectionBadge } from "@/components/dashboard/connection-badge";
 import { deviceIdsOf } from "@/components/dashboard/sidebar-remote-actions";
 import { useRealtime } from "@/components/realtime-provider";
 
@@ -513,6 +514,12 @@ export function ReportsBrowser() {
                       </span>
                       <span>Disk {fmtPercent(disk)}</span>
                       <span>Net {fmtBytes(net)}</span>
+                    </div>
+                    <div className={`mt-1 flex items-center gap-2 text-[11px] ${active ? "text-blue-100/90" : "text-slate-400"}`}>
+                      <ConnectionBadge kind={live?.eth_kind} ssid={live?.eth_ssid} />
+                      {live?.eth_kind === "wifi" && live?.eth_link_mbps ? (
+                        <span className="text-[10px] text-slate-500">{live.eth_link_mbps} Mbps</span>
+                      ) : null}
                     </div>
                     {(r.private_ip || machineMac(r) || r.app_version) && (
                       <div

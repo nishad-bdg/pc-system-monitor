@@ -55,6 +55,7 @@ export type LiveMetricsSample = {
   eth_send_rate_bps?: number;
   eth_recv_rate_bps?: number;
   eth_link_mbps?: number;
+  eth_ssid?: string | null;
   cpu_name?: string | null;
   cpu_brand?: string | null;
   processes?: LiveProcesses;

@@ -328,6 +328,9 @@ async def broadcast_metrics(sample: dict) -> None:
             link = 0
         if link > 0:
             metrics["eth_link_mbps"] = link
+        eth_ssid = _as_optional_text(sample.get("eth_ssid"), 80)
+        if eth_ssid:
+            metrics["eth_ssid"] = eth_ssid
     await _send({
         "type": "metrics.sample",
         "metrics": metrics,

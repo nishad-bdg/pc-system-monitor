@@ -9,6 +9,8 @@ sample (Task Manager style). Safe to call every few seconds from the watcher.
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 import time
 
 import psutil
@@ -17,6 +19,9 @@ _cpu_primed = False
 _last_net: tuple[float, int, int] | None = None  # monotonic ts, sent, recv
 _last_nics: dict[str, tuple[int, int]] = {}  # name -> sent, recv at last sample
 _last_nic_ts: float | None = None
+
+_ssid_cache: tuple[float, str | None] | None = None  # monotonic ts, ssid
+_SSID_TTL = 30.0
 
 _SKIP_NIC = re.compile(
     r"loopback|isatap|teredo|6to4|bluetooth|vmware|vbox|virtualbox|"
@@ -33,11 +38,12 @@ _ETHER_NIC = re.compile(
 
 def reset_live_metrics_state() -> None:
     """Clear CPU/network baselines (tests)."""
-    global _cpu_primed, _last_net, _last_nics, _last_nic_ts
+    global _cpu_primed, _last_net, _last_nics, _last_nic_ts, _ssid_cache
     _cpu_primed = False
     _last_net = None
     _last_nics = {}
     _last_nic_ts = None
+    _ssid_cache = None
     try:
         from .resources import reset_cpu_identity_cache
 
@@ -61,6 +67,53 @@ def nic_kind(name: str) -> str:
 
 def _kind_rank(kind: str) -> int:
     return {"ethernet": 0, "other": 1, "wifi": 2}.get(kind, 9)
+
+
+def _current_ssid(nic_name: str) -> str | None:
+    """Best-effort current Wi-Fi SSID (network name).
+
+    Cached briefly so the 5s watcher loop does not spawn a subprocess each
+    tick. Returns None on wired/unknown, when the OS tool is missing, or when
+    the command fails.
+    """
+    global _ssid_cache
+    now = time.monotonic()
+    if _ssid_cache is not None and now - _ssid_cache[0] < _SSID_TTL:
+        return _ssid_cache[1]
+    ssid: str | None = None
+    try:
+        if sys.platform == "darwin":
+            iface = str(nic_name or "").strip() or "en0"
+            out = subprocess.run(
+                ["networksetup", "-getairportnetwork", iface],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            text = (out.stdout or "") + (out.stderr or "")
+            match = re.search(r"Current Wi-Fi Network:\s*(.+)", text)
+            if match:
+                value = match.group(1).strip()
+                if value.lower() not in {"off", "you are not associated with an airport network"}:
+                    ssid = value
+        elif sys.platform == "win32":
+            out = subprocess.run(
+                ["netsh", "wlan", "show", "interfaces"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            text = (out.stdout or "") + (out.stderr or "")
+            match = re.search(r"^\s*SSID\s*:\s*(.+?)\s*$", text, re.MULTILINE)
+            if match:
+                value = match.group(1).strip()
+                if value.lower() not in {"", "off"}:
+                    ssid = value
+    except Exception:
+        ssid = None
+    _ssid_cache = (now, ssid)
+    return ssid
 
 
 def _live_ethernet(now: float) -> dict:
@@ -118,6 +171,10 @@ def _live_ethernet(now: float) -> dict:
         "eth_send_rate_bps": send_rate,
         "eth_recv_rate_bps": recv_rate,
     }
+    if kind == "wifi":
+        ssid = _current_ssid(name)
+        if ssid:
+            out["eth_ssid"] = ssid[:80]
     if link:
         out["eth_link_mbps"] = link
     return out

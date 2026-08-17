@@ -1242,6 +1242,7 @@ function NetworkSection({
     live?.eth_recv_rate_bps ?? live?.recv_rate_bps ?? network?.recv_rate_bps;
   const adapterName = live?.eth_name?.trim() || "";
   const kindLabel = ethKindLabel(live?.eth_kind);
+  const ssid = live?.eth_ssid?.trim() || "";
   const linkLabel = fmtLinkMbps(live?.eth_link_mbps);
   const liveChart = (liveSeries ?? []).map((p) => ({
     time: fmtClock(p.t),
@@ -1259,6 +1260,25 @@ function NetworkSection({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-sm font-medium text-slate-700">
           {adapterName ? `${kindLabel} · ${adapterName}` : "Network bandwidth"}
+          {ssid ? (
+            <span className="ml-2 inline-flex max-w-full items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 align-middle text-[11px] font-medium text-blue-700">
+              <svg
+                className="h-3 w-3 shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={2}
+                stroke="currentColor"
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 20.25V21A1.5 1.5 0 019.75 22.5h4.5A1.5 1.5 0 0015.75 21v-.75m-2.25-6.75h.008v.008H13.5v-.008z"
+                />
+              </svg>
+              <span className="truncate">{ssid}</span>
+            </span>
+          ) : null}
         </h2>
         {linkLabel ? (
           <p className="text-xs font-medium text-slate-500">

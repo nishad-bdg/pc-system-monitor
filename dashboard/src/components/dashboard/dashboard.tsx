@@ -21,6 +21,7 @@ import { StatusDot } from "./status-dot";
 import { PrintingBadge } from "./printing-badge";
 import { LoadWarningBadge, isHighLiveLoad } from "./load-warning-badge";
 import { ActivationBadge } from "./activation-badge";
+import { ConnectionBadge } from "./connection-badge";
 import { deviceIdsOf } from "./sidebar-remote-actions";
 import { useRealtime } from "../realtime-provider";
 
@@ -194,6 +195,7 @@ export function Dashboard() {
                       >
                         RAM {fmtPercent(ram)}
                       </span>
+                      <ConnectionBadge kind={live?.eth_kind} ssid={live?.eth_ssid} />
                     </div>
                     {(m.latest.private_ip ||
                       machineMac(m.latest) ||

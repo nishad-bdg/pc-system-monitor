@@ -31,6 +31,7 @@ import {
 } from "@/components/dashboard/shell";
 import { StatusDot } from "@/components/dashboard/status-dot";
 import { PrintingBadge } from "@/components/dashboard/printing-badge";
+import { ConnectionBadge } from "@/components/dashboard/connection-badge";
 import { deviceIdsOf } from "@/components/dashboard/sidebar-remote-actions";
 import { useRealtime } from "@/components/realtime-provider";
 import type { LiveMetricsSample } from "@/components/realtime-provider";
@@ -386,6 +387,7 @@ export function FleetGraphs() {
                         >
                           {cpu != null ? `${Math.round(cpu)}%` : "—"}
                         </span>
+                        <ConnectionBadge kind={live?.eth_kind} ssid={live?.eth_ssid} />
                       </span>
                     </SidebarSelectButton>
                   </li>
