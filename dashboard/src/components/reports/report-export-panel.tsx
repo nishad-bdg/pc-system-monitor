@@ -342,6 +342,27 @@ export function ReportExportPanel() {
     };
   }, [printByPc, printPreviewRows]);
 
+  const lifetimePrintRows = useMemo(() => {
+    return machines
+      .map((m) => {
+        const prv = m.latest.printers;
+        const printerCount =
+          (prv?.usb?.length ?? 0) + (prv?.network?.length ?? 0) + (prv?.other?.length ?? 0);
+        const total =
+          (prv?.usb ?? []).reduce((s, p) => s + (p.print_count ?? 0), 0) +
+          (prv?.network ?? []).reduce((s, p) => s + (p.print_count ?? 0), 0) +
+          (prv?.other ?? []).reduce((s, p) => s + (p.print_count ?? 0), 0);
+        return { name: m.name, deviceId: m.deviceId ?? "", printers: printerCount, total };
+      })
+      .filter((r) => r.total > 0 || r.printers > 0)
+      .sort((a, b) => b.total - a.total);
+  }, [machines]);
+
+  const totalLifetimePrints = useMemo(
+    () => lifetimePrintRows.reduce((s, r) => s + r.total, 0),
+    [lifetimePrintRows],
+  );
+
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     const presetRange =
@@ -430,6 +451,26 @@ export function ReportExportPanel() {
     const a = document.createElement("a");
     a.href = url;
     a.download = `print-totals-${applied.range}-${Date.now()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function onDownloadTotalPrints() {
+    if (!applied) return;
+    const header = ["pc_name", "device_id", "printers", "total_prints"];
+    const lines = [
+      header.join(","),
+      ...lifetimePrintRows.map((r) =>
+        [csvCell(r.name), csvCell(r.deviceId), r.printers, r.total].join(","),
+      ),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `total-print-count-${applied.range}-${Date.now()}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -535,6 +576,7 @@ export function ReportExportPanel() {
           `Generated ${new Date().toLocaleString()}`,
         ],
         stats: [
+          { label: "Total prints", value: totalLifetimePrints.toLocaleString() },
           { label: "Prints in range", value: printTotals.jobs.toLocaleString() },
           { label: "Pages in range", value: printTotals.pages.toLocaleString() },
           {
@@ -601,6 +643,16 @@ export function ReportExportPanel() {
               r.deviceId || "-",
               String(r.jobs),
               String(r.pages),
+            ]),
+          },
+          {
+            title: "Total print count by PC",
+            head: ["PC", "Device ID", "Printers", "Total prints"],
+            body: lifetimePrintRows.map((r) => [
+              r.name,
+              r.deviceId || "-",
+              r.printers ? String(r.printers) : "-",
+              r.total > 0 ? r.total.toLocaleString() : "-",
             ]),
           },
         ],
@@ -911,6 +963,14 @@ export function ReportExportPanel() {
                 </button>
                 <button
                   type="button"
+                  onClick={onDownloadTotalPrints}
+                  disabled={isFetching || exporting || exportingPdf}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                >
+                  Download total prints CSV
+                </button>
+                <button
+                  type="button"
                   onClick={onDownload}
                   disabled={exporting || exportingPdf || isFetching}
                   className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60"
@@ -942,7 +1002,18 @@ export function ReportExportPanel() {
                 </div>
               </div>
               {printPreviewRows.length > 0 && (
-                <div className="grid gap-3 border-b border-slate-100 px-4 py-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="grid gap-3 border-b border-slate-100 px-4 py-3 sm:grid-cols-2 lg:grid-cols-5">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      Total prints
+                    </p>
+                    <p className="mt-1 text-lg font-semibold text-slate-900">
+                      {totalLifetimePrints.toLocaleString()}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      lifetime printer counter · all PCs
+                    </p>
+                  </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                       Prints in range
