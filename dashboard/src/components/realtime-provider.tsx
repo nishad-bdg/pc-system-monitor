@@ -94,6 +94,8 @@ const LIVE_METRICS_STALE_MS = 20_000;
 /** Keep ~7 minutes of 5s Ethernet samples for the Task Manager-style chart. */
 const ETH_HISTORY_MS = 7 * 60 * 1000;
 const ETH_HISTORY_MAX = 90;
+/** Keep ~15 minutes of print-job timestamps for the live printing graph. */
+const PRINT_HISTORY_MS = 15 * 60 * 1000;
 
 type RealtimeContextValue = {
   connected: boolean;
@@ -112,6 +114,8 @@ type RealtimeContextValue = {
   metricsFor: (deviceId?: string | null) => LiveMetricsSample | null;
   /** Last ~7 minutes of Ethernet send/receive (Mbps) for a live sparkline. */
   metricsHistoryFor: (deviceId?: string | null) => LiveEthPoint[];
+  /** Timestamps (ms) of live `print.job` events in the last ~15 minutes. */
+  printEventsFor: (deviceId?: string | null) => number[];
   /** Force-refetch every active query (Refresh button). */
   refreshAll: () => void;
 };
@@ -126,6 +130,7 @@ const RealtimeContext = createContext<RealtimeContextValue>({
   printingCount: () => 0,
   metricsFor: () => null,
   metricsHistoryFor: () => [],
+  printEventsFor: () => [],
   refreshAll: () => {},
 });
 
@@ -151,6 +156,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const printTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const ethHistoryRef = useRef<Record<string, LiveEthPoint[]>>({});
+  const printEventsRef = useRef<Record<string, number[]>>({});
 
   const wsUrl = buildWsUrl(API_URL);
 
@@ -186,10 +192,15 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     (deviceId?: string | null) => {
       if (!deviceId) return;
       const key = deviceId;
+      const now = Date.now();
       setPrinting((prev) => {
         const cur = prev[key] ?? { count: 0, lastPrintAt: 0 };
-        return { ...prev, [key]: { count: cur.count + 1, lastPrintAt: Date.now() } };
+        return { ...prev, [key]: { count: cur.count + 1, lastPrintAt: now } };
       });
+      const events = printEventsRef.current[key] ?? [];
+      printEventsRef.current[key] = [...events, now].filter(
+        (t) => now - t <= PRINT_HISTORY_MS,
+      );
       const existing = printTimersRef.current[key];
       if (existing) clearTimeout(existing);
       printTimersRef.current[key] = setTimeout(() => {
@@ -372,6 +383,17 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     [metrics, tick],
   );
 
+  const printEventsFor = useCallback(
+    (deviceId?: string | null): number[] => {
+      if (!deviceId) return [];
+      const now = Date.now();
+      return (printEventsRef.current[deviceId] ?? []).filter(
+        (t) => now - t <= PRINT_HISTORY_MS,
+      );
+    },
+    [metrics, tick],
+  );
+
   return (
     <RealtimeContext.Provider
       value={{
@@ -384,6 +406,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         printingCount,
         metricsFor,
         metricsHistoryFor,
+        printEventsFor,
         refreshAll,
       }}
     >

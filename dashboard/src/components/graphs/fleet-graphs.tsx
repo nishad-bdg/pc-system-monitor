@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Legend,
   Line,
@@ -118,12 +120,15 @@ function histPoint(
 export function FleetGraphs() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
-  const { connected, isOnline, isPrinting, printingCount, metricsFor, refreshAll } =
+  const { connected, isOnline, isPrinting, printingCount, metricsFor, printEventsFor, refreshAll } =
     useRealtime();
   const [groupFilter, setGroupFilter] = useState("");
   const [pcQuery, setPcQuery] = useState("");
   const [pcKey, setPcKey] = useState("");
   const [history, setHistory] = useState<HistPoint[]>([]);
+  const [printHist, setPrintHist] = useState<
+    { time: string; [key: string]: string | number }[]
+  >([]);
 
   const { data, isLoading, isError, isFetching } = useQuery({
     queryKey: ["reports"],
@@ -196,6 +201,39 @@ export function FleetGraphs() {
       setHistory((prev) =>
         [...prev, point].filter((p) => p.t >= point.t - HISTORY_MS),
       );
+    }, SAMPLE_MS);
+    return () => clearInterval(id);
+  }, [historyScope]);
+
+  const listedRef2 = useRef(listed);
+  const printEventsRef = useRef(printEventsFor);
+
+  useEffect(() => {
+    listedRef2.current = listed;
+    printEventsRef.current = printEventsFor;
+  });
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const now = Date.now();
+      const bucketMs = 60_000;
+      const buckets: { time: string; [key: string]: string | number }[] = [];
+      const start = now - HISTORY_MS;
+      for (let t = start; t <= now; t += bucketMs) {
+        const bucketEnd = t + bucketMs;
+        const row: { time: string; [key: string]: string | number } = {
+          time: formatClock(bucketEnd),
+        };
+        for (const m of listedRef2.current) {
+          const key = seriesKey(m);
+          const events = printEventsRef.current(m.deviceId).filter(
+            (ev) => ev >= t && ev < bucketEnd,
+          );
+          row[key] = events.length;
+        }
+        buckets.push(row);
+      }
+      setPrintHist(buckets);
     }, SAMPLE_MS);
     return () => clearInterval(id);
   }, [historyScope]);
@@ -368,7 +406,7 @@ export function FleetGraphs() {
           </h2>
           <p className="mt-1 text-sm text-slate-500">
             CPU, RAM, and network from live WebSocket samples (last 15
-            minutes).{" "}
+            minutes), plus completed print jobs per minute.{" "}
             {selectedKey
               ? "Back returns to every PC in the current filter."
               : "Pick a PC in the list or dropdown to show only that machine."}{" "}
@@ -407,8 +445,89 @@ export function FleetGraphs() {
           empty={filtered.length === 0}
           hint="Send + receive on the preferred NIC (live) or last report sample"
         />
+        <PrintingChart
+          data={printHist}
+          series={series}
+          empty={filtered.length === 0}
+          live={connected}
+        />
       </div>
     </DashboardShell>
+  );
+}
+
+function PrintingChart({
+  data,
+  series,
+  empty,
+  live,
+}: {
+  data: { time: string; [key: string]: string | number }[];
+  series: { key: string; name: string; color: string }[];
+  empty: boolean;
+  live: boolean;
+}) {
+  const totalPrints = data.reduce(
+    (sum, row) =>
+      sum +
+      series.reduce((s, ser) => s + (Number(row[ser.key]) || 0), 0),
+    0,
+  );
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-medium text-slate-700">Live printing</h3>
+        <span
+          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+            live ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
+          }`}
+        >
+          {live ? "Live" : "Reconnecting…"}
+        </span>
+      </div>
+      <p className="mt-1 text-xs text-slate-500">
+        Completed print jobs per minute, pushed live over WebSocket. Total in
+        the last {Math.round(HISTORY_MS / 60000)} min:{" "}
+        <span className="font-semibold text-slate-700">{totalPrints}</span>
+      </p>
+      {empty ? (
+        <p className="mt-8 text-center text-sm text-slate-500">
+          Waiting for PCs…
+        </p>
+      ) : (
+        <div className="mt-2 h-80">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey="time" fontSize={11} stroke="#94a3b8" minTickGap={32} />
+              <YAxis
+                fontSize={11}
+                stroke="#94a3b8"
+                allowDecimals={false}
+                width={32}
+              />
+              <Tooltip
+                formatter={(value, name) => [
+                  `${Number(value ?? 0)} print${Number(value) === 1 ? "" : "s"}`,
+                  String(name),
+                ]}
+              />
+              <Legend />
+              {series.map((s) => (
+                <Bar
+                  key={s.key}
+                  dataKey={s.key}
+                  name={s.name}
+                  stackId="prints"
+                  fill={s.color}
+                  isAnimationActive={false}
+                />
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
   );
 }
 
