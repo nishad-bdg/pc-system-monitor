@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {
@@ -87,11 +86,22 @@ function liveSnapshot(
   return { cpu, ram, net };
 }
 
+function histPoint(
+  machines: MachineSummary[],
+  metricsFor: (id?: string | null) => LiveMetricsSample | null,
+): HistPoint {
+  const t = Date.now();
+  const snap = liveSnapshot(machines, metricsFor);
+  return { t, time: formatClock(t), cpu: snap.cpu, ram: snap.ram, net: snap.net };
+}
+
 export function FleetGraphs() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
   const { connected, isOnline, metricsFor, refreshAll } = useRealtime();
   const [groupFilter, setGroupFilter] = useState("");
+  const [pcQuery, setPcQuery] = useState("");
+  const [pcKey, setPcKey] = useState("");
   const [history, setHistory] = useState<HistPoint[]>([]);
 
   const { data, isLoading, isError, isFetching } = useQuery({
@@ -112,13 +122,24 @@ export function FleetGraphs() {
     [data?.reports],
   );
 
+  const listed = useMemo(() => {
+    let rows = machines;
+    if (groupFilter) {
+      rows = rows.filter((m) => groupOf(m, groups)?.id === groupFilter);
+    }
+    const q = pcQuery.trim().toLowerCase();
+    if (q) {
+      rows = rows.filter((m) => m.name.toLowerCase().includes(q));
+    }
+    return rows;
+  }, [machines, groupFilter, groups, pcQuery]);
+
+  const selectedKey = listed.some((m) => m.key === pcKey) ? pcKey : "";
+
   const filtered = useMemo(() => {
-    if (!groupFilter) return machines;
-    return machines.filter((m) => {
-      const g = groupOf(m, groups);
-      return g?.id === groupFilter;
-    });
-  }, [machines, groupFilter, groups]);
+    if (!selectedKey) return listed;
+    return listed.filter((m) => m.key === selectedKey);
+  }, [listed, selectedKey]);
 
   const series = useMemo(
     () =>
@@ -131,33 +152,32 @@ export function FleetGraphs() {
     [filtered],
   );
 
-  const filteredRef = useRef(filtered);
-  filteredRef.current = filtered;
-  const metricsRef = useRef(metricsFor);
-  metricsRef.current = metricsFor;
+  const historyScope = `${groupFilter}|${pcQuery}|${listed.length}`;
+  const [activeScope, setActiveScope] = useState(historyScope);
+  if (activeScope !== historyScope) {
+    setActiveScope(historyScope);
+    setHistory([histPoint(listed, metricsFor)]);
+  } else if (history.length === 0) {
+    setHistory([histPoint(listed, metricsFor)]);
+  }
 
-  const pushPoint = () => {
-    const t = Date.now();
-    const snap = liveSnapshot(filteredRef.current, metricsRef.current);
-    setHistory((prev) => {
-      const point: HistPoint = {
-        t,
-        time: formatClock(t),
-        cpu: snap.cpu,
-        ram: snap.ram,
-        net: snap.net,
-      };
-      const cutoff = t - HISTORY_MS;
-      return [...prev, point].filter((p) => p.t >= cutoff);
-    });
-  };
+  const listedRef = useRef(listed);
+  const metricsRef = useRef(metricsFor);
 
   useEffect(() => {
-    setHistory([]);
-    pushPoint();
-    const id = setInterval(pushPoint, SAMPLE_MS);
+    listedRef.current = listed;
+    metricsRef.current = metricsFor;
+  });
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const point = histPoint(listedRef.current, metricsRef.current);
+      setHistory((prev) =>
+        [...prev, point].filter((p) => p.t >= point.t - HISTORY_MS),
+      );
+    }, SAMPLE_MS);
     return () => clearInterval(id);
-  }, [groupFilter, filtered.length]);
+  }, [historyScope]);
 
   const cpuData = useMemo(
     () => history.map((p) => ({ time: p.time, ...p.cpu })),
@@ -173,13 +193,13 @@ export function FleetGraphs() {
   );
 
   const sidebarPcs = useMemo(() => {
-    return [...filtered].sort((a, b) => {
+    return [...listed].sort((a, b) => {
       const aOn = isOnline(a.deviceId) ?? a.latest.online ? 1 : 0;
       const bOn = isOnline(b.deviceId) ?? b.latest.online ? 1 : 0;
       if (aOn !== bOn) return bOn - aOn;
       return a.name.localeCompare(b.name);
     });
-  }, [filtered, isOnline]);
+  }, [listed, isOnline]);
 
   return (
     <DashboardShell
@@ -190,25 +210,55 @@ export function FleetGraphs() {
       subtitle={
         <>
           {filtered.length} PC{filtered.length === 1 ? "" : "s"}
+          {selectedKey ? " · 1 selected" : ""}
           {connected ? " · live" : " · connecting"}
         </>
       }
       sidebar={
         <>
-          <div className="px-3 pt-3">
+          <div className="space-y-2 px-3 pt-3">
             <label className="sr-only" htmlFor="graphs-group-filter">
               Filter by group
             </label>
             <select
               id="graphs-group-filter"
               value={groupFilter}
-              onChange={(e) => setGroupFilter(e.target.value)}
+              onChange={(e) => {
+                setGroupFilter(e.target.value);
+                setPcKey("");
+              }}
               className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
             >
               <option value="">All groups</option>
               {groups.map((g: Group) => (
                 <option key={g.id} value={g.id}>
                   {g.name}
+                </option>
+              ))}
+            </select>
+            <label className="sr-only" htmlFor="graphs-pc-filter">
+              Filter by PC name
+            </label>
+            <input
+              id="graphs-pc-filter"
+              value={pcQuery}
+              onChange={(e) => setPcQuery(e.target.value)}
+              placeholder="Filter by PC name…"
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+            />
+            <label className="sr-only" htmlFor="graphs-pc-select">
+              Show PC on graphs
+            </label>
+            <select
+              id="graphs-pc-select"
+              value={selectedKey}
+              onChange={(e) => setPcKey(e.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+            >
+              <option value="">All PCs</option>
+              {sidebarPcs.map((m) => (
+                <option key={m.key} value={m.key}>
+                  {m.name}
                 </option>
               ))}
             </select>
@@ -228,11 +278,17 @@ export function FleetGraphs() {
               {sidebarPcs.map((m, i) => {
                 const live = metricsFor(m.deviceId);
                 const cpu = live?.cpu_percent ?? m.latest.resources?.cpu_percent;
+                const active = selectedKey === m.key;
                 return (
                   <li key={m.key}>
-                    <Link
-                      href={`/reports/${encodeURIComponent(m.key)}`}
-                      className="flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-slate-200 hover:bg-slate-900"
+                    <button
+                      type="button"
+                      onClick={() => setPcKey(active ? "" : m.key)}
+                      className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left transition ${
+                        active
+                          ? "bg-blue-600 text-white shadow-sm shadow-blue-900/40"
+                          : "text-slate-200 hover:bg-slate-900"
+                      }`}
                     >
                       <span className="flex min-w-0 items-center gap-2">
                         <span
@@ -244,10 +300,14 @@ export function FleetGraphs() {
                         />
                         <span className="truncate text-sm">{m.name}</span>
                       </span>
-                      <span className="shrink-0 text-xs text-slate-400">
+                      <span
+                        className={`shrink-0 text-xs ${
+                          active ? "text-blue-100" : "text-slate-400"
+                        }`}
+                      >
                         {cpu != null ? `${Math.round(cpu)}%` : "—"}
                       </span>
-                    </Link>
+                    </button>
                   </li>
                 );
               })}
@@ -276,8 +336,10 @@ export function FleetGraphs() {
             Live graphs
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            CPU, RAM, and network for every PC from live WebSocket samples
-            (last 15 minutes). Offline PCs use the last saved report.
+            CPU, RAM, and network from live WebSocket samples (last 15
+            minutes). Pick a PC in the list or dropdown to show only that
+            machine; All PCs shows every line. Offline PCs use the last saved
+            report.
           </p>
         </div>
       }

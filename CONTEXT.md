@@ -406,8 +406,9 @@ Page navigation lives in the **sticky top bar** (not the sidebar). Avoid purple/
   usage**, **network usage** — one line per PC from `metrics.sample` (fallback
   to the last saved report). Client-side history is the last **15 minutes** at
   **5s**. Network is send+receive bit rate (Mbps) on the preferred NIC.
-  Group filter in the left list; rows link to `/reports/[key]`. Not stored in
-  Mongo.
+  Left list: **group filter**, **PC name filter**, and **PC picker** (All PCs
+  or one machine). Click a PC row to graph only that machine; click again for
+  all. Not stored in Mongo.
 
 ### Fleet (`/dashboard`)
 
