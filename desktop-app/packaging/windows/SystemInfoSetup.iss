@@ -11,6 +11,8 @@
 ;   - Always launches --watch after files are copied (tray). A finish-page
 ;     checkbox can start it again if the first launch was blocked (AV, etc.);
 ;     a process mutex prevents two watchers.
+;   - On upgrade: stops a running watcher before replacing the exe, then
+;     launches --watch again so the tray comes back.
 ;   - Creates Start Menu (and optional Desktop) shortcuts to start it later
 ;   - On first run the app self-registers an HKCU Run entry so --watch starts at logon
 
@@ -36,6 +38,8 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
 ArchitecturesInstallIn64BitMode=x64compatible
+CloseApplications=yes
+RestartApplications=no
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Languages]
@@ -118,6 +122,16 @@ begin
   SaveStringToFile(Path, Content, False);
 end;
 
+procedure StopWatcher;
+var
+  ResultCode: Integer;
+begin
+  { Unlock system-info.exe so this upgrade can replace it. The mutex would
+    also make a post-install --watch a no-op while the old process is alive. }
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM {#MyAppExeName} /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(1500);
+end;
+
 procedure LaunchWatcher;
 var
   ExePath: string;
@@ -139,6 +153,8 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  if CurStep = ssInstall then
+    StopWatcher;
   if CurStep = ssPostInstall then
   begin
     WriteConfigFile;

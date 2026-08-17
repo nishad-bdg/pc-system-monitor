@@ -94,8 +94,8 @@ API (`/ws/agent`, authenticated with the same API key) so admin actions land
 **Update all apps** (`super_admin` only, Fleet sidebar) broadcasts an `update`
 command to every connected agent at once. Each agent checks the release
 manifest, downloads a newer exe when one exists, and `apply-update-restart.cmd`
-waits for the process to exit, swaps the exe and relaunches `--watch` — so the
-updated binary comes back up on its own. Already-up-to-date agents just ack.
+waits for the process to exit, swaps the exe and relaunches `--watch` with
+PowerShell `Start-Process` — so the updated binary comes back up on its own. Already-up-to-date agents just ack.
 
 Both reboot/shutdown actions are best-effort and run in whatever privileges the
 watcher has (the per-user Run-key process typically can't reboot unless the user

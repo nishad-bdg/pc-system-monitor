@@ -478,10 +478,18 @@ def test_apply_update_and_restart_script_relaunches_tray():
     backup = Path(r"C:\SystemInfo\system-info.prev.exe")
     script = _watch_relaunch_script(4242, current, pending, backup, current.parent)
     assert "--watch" in script
-    assert "start" in script.lower()
+    assert "Start-Process" in script
+    assert 'start ""' not in script
     assert "4242" in script
     assert str(current) in script
     assert str(pending) in script
+    assert "WindowStyle Hidden" in script
+
+
+def test_ps_single_quote_escapes_apostrophe():
+    from system_info.update import _ps_single_quote
+
+    assert _ps_single_quote(r"C:\O'Brien\system-info.exe") == r"'C:\O''Brien\system-info.exe'"
 
 
 def test_collect_network_usage(monkeypatch):

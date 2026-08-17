@@ -324,7 +324,8 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
   `update.py::force_update_and_restart()`:
   if a newer build exists it downloads it and `apply_update_and_restart()` writes
   a detached `apply-update-restart.cmd` that **waits for the old PID to exit,
-  swaps the exe and relaunches `--watch`** so the tray icon comes back. Hourly
+  swaps the exe, then `Start-Process … --watch`** (not cmd `start ""`, which
+  often does nothing when the updater runs with no console). Hourly
   auto-update and tray **Check for updates…** use the same restart path (not
   stage-and-wait). Already-up-to-date agents ack `done` but don't restart.
   Offline agents are skipped by the broadcast.
@@ -464,8 +465,11 @@ Tag `v*` (or Actions → Windows Release) builds the exe + Inno installer and pu
   detached `--watch` and stops this instance.
 - **Updates:** `SYSTEM_INFO_UPDATE_URL` JSON manifest. Hourly check, tray
   Check for updates, and remote `update` all use `apply_update_and_restart`:
-  wait for PID, swap exe, `start "" … --watch` so the **tray comes back**.
-  Do not use stage-only `apply_windows_update` for those paths.
+  wait for PID, swap exe, PowerShell `Start-Process … --watch` so the **tray
+  comes back** (cmd `start ""` from a `CREATE_NO_WINDOW` updater often never
+  launched the new process). Do not use stage-only `apply_windows_update` for
+  those paths. Re-running the Inno installer **taskkill**s a live watcher
+  before replacing the exe, then launches `--watch` again.
 - **Auto-start on logon:** first run registers HKCU `...\Run` →
   `SystemInfoReporter` = `"system-info.exe" --watch`. Marker
   `%APPDATA%\system-info\startup-registered`. `SYSTEM_INFO_NO_STARTUP=1` skips.

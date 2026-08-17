@@ -159,12 +159,29 @@ del /f /q "%~f0"
     return str(updater)
 
 
+def _ps_single_quote(value: str) -> str:
+    """Quote a path for PowerShell so `Start-Process` gets one argument."""
+    return "'" + str(value).replace("'", "''") + "'"
+
+
 def _watch_relaunch_script(pid: int, current: Path, pending: Path, backup: Path, target_dir: Path) -> str:
-    """Batch that waits for `pid`, swaps the exe, then starts `--watch` (tray)."""
+    """Batch that waits for `pid`, swaps the exe, then starts `--watch` (tray).
+
+    Do not use cmd `start ""` here: this updater is launched with
+    CREATE_NO_WINDOW, and `start` from a windowless console often never
+    creates the new process. `Start-Process` matches tray Restart
+    (independent process, no inherited console).
+    """
+    exe = _ps_single_quote(str(current))
+    cwd = _ps_single_quote(str(target_dir))
+    launch = (
+        "Start-Process -FilePath "
+        f"{exe} -ArgumentList '--watch' -WorkingDirectory {cwd}"
+    )
     return f"""@echo off
 rem Wait for the current watcher (pid {pid}) to exit so the exe is unlocked.
 :wait
-tasklist /FI "PID eq {pid}" 2>nul | findstr "{pid}" >nul
+tasklist /FI "PID eq {pid}" 2>nul | findstr /C:" {pid} " >nul
 if not errorlevel 1 (
   ping 127.0.0.1 -n 2 >nul
   goto wait
@@ -172,9 +189,17 @@ if not errorlevel 1 (
 if exist "{backup}" del /f /q "{backup}"
 if exist "{current}" move /y "{current}" "{backup}"
 move /y "{pending}" "{current}"
-ping 127.0.0.1 -n 2 >nul
+rem Mutex + file locks drop a moment after the PID vanishes.
+ping 127.0.0.1 -n 4 >nul
 cd /d "{target_dir}"
-start "" "{current}" --watch
+set TRIES=0
+:launch
+set /a TRIES+=1
+powershell -NoProfile -NonInteractive -WindowStyle Hidden -Command "{launch}"
+if errorlevel 1 if %TRIES% LSS 3 (
+  ping 127.0.0.1 -n 2 >nul
+  goto launch
+)
 del /f /q "%~f0"
 """
 
@@ -206,10 +231,16 @@ def apply_update_and_restart(manifest: dict) -> str | None:
     try:
         import subprocess
 
+        kwargs = dict(hidden_subprocess_kwargs())
+        flags = int(kwargs.get("creationflags") or 0)
+        if hasattr(subprocess, "DETACHED_PROCESS"):
+            flags |= subprocess.DETACHED_PROCESS
+        if flags:
+            kwargs["creationflags"] = flags
         subprocess.Popen(
             [os.environ.get("COMSPEC", "cmd.exe"), "/c", str(updater)],
-            **hidden_subprocess_kwargs(),
             close_fds=True,
+            **kwargs,
         )
     except OSError:
         return str(updater)
