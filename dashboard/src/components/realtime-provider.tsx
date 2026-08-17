@@ -23,6 +23,22 @@ export type PresenceEntry = {
   pc_name?: string | null;
 };
 
+export type LiveProcessRow = {
+  pid?: number;
+  name?: string;
+  username?: string | null;
+  cpu_percent?: number;
+  memory_rss?: number;
+  memory_percent?: number;
+  connections?: number;
+};
+
+export type LiveProcesses = {
+  cpu?: LiveProcessRow[];
+  ram?: LiveProcessRow[];
+  network?: LiveProcessRow[];
+};
+
 export type LiveMetricsSample = {
   device_id: string;
   pc_name?: string | null;
@@ -34,6 +50,7 @@ export type LiveMetricsSample = {
   bytes_recv?: number;
   send_rate_bps?: number;
   recv_rate_bps?: number;
+  processes?: LiveProcesses;
   ts?: number;
 };
 
@@ -96,7 +113,7 @@ const RealtimeContext = createContext<RealtimeContextValue>({
  *    pushes a heartbeat online instantly; the client flips to offline after
  *    ONLINE_TIMEOUT_SECONDS of silence — Messenger-style), and
  *  - invalidates reports queries on `report.created` so the fleet updates, and
- *  - keeps live CPU/RAM/network gauges from `metrics.sample` (not stored).
+ *  - keeps live CPU/RAM/network gauges and top-process lists from `metrics.sample` (not stored).
  * Reconnects with capped exponential backoff and re-seeds presence.
  */
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {

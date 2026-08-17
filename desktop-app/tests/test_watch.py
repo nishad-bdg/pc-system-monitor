@@ -21,6 +21,7 @@ def _args(**overrides) -> argparse.Namespace:
         security=False,
         health=False,
         emails=False,
+        processes=False,
         no_save=False,
         json=False,
         watch=False,
@@ -52,6 +53,7 @@ def test_watch_args_forces_flags_off():
         "security",
         "health",
         "emails",
+        "processes",
         "no_save",
         "json",
         "watch",
@@ -115,6 +117,20 @@ def test_send_live_metrics(monkeypatch):
     )
     monkeypatch.setattr("system_info.watch.get_or_create_device_id", lambda n: "d1")
     monkeypatch.setattr("system_info.watch.resolve_pc_name", lambda n: "PC")
+    monkeypatch.setattr(
+        "system_info.processes.collect_top_processes",
+        lambda interval=None: type(
+            "T",
+            (),
+            {
+                "to_dict": lambda self: {
+                    "cpu": [{"pid": 1, "name": "chrome", "cpu_percent": 12.0}],
+                    "ram": [],
+                    "network": [],
+                }
+            },
+        )(),
+    )
     loop = WatchLoop(_args())
     loop._agent_ws = FakeAgent()
     loop.send_live_metrics()
@@ -122,6 +138,7 @@ def test_send_live_metrics(monkeypatch):
     assert sent["pc_name"] == "PC"
     assert sent["cpu_percent"] == 11.0
     assert sent["recv_rate_bps"] == 6.0
+    assert sent["processes"]["cpu"][0]["name"] == "chrome"
 
 
 def test_send_live_metrics_noop_without_agent():

@@ -1,6 +1,6 @@
 # Project context — Desktop Monitoring App
 
-Last updated: 2026-08-15
+Last updated: 2026-08-17
 
 Use this file as the source of truth for current product behavior when continuing work.
 Detailed design notes also live under `docs/superpowers/specs/`.
@@ -76,7 +76,7 @@ uv run system-info --no-save                 # print only
 uv run system-info --heartbeat               # lightweight online ping (one-shot)
 uv run system-info --watch                   # always-on daemon: heartbeats, live metrics, hourly reports, tray Exit
 uv run system-info --pc-name Office-PC-3     # Windows custom name
-uv run system-info --printers | --disk | --network | --sys | --security | --health | --emails
+uv run system-info --printers | --disk | --network | --sys | --security | --health | --emails | --processes
 uv run system-info --print-jobs              # flush new print jobs, then exit
 uv run system-info --check-update            # Windows: compare local version to SYSTEM_INFO_UPDATE_URL
 uv run system-info --auto-update             # Windows: download + swap exe and relaunch --watch
@@ -92,6 +92,7 @@ Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`, `SYSTE
 - Agent WebSocket `hello` also marks the PC online immediately; the last `/ws/agent` disconnect marks it offline.
 - `GET /reports`, `GET /reports/{id}`, and `GET /reports/export` annotate every report with `online` (bool) + `last_seen`. Old reports without a `device_id` are marked offline.
 - The dashboard shows a **green (online) / red (offline)** dot next to each PC in the Fleet sidebar, Reports browser, and detail header. The client timer starts from **when the presence event was received**, not by comparing `last_seen` to the browser clock (avoids false-offline from clock skew).
+- **Windows activation** is on the hourly/Collect report (`os.windows_activation`), not the 5s live metrics stream. Dashboard: identity bar **Windows** (green Activated / amber Not activated or grace), Summary **Operating system** card, Overview Machine card. Fleet/Reports sidebar shows an amber badge when `licensed` is false. Older reports without the field omit it until Collect now / a new desktop build.
 - Admin **Ping** (`POST /commands/ping`) live-checks the agent socket (any OS); **Connect** (`POST /commands` type `reconnect`) asks an offline PC to reopen `/ws/agent` if the desktop app is running and has internet; **Connect all** (`POST /commands/batch` type `reconnect`) does the same for every PC currently shown in the Fleet sidebar list; **Collect now** (`POST /commands` type `collect`) asks that PC to send a fresh report. See Remote control.
 
 ### Identity
@@ -107,10 +108,10 @@ Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`, `SYSTE
 |-------|--------|--------|
 | `pc_name`, `device_id` | `device.py` | Always on save |
 | `app_version` | `version.py` | Desktop **System Info Reporter** version (e.g. `0.2.21`). Always on save. Dashboard shows it as `v0.2.21` on the machine identity bar, Fleet/Reports sidebar, and Overview Machine card. Older reports without the field show **—**. |
-| `os` | `os_info.py` | Includes hostname |
+| `os` | `os_info.py` | Includes hostname. On **Windows**, `windows_activation` from WMI `SoftwareLicensingProduct` (`licensed`, `status`, `label`, channel, last-5 `partial_key`). `null` on macOS and when WMI fails. |
 | `private_ip`, `public_ip`, `mac_address`, `mac_addresses` | `ip.py` | |
 | `location` | `geo.py` | ip-api.com |
-| `resources` | `resources.py` | CPU/RAM/swap + laptop `battery` + RAM `ram_speed_mhz`/`ram_type`. CPU **`cpu_brand`** is the vendor (Intel/AMD/Apple). **`cpu_name`** is the marketing model (`Intel Core i5-10400`, `AMD Ryzen 5 5600G`, `Apple M2`), not Windows `platform.processor()` (`Intel64 Family 6 Model …`). |
+| `resources` | `resources.py` | CPU/RAM/swap + laptop `battery` + RAM `ram_speed_mhz`/`ram_type`. CPU **`cpu_brand`** is the vendor (Intel/AMD/Apple). **`cpu_name`** is the marketing model (`Intel Core i5-10400`, `AMD Ryzen 7 5800X 8-Core Processor`, `Apple M2`). Vendor-only WMI labels (`AMD`, `Intel`) are treated as missing; Windows then uses registry `ProcessorNameString`. Dashboard **Name** does not copy Brand — it shows `cpu_name` or **—**, never `AMD`/`Intel` alone. Not Windows `platform.processor()` (`Intel64 Family 6 Model …`). |
 | `uptime` | `uptime.py` | Session + UTC day-wise on-seconds (`by_day`) |
 | `network` | `network.py` | NIC totals/rates |
 
@@ -119,6 +120,7 @@ Env: `SYSTEM_INFO_API_URL`, `SYSTEM_INFO_API_KEY`, `SYSTEM_INFO_PC_NAME`, `SYSTE
 | `security` | `security.py` | Internet-security products, see below |
 | `health` | `health.py` | Disk + battery health, see below |
 | `email_accounts` | `email_accounts.py` | POP/IMAP accounts, see below |
+| `processes` | `processes.py` | Top 10 CPU / RAM / network processes. Hourly + Collect now store a snapshot. **Live** lists ride `metrics.sample` every 5s (not Mongo). Network rank is open inet connection count, not bytes/sec. |
 
 ### Battery (`resources.battery`)
 
@@ -130,6 +132,22 @@ Laptop only (`psutil.sensors_battery()`), `null` on desktops:
 (plugged, 100%), `"discharging"` (on battery, shows `seconds_left`
 remaining). The dashboard Overview Battery card shows this state
 (Charging · time to full / Fully charged / On battery · time remaining).
+
+### Windows activation (`os.windows_activation`)
+
+Windows only (macOS `null`). WMI `SoftwareLicensingProduct` for the Windows
+app ID, SKUs that have a `PartialProductKey` (the installed product).
+
+`{ licensed, status, label, name, channel, partial_key, grace_minutes }`
+
+- `licensed` is true only when `LicenseStatus` is **1**.
+- `label`: Activated / Not activated / Out-of-box grace / Out-of-tolerance grace / Non-genuine grace / Notification / Extended grace.
+- `partial_key` is the last 5 characters only (never the full key).
+- Collected on hourly reports and Collect now, not the 5s live metrics stream.
+
+Dashboard: identity bar, Summary Operating system card, Overview Machine card.
+Amber Fleet/Reports badge when not licensed. Old reports without the field
+show nothing until a new desktop collect.
 
 ### Internet Security (`security`)
 
@@ -317,10 +335,10 @@ Sorted by `created_at` **descending** (newest first). Auth: admin JWT.
 
 - **`POST /heartbeat`** (API key) — desktop pings with `{device_id, pc_name}`; records `last_seen` in the `machines` collection.
 - **`GET/POST /reports`** — every saved report is annotated with `online` + `last_seen` and broadcasts a `report.created` event (full report incl. `printers`) over the WebSocket so the dashboard updates in realtime (print counts included).
-- **`WebSocket /ws`** (`routes/realtime.py`) — the dashboard connects with its JWT passed as the WS **subprotocol** (or `?token=`); only `admin`/`super_admin` roles are allowed; `Origin` must match `CORS_ORIGINS`. On connect the server sends `{"type":"hello"}` then seeds `{"type":"presence.changed","presence":{device_id,online,last_seen,pc_name}}` for every known machine (in-process snapshot). Events: `{"type":"report.created","report":{...},"ts":...}`, `{"type":"presence.changed","presence":{...},"ts":...}`, `{"type":"print.job","job":{...},"ts":...}`, and `{"type":"metrics.sample","metrics":{device_id,cpu_percent,ram_percent,ram_used,ram_total,bytes_sent,bytes_recv,send_rate_bps,recv_rate_bps},"ts":...}`.
+- **`WebSocket /ws`** (`routes/realtime.py`) — the dashboard connects with its JWT passed as the WS **subprotocol** (or `?token=`); only `admin`/`super_admin` roles are allowed; `Origin` must match `CORS_ORIGINS`. On connect the server sends `{"type":"hello"}` then seeds `{"type":"presence.changed","presence":{device_id,online,last_seen,pc_name}}` for every known machine (in-process snapshot). Events: `{"type":"report.created","report":{...},"ts":...}`, `{"type":"presence.changed","presence":{...},"ts":...}`, `{"type":"print.job","job":{...},"ts":...}`, and `{"type":"metrics.sample","metrics":{device_id,cpu_percent,ram_percent,ram_used,ram_total,bytes_sent,bytes_recv,send_rate_bps,recv_rate_bps,processes:{cpu,ram,network}},"ts":...}`.
 - **Live presence (Messenger-style):** `POST /heartbeat` and `POST /reports` (when `device_id` present) call `realtime.broadcast_presence(device_id, online=True, last_seen, pc_name)` so an open dashboard flips that PC's dot green instantly. The `broadcast_presence`/`update_presence` pair dedupes same-state flips. `realtime.py` keeps an in-process `_presence` map (`device_id -> {online,last_seen,pc_name}`); `presence_snapshot()` seeds newly-connected clients (notably **no initial fetch from Mongo** — the machine's known presence only reaches a fresh dashboard after a heartbeat/report from it, so a PC idle for >`ONLINE_TIMEOUT_SECONDS` starts grey until seen). The `presence.changed` payload goes out via the shared `_send` helper (never through `broadcast()`, which is `report.created`-only).
-- **Live CPU / RAM / network:** while `--watch` is running the agent sends a cheap sample every **5s** over `/ws/agent` (`{"type":"metrics", device_id, cpu_percent, ram_percent, ram_used, ram_total, bytes_sent, bytes_recv, send_rate_bps, recv_rate_bps}`). `live_metrics.py` uses non-blocking `psutil.cpu_percent(interval=None)` and rate-since-last-sample — no 3s network window, no WMI. The API broadcasts `metrics.sample` to dashboard `/ws`. **Not stored in Mongo.** Full hourly reports (and Collect now) still persist snapshots.
-- Dashboard `RealtimeProvider` (`src/components/realtime-provider.tsx`) holds one socket, reconnects with capped backoff, and invalidates `reports`/`reports-browse`/`report-pc` queries on each event — no manual Refresh needed. It keeps a live presence map and **client-side flips a dot to offline after `ONLINE_TIMEOUT_SECONDS` (300s)** of silence via per-device timers, so a machine that stops heartbeating goes red even without a server event (Messenger-style). `isOnline(deviceId)` and `lastSeenFor(deviceId, fallback)` feed the Fleet/Reports sidebar rows, report detail, `machine-detail` identity bar, and the **Overview** page totals/graphs. On `print.job` it invalidates `print-jobs`/`print-summary` so the Print Activity page updates live, and it bumps a per-device **`printing` badge** (60s window, `isPrinting(deviceId)`/`printingCount(deviceId)`) shown as an amber "printing"/"N prints" pill over the PC card in the Fleet + Reports sidebars (`printing-badge.tsx`). On `metrics.sample` it overlays **live CPU %, RAM %, and NIC rates** on Fleet/Reports sidebars and the selected PC Overview/Summary/Network cards (`metricsFor(deviceId)`). Samples are **not** written to Mongo. If no sample arrives for ~20s the UI falls back to the last saved report. When a **live** sample has CPU or RAM **≥ 90%**, Fleet/Reports cards show a blinking red **CPU high** / **RAM high** / **CPU+RAM high** badge (`load-warning-badge.tsx`) and Overview CPU/RAM tiles switch the Live pill to blinking **High**. Hourly report values alone do not trigger the badge.
+- **Live CPU / RAM / network / processes:** while `--watch` is running the agent sends a cheap sample every **5s** over `/ws/agent` (`{"type":"metrics", device_id, cpu_percent, ram_percent, ram_used, ram_total, bytes_sent, bytes_recv, send_rate_bps, recv_rate_bps, processes:{cpu,ram,network}}`). `live_metrics.py` uses non-blocking `psutil.cpu_percent(interval=None)` and rate-since-last-sample — no 3s network window, no WMI. `processes.py` with `interval=None` is also non-blocking (CPU % since the last 5s sample). The API broadcasts `metrics.sample` to dashboard `/ws`. **Not stored in Mongo.** Full hourly reports (and Collect now) still persist snapshots, including `processes`.
+- Dashboard `RealtimeProvider` (`src/components/realtime-provider.tsx`) holds one socket, reconnects with capped backoff, and invalidates `reports`/`reports-browse`/`report-pc` queries on each event — no manual Refresh needed. It keeps a live presence map and **client-side flips a dot to offline after `ONLINE_TIMEOUT_SECONDS` (300s)** of silence via per-device timers, so a machine that stops heartbeating goes red even without a server event (Messenger-style). `isOnline(deviceId)` and `lastSeenFor(deviceId, fallback)` feed the Fleet/Reports sidebar rows, report detail, `machine-detail` identity bar, and the **Overview** page totals/graphs. On `print.job` it invalidates `print-jobs`/`print-summary` so the Print Activity page updates live, and it bumps a per-device **`printing` badge** (60s window, `isPrinting(deviceId)`/`printingCount(deviceId)`) shown as an amber "printing"/"N prints" pill over the PC card in the Fleet + Reports sidebars (`printing-badge.tsx`). On `metrics.sample` it overlays **live CPU %, RAM %, NIC rates, and top processes** on Fleet/Reports sidebars, the selected PC Overview/Summary/Network cards, and the **Processes** tab (`metricsFor(deviceId)`). Samples are **not** written to Mongo. If no sample arrives for ~20s the UI falls back to the last saved report. When a **live** sample has CPU or RAM **≥ 90%**, Fleet/Reports cards show a blinking red **CPU high** / **RAM high** / **CPU+RAM high** badge (`load-warning-badge.tsx`) and Overview CPU/RAM tiles switch the Live pill to blinking **High**. Hourly report values alone do not trigger the badge.
 - Broadcasting is in-process (best-effort per uvicorn worker); the dashboard also refetches on reconnect so nothing is permanently lost.
 
 ### Print Activity (`/print-jobs`)
@@ -373,13 +391,14 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 
 ### Fleet (`/dashboard`)
 
-- Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports. Each PC row and the detail header show a **green (online) / red (offline)** status dot; data updates live via WebSocket. Each row also shows the desktop **App version** (`v0.2.21`) from the latest report when present. Live CPU/RAM ≥ **90%** shows a blinking red **CPU high** / **RAM high** / **CPU+RAM high** badge on the card (`load-warning-badge.tsx`). The detail identity bar lists Private IP, Public IP, MAC, and **App version**. For `admin`/`super_admin` the detail header has **Ping**, **Connect** (offline PCs), and **Collect now** (any OS) plus **Restart** / **Shut down** (Windows only). The sidebar footer **Connect all** button (`admin`/`super_admin`) sends `reconnect` to every PC in the current list. For `super_admin` the sidebar footer also shows an **Update all apps** button that pushes a `update` broadcast to every connected desktop app at once.
-- Detail tabs (`machine-detail.tsx`): **Summary (default) / Overview / Printers / Uptime / Storage / Health / Emails**.
-  - **Summary:** total uptime + session, network total + bandwidth, full CPU spec (**name** like `Intel Core i5-10400`, brand, arch/cores/clock), full RAM spec (total/available/free/swap + **bus speed** `ram_speed_mhz` + `ram_type`), storage health (SSD/HDD badge + brand, SMART, Healthy/Failing), battery health (condition, health %, cycle count), internet security, printers + total prints.
-  - **Overview:** CPU/RAM/swap tiles, compact UptimeState (session + days tracked) + DiskState (devices/used/free), location/machine, Battery stat card (laptops only), Network bandwidth chart, Printers, Security card.
+- Sidebar: filter by name, select PC, Refresh, **group filter**, link to Reports. Each PC row and the detail header show a **green (online) / red (offline)** status dot; data updates live via WebSocket. Each row also shows the desktop **App version** (`v0.2.21`) from the latest report when present. Live CPU/RAM ≥ **90%** shows a blinking red **CPU high** / **RAM high** / **CPU+RAM high** badge on the card (`load-warning-badge.tsx`). Windows that are **not licensed** show an amber activation badge (`activation-badge.tsx`). The detail identity bar lists Private IP, Public IP, MAC, **App version**, and **Windows** activation when present. For `admin`/`super_admin` the detail header has **Ping**, **Connect** (offline PCs), and **Collect now** (any OS) plus **Restart** / **Shut down** (Windows only). The sidebar footer **Connect all** button (`admin`/`super_admin`) sends `reconnect` to every PC in the current list. For `super_admin` the sidebar footer also shows an **Update all apps** button that pushes a `update` broadcast to every connected desktop app at once.
+- Detail tabs (`machine-detail.tsx`): **Summary (default) / Overview / Printers / Uptime / Storage / Processes / Health / Emails**.
+  - **Summary:** OS + Windows activation, total uptime + session, network total + bandwidth, full CPU spec (**name** like `AMD Ryzen 7 5800X 8-Core Processor` — not the vendor word `AMD` alone; **—** until a report has `cpu_name`), brand, arch/cores/clock), full RAM spec (total/available/free/swap + **bus speed** `ram_speed_mhz` + `ram_type`), storage health (SSD/HDD badge + brand, SMART, Healthy/Failing), battery health (condition, health %, cycle count), internet security, printers + total prints.
+  - **Overview:** CPU/RAM/swap tiles, compact UptimeState (session + days tracked) + DiskState (devices/used/free), location/machine (incl. Windows activation), Battery stat card (laptops only), Network bandwidth chart, Printers, Security card.
   - **Printers:** stat cards (connected printers, total prints, avg prints/printer) + per-group lists (USB/Network/Other) with name, port, IP, print counts.
   - **Uptime:** session + UTC day bars with BD labels; day bars load in batches (default 14, Load more for the rest).
   - **Storage:** device count + partition bars (blue &lt;50%, amber 50–80%, red &gt;80%).
+  - **Processes:** three lists (top CPU, top RAM, top network connections), updated live every **5s** over `/ws` while `--watch` is running (falls back to the last hourly/Collect snapshot). Network is open connection count, not per-process bytes. Idle/`kernel_task` omitted.
   - **Health:** storage health cards (SSD/HDD badge, SMART status, Internal/External, Healthy/Failing) + battery health (condition, health %, cycle count, max capacity).
 - Shared detail UI: `src/components/dashboard/machine-detail.tsx`.
 

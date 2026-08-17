@@ -13,12 +13,14 @@ import {
   groupOf,
   machineMac,
   fmtAppVersion,
+  isWindowsNotActivated,
 } from "@/lib/api";
 import { DashboardShell } from "./shell";
 import { MachineDetail } from "./machine-detail";
 import { StatusDot } from "./status-dot";
 import { PrintingBadge } from "./printing-badge";
 import { LoadWarningBadge, isHighLiveLoad } from "./load-warning-badge";
+import { ActivationBadge } from "./activation-badge";
 import { UpdateAppsButton } from "./update-apps-button";
 import { ConnectAllButton } from "./connect-all-button";
 import { useRealtime } from "../realtime-provider";
@@ -161,13 +163,15 @@ export function Dashboard() {
                   >
                     {(printing ||
                       isHighLiveLoad(live?.cpu_percent) ||
-                      isHighLiveLoad(live?.ram_percent)) && (
+                      isHighLiveLoad(live?.ram_percent) ||
+                      isWindowsNotActivated(m.latest.os)) && (
                       <span className="absolute right-2 top-1.5 flex flex-col items-end gap-1">
                         {printing && <PrintingBadge count={printCount} />}
                         <LoadWarningBadge
                           cpu={live?.cpu_percent}
                           ram={live?.ram_percent}
                         />
+                        <ActivationBadge os={m.latest.os} />
                       </span>
                     )}
                     <div className="flex items-start justify-between gap-2">

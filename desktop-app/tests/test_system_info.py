@@ -135,6 +135,111 @@ def test_collect_os_info_fields():
     assert info.system in ("Darwin", "Windows", "Linux")
     for field in ("system", "release", "machine", "processor", "python_version", "hostname"):
         assert getattr(info, field)
+    payload = info.to_dict()
+    assert "windows_activation" in payload
+    if info.system != "Windows":
+        assert payload["windows_activation"] is None
+
+
+def test_parse_windows_activation_licensed():
+    from system_info.os_info import parse_windows_activation
+
+    raw = json.dumps({
+        "Name": "Windows(R) Operating System, VOLUME_KMSCLIENT channel",
+        "Description": "Windows(R) Operating System, VOLUME_KMSCLIENT channel",
+        "LicenseStatus": 1,
+        "PartialProductKey": "3V66T",
+        "GracePeriodRemaining": 0,
+        "ProductKeyChannel": "Volume:GVLK",
+    })
+    info = parse_windows_activation(raw)
+    assert info["licensed"] is True
+    assert info["status"] == "licensed"
+    assert info["label"] == "Activated"
+    assert info["partial_key"] == "3V66T"
+    assert info["channel"] == "Volume:GVLK"
+    assert info["grace_minutes"] == 0
+
+
+def test_parse_windows_activation_unlicensed_prefers_licensed_sku():
+    from system_info.os_info import parse_windows_activation
+
+    raw = json.dumps([
+        {
+            "Name": "Windows",
+            "LicenseStatus": 0,
+            "PartialProductKey": "AAAAA",
+            "ProductKeyChannel": "Retail",
+        },
+        {
+            "Name": "Windows 11 Pro",
+            "LicenseStatus": 1,
+            "PartialProductKey": "BBBBB",
+            "ProductKeyChannel": "OEM",
+        },
+    ])
+    info = parse_windows_activation(raw)
+    assert info["licensed"] is True
+    assert info["partial_key"] == "BBBBB"
+    assert info["channel"] == "OEM"
+
+
+def test_parse_windows_activation_grace():
+    from system_info.os_info import parse_windows_activation
+
+    info = parse_windows_activation(json.dumps({
+        "Name": "Windows 10 Pro",
+        "LicenseStatus": 2,
+        "PartialProductKey": "XXXXX",
+        "GracePeriodRemaining": 43200,
+        "Description": "Windows(R) Operating System, VOLUME_KMSCLIENT channel",
+    }))
+    assert info["licensed"] is False
+    assert info["status"] == "oob_grace"
+    assert info["label"] == "Out-of-box grace"
+    assert info["grace_minutes"] == 43200
+    assert info["channel"] == "VOLUME_KMSCLIENT"
+
+
+def test_parse_windows_activation_empty():
+    from system_info.os_info import parse_windows_activation
+
+    assert parse_windows_activation("") is None
+    assert parse_windows_activation("null") is None
+    assert parse_windows_activation("{") is None
+
+
+def test_collect_os_info_skips_activation_off_windows(monkeypatch):
+    from system_info import os_info
+
+    monkeypatch.setattr(os_info.os, "name", "posix")
+
+    def boom(*a, **k):
+        raise AssertionError("no powershell")
+
+    monkeypatch.setattr(os_info, "_run", boom)
+    assert os_info._collect_windows_activation() is None
+
+
+def test_collect_windows_activation_uses_wmi_json(monkeypatch):
+    from system_info import os_info
+
+    monkeypatch.setattr(os_info.os, "name", "nt")
+    monkeypatch.setattr(
+        os_info,
+        "_run",
+        lambda cmd, timeout=20.0: json.dumps({
+            "Name": "Windows 11 Pro",
+            "LicenseStatus": 1,
+            "PartialProductKey": "9XXXX",
+            "ProductKeyChannel": "Retail",
+            "GracePeriodRemaining": 0,
+        }),
+    )
+    info = os_info._collect_windows_activation()
+    assert info["licensed"] is True
+    assert info["label"] == "Activated"
+    assert info["partial_key"] == "9XXXX"
 
 
 def test_location_to_dict():
@@ -184,6 +289,9 @@ def test_friendly_cpu_name_intel_core():
         "AMD Ryzen 5 5600G with Radeon Graphics"
     ) == "AMD Ryzen 5 5600G"
     assert _friendly_cpu_name("Apple M2 Pro") == "Apple M2 Pro"
+    assert _friendly_cpu_name("AMD") is None
+    assert _friendly_cpu_name("Intel") is None
+    assert _friendly_cpu_name("AMD Processor") is None
     assert (
         _friendly_cpu_name("Intel64 Family 6 Model 165 Stepping 3, GenuineIntel")
         is None
@@ -211,6 +319,28 @@ def test_collect_cpu_identity_windows_cim(monkeypatch):
     brand, name = resources._collect_cpu_identity()
     assert brand == "Intel"
     assert name == "Intel Core i5-10400"
+
+
+def test_collect_cpu_identity_windows_generic_wmi_uses_registry(monkeypatch):
+    from system_info import resources
+
+    monkeypatch.setattr(resources.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(resources.os, "name", "nt")
+    monkeypatch.setattr(
+        resources,
+        "_run",
+        lambda cmd, timeout=15.0: json.dumps(
+            {"Name": "AMD", "Manufacturer": "AuthenticAMD"}
+        ),
+    )
+    monkeypatch.setattr(
+        resources,
+        "_windows_cpu_name_registry",
+        lambda: "AMD Ryzen 7 5800X 8-Core Processor",
+    )
+    brand, name = resources._collect_cpu_identity()
+    assert brand == "AMD"
+    assert name == "AMD Ryzen 7 5800X 8-Core Processor"
 
 
 def test_collect_battery_status_charging(monkeypatch):

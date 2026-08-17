@@ -1,3 +1,13 @@
+export type WindowsActivation = {
+  licensed?: boolean | null;
+  status?: string | null;
+  label?: string | null;
+  name?: string | null;
+  channel?: string | null;
+  partial_key?: string | null;
+  grace_minutes?: number | null;
+};
+
 export interface Report {
   _id?: string;
   pc_name?: string | null;
@@ -10,6 +20,7 @@ export interface Report {
     python_version?: string;
     hostname?: string;
     platform_detail?: string;
+    windows_activation?: WindowsActivation | null;
   };
   private_ip?: string;
   public_ip?: string;
@@ -113,6 +124,11 @@ export interface Report {
       security?: string | null;
     }[];
   } | null;
+  processes?: {
+    cpu?: ProcessRow[];
+    ram?: ProcessRow[];
+    network?: ProcessRow[];
+  } | null;
   health?: {
     disks?: {
       name: string;
@@ -136,6 +152,16 @@ export interface Report {
   online?: boolean;
   last_seen?: number;
 }
+
+export type ProcessRow = {
+  pid?: number;
+  name?: string;
+  username?: string | null;
+  cpu_percent?: number;
+  memory_rss?: number;
+  memory_percent?: number;
+  connections?: number;
+};
 
 export interface ReportsResponse {
   total: number;
@@ -295,6 +321,25 @@ export function fmtAppVersion(version?: string | null): string | null {
   const value = (version || "").trim();
   if (!value) return null;
   return /^v/i.test(value) ? value : `v${value}`;
+}
+
+export function windowsActivation(
+  os?: Report["os"] | null,
+): WindowsActivation | null {
+  const info = os?.windows_activation;
+  if (!info || typeof info !== "object") return null;
+  return info;
+}
+
+export function isWindowsNotActivated(os?: Report["os"] | null): boolean {
+  const info = windowsActivation(os);
+  return info != null && info.licensed === false;
+}
+
+export function fmtWindowsActivation(os?: Report["os"] | null): string | null {
+  const info = windowsActivation(os);
+  if (!info) return null;
+  return (info.label || "").trim() || (info.licensed ? "Activated" : "Not activated");
 }
 
 /** Configured email accounts on a report. */
@@ -884,13 +929,25 @@ export function isOnline(m: Pick<MachineSummary, "latest">): boolean {
   return m.latest.online === true;
 }
 
-/** Marketing CPU name (Core i5-10400), never the Windows Family/Model string. */
+const CPU_FAMILY_JUNK = /family\s+\d+\s+model\s+\d+/i;
+const CPU_VENDOR_ONLY =
+  /^(amd|intel|apple|arm|qualcomm|authenticamd|genuineintel)(\s+processor)?$/i;
+
+/** True when the string is a real model, not vendor/Family-Model junk. */
+export function isUsefulCpuName(value?: string | null): boolean {
+  const text = (value || "").trim();
+  if (!text) return false;
+  if (CPU_FAMILY_JUNK.test(text) || CPU_VENDOR_ONLY.test(text)) return false;
+  return true;
+}
+
+/** Marketing CPU name (Ryzen 5 5600G / Core i5-10400). Never vendor-only or Family/Model. */
 export function cpuDisplayName(r: Report | undefined | null): string | null {
   const name = r?.resources?.cpu_name?.trim();
-  if (name) return name;
+  if (isUsefulCpuName(name)) return name!;
   const proc = r?.os?.processor?.trim();
-  if (proc && !/family\s+\d+\s+model\s+\d+/i.test(proc)) return proc;
-  return r?.resources?.cpu_brand?.trim() || null;
+  if (isUsefulCpuName(proc)) return proc!;
+  return null;
 }
 
 /** Print total across printer groups on a report. */

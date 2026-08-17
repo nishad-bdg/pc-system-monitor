@@ -9,7 +9,7 @@ exits after sending data.
 
 Timing:
   - heartbeat + print flush: every HEARTBEAT_INTERVAL (60s)
-  - live CPU/RAM/network sample: every METRICS_INTERVAL (5s) over /ws/agent
+  - live CPU/RAM/network + top processes: every METRICS_INTERVAL (5s) over /ws/agent
   - full hourly report: on start and then every HOUR_INTERVAL (60 min),
     aligned to the wall-clock hour so all PCs report around the same time
 """
@@ -31,7 +31,7 @@ from . import cli
 PRODUCT_NAME = getattr(_version, "PRODUCT_NAME", None) or "System Info Reporter"
 
 HEARTBEAT_INTERVAL = 60  # seconds — must stay well under the 300s online timeout
-METRICS_INTERVAL = 5  # seconds — live CPU/RAM/network gauges
+METRICS_INTERVAL = 5  # seconds — live CPU/RAM/network gauges + top processes
 HOUR_INTERVAL = 3600  # seconds (60 min)
 
 
@@ -53,6 +53,7 @@ def watch_args(base: argparse.Namespace, **overrides) -> argparse.Namespace:
         "security",
         "health",
         "emails",
+        "processes",
         "no_save",
         "json",
         "watch",
@@ -105,17 +106,22 @@ class WatchLoop:
         return bool(response)
 
     def send_live_metrics(self) -> None:
-        """Push a cheap CPU/RAM/network sample over `/ws/agent` (not Mongo)."""
+        """Push a cheap CPU/RAM/network + top-process sample over `/ws/agent`."""
         agent = getattr(self, "_agent_ws", None)
         if agent is None:
             return
         from .live_metrics import collect_live_metrics
+        from .processes import collect_top_processes
 
         pc_name = resolve_pc_name(self.args.pc_name)
         device_id = get_or_create_device_id(pc_name)
         sample = collect_live_metrics()
         sample["device_id"] = device_id
         sample["pc_name"] = pc_name
+        try:
+            sample["processes"] = collect_top_processes(interval=None).to_dict()
+        except Exception:
+            pass
         agent.send_metrics(sample)
 
     def _kick_agent_ws(self) -> bool:

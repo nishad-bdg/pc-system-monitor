@@ -2531,6 +2531,11 @@ def test_broadcast_metrics_skips_empty_device():
             "device_id": "dev-9",
             "cpu_percent": "11.5",
             "ram_percent": 20,
+            "processes": {
+                "cpu": [{"pid": 4, "name": "chrome", "cpu_percent": 12.5, "memory_rss": 1}],
+                "ram": [],
+                "network": [{"name": "", "pid": 9}],
+            },
         }))
     finally:
         realtime._send = original
@@ -2538,6 +2543,8 @@ def test_broadcast_metrics_skips_empty_device():
     assert sent[0]["type"] == "metrics.sample"
     assert sent[0]["metrics"]["device_id"] == "dev-9"
     assert sent[0]["metrics"]["cpu_percent"] == 11.5
+    assert sent[0]["metrics"]["processes"]["cpu"][0]["name"] == "chrome"
+    assert sent[0]["metrics"]["processes"]["network"] == []
 
 
 class ObjectIdStr(str):

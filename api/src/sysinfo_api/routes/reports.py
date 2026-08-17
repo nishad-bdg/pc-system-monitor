@@ -210,6 +210,7 @@ _CSV_COLUMN_PREFIXES = (
     "os.release",
     "os.machine",
     "os.hostname",
+    "os.windows_activation.",
     "private_ip",
     "public_ip",
     "mac_address",
@@ -239,6 +240,7 @@ _CSV_COLUMN_PREFIXES = (
     "security.",
     "health.",
     "email_accounts.",
+    "processes.",
     "mac_addresses.",
 )
 

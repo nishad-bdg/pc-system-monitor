@@ -21,12 +21,14 @@ import {
   sortMachines,
   subCategoryOf,
   fmtAppVersion,
+  isWindowsNotActivated,
 } from "@/lib/api";
 import { DashboardShell } from "@/components/dashboard/shell";
 import { MachineDetail } from "@/components/dashboard/machine-detail";
 import { StatusDot } from "@/components/dashboard/status-dot";
 import { PrintingBadge } from "@/components/dashboard/printing-badge";
 import { LoadWarningBadge, isHighLiveLoad } from "@/components/dashboard/load-warning-badge";
+import { ActivationBadge } from "@/components/dashboard/activation-badge";
 import { useRealtime } from "@/components/realtime-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -465,13 +467,15 @@ export function ReportsBrowser() {
                   >
                     {(printing ||
                       isHighLiveLoad(live?.cpu_percent) ||
-                      isHighLiveLoad(live?.ram_percent)) && (
+                      isHighLiveLoad(live?.ram_percent) ||
+                      isWindowsNotActivated(r.os)) && (
                       <span className="absolute right-2 top-1.5 flex flex-col items-end gap-1">
                         {printing && <PrintingBadge count={printCount} />}
                         <LoadWarningBadge
                           cpu={live?.cpu_percent}
                           ram={live?.ram_percent}
                         />
+                        <ActivationBadge os={r.os} />
                       </span>
                     )}
                     <div className="flex items-start justify-between gap-2">

@@ -17,6 +17,7 @@ from .uptime import collect_uptime
 from .security import collect_security_info
 from .health import collect_health_info
 from .email_accounts import collect_email_accounts
+from .processes import collect_top_processes
 from .device import get_or_create_device_id, resolve_pc_name
 from .startup import register_startup, unregister_startup
 from .update import check_for_update, maybe_auto_update
@@ -49,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--security", action="store_true", help="Only show internet-security software")
     parser.add_argument("--health", action="store_true", help="Only show storage/battery health")
     parser.add_argument("--emails", action="store_true", help="Only show configured POP/IMAP email accounts")
+    parser.add_argument("--processes", action="store_true", help="Only show top CPU/RAM/network processes")
     parser.add_argument("--json", action="store_true", help="Print output as JSON")
     parser.add_argument("--no-save", action="store_true", help="Do not save report to the API")
     parser.add_argument("--heartbeat", action="store_true", help="Only send a lightweight online heartbeat, then exit")
@@ -191,6 +193,7 @@ def run(args: argparse.Namespace) -> int:
     show_security = args.security or not specific(args)
     show_health = args.health or not specific(args)
     show_emails = args.emails or not specific(args)
+    show_processes = args.processes or not specific(args)
 
     _print(
         data,
@@ -204,6 +207,7 @@ def run(args: argparse.Namespace) -> int:
         show_security,
         show_health,
         show_emails,
+        show_processes,
         args,
     )
 
@@ -227,6 +231,7 @@ def specific(args: argparse.Namespace) -> bool:
         or args.security
         or args.health
         or args.emails
+        or args.processes
         or args.os
     )
 
@@ -291,6 +296,9 @@ def collect_all(args: argparse.Namespace) -> dict:
 
     if args.emails or not specific(args):
         data["email_accounts"] = collect_email_accounts().to_dict()
+
+    if args.processes or not specific(args):
+        data["processes"] = collect_top_processes(interval=0.15).to_dict()
 
     pc_name = resolve_pc_name(args.pc_name)
     device_id = get_or_create_device_id(pc_name)
@@ -381,6 +389,7 @@ def _print(
     show_security: bool,
     show_health: bool,
     show_emails: bool,
+    show_processes: bool,
     args: argparse.Namespace,
 ) -> None:
     if args.json:
@@ -579,6 +588,21 @@ def _print(
                 print(f"  - {label}{suffix}")
         else:
             print("  none detected")
+
+    if show_processes:
+        procs = data.get("processes") or {}
+        print("== Top processes ==")
+        for label, key in (("CPU", "cpu"), ("RAM", "ram"), ("Network", "network")):
+            rows = procs.get(key) or []
+            print(f"  {label}:")
+            if not rows:
+                print("    (none)")
+                continue
+            for row in rows:
+                extra = f" cpu={row.get('cpu_percent')}%"
+                extra += f" ram={_fmt_bytes(int(row.get('memory_rss') or 0))}"
+                extra += f" conn={row.get('connections') or 0}"
+                print(f"    - {row.get('name')} pid={row.get('pid')}{extra}")
 
 
 def main() -> int:

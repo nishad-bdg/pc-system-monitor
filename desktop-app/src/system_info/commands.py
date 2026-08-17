@@ -120,6 +120,7 @@ def collect_and_save(api_url: str, api_key: str, pc_name: str = "") -> tuple[boo
         security=False,
         health=False,
         emails=False,
+        processes=False,
         no_save=True,
         json=False,
         watch=False,
@@ -393,7 +394,7 @@ class WatchCommandSocket(threading.Thread):
                 pass
 
     def send_metrics(self, sample: dict) -> bool:
-        """Push a live CPU/RAM/network sample over the open agent socket."""
+        """Push a live CPU/RAM/network + top-process sample over the open agent socket."""
         payload = {"type": "metrics", **sample}
         with self._ws_lock:
             ws = self._ws

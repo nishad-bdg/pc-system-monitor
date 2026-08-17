@@ -18,6 +18,7 @@ class Report(BaseModel):
     security: dict | None = None
     health: dict | None = None
     email_accounts: dict | None = None
+    processes: dict | None = None
     app_version: str | None = None
     created_at: float | None = Field(default=None, description="Unix timestamp")
 

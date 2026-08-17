@@ -330,13 +330,18 @@ _CPU_FAMILY_JUNK = re.compile(
     r"family\s+\d+\s+model\s+\d+",
     re.IGNORECASE,
 )
+_CPU_VENDOR_ONLY = re.compile(
+    r"^(amd|intel|apple|arm|qualcomm|authenticamd|genuineintel)(\s+processor)?$",
+    re.IGNORECASE,
+)
 
 
 def _friendly_cpu_name(raw: str | None) -> str | None:
     """Turn WMI/registry names into a readable model (Core i5-10400, Ryzen 5…).
 
-    Drops `(R)`/`(TM)`, trailing `CPU @ 2.90GHz`, and Windows' useless
-    `Intel64 Family 6 Model 165 Stepping 3, GenuineIntel` string.
+    Drops `(R)`/`(TM)`, trailing `CPU @ 2.90GHz`, Windows' useless
+    `Intel64 Family 6 Model 165 Stepping 3, GenuineIntel` string, and
+    vendor-only labels (`AMD`, `Intel`) that are not a model name.
     """
     text = str(raw or "").strip()
     if not text or _CPU_FAMILY_JUNK.search(text):
@@ -347,7 +352,9 @@ def _friendly_cpu_name(raw: str | None) -> str | None:
     text = re.sub(r"\s+@\s*[\d.]+\s*GHz.*$", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\s+with Radeon Graphics.*$", "", text, flags=re.IGNORECASE)
     text = text.strip(" -")
-    return text or None
+    if not text or _CPU_VENDOR_ONLY.match(text):
+        return None
+    return text
 
 
 def _cpu_brand_from_name(name: str | None, manufacturer: str | None = None) -> str | None:
@@ -407,9 +414,10 @@ def _collect_cpu_identity() -> tuple[str | None, str | None]:
             [
                 "powershell",
                 "-NoProfile",
+                "-NonInteractive",
                 "-Command",
                 "Get-CimInstance Win32_Processor | "
-                "Select-Object Name, Manufacturer | ConvertTo-Json",
+                "Select-Object Name, Manufacturer | ConvertTo-Json -Compress",
             ]
         )
         name = None

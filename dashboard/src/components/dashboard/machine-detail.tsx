@@ -29,6 +29,10 @@ import {
   Report,
   fmtAppVersion,
   cpuDisplayName,
+  ProcessRow,
+  fmtWindowsActivation,
+  isWindowsNotActivated,
+  windowsActivation,
 } from "@/lib/api";
 import { StatusDot } from "./status-dot";
 import { useRealtime } from "../realtime-provider";
@@ -50,6 +54,7 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
     | "printers"
     | "uptime"
     | "storage"
+    | "processes"
     | "health"
     | "emails"
   >("summary");
@@ -93,6 +98,20 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         <IdentityItem label="Public IP" value={host.public_ip} />
         <IdentityItem label="MAC address" value={machineMac(host)} />
         <IdentityItem label="App version" value={fmtAppVersion(host.app_version)} />
+        {windowsActivation(host.os) && (
+          <span className="flex items-baseline gap-1.5 text-xs">
+            <span className="font-medium text-slate-500">Windows</span>
+            <span
+              className={`text-sm font-semibold ${
+                isWindowsNotActivated(host.os)
+                  ? "text-amber-700"
+                  : "text-emerald-700"
+              }`}
+            >
+              {fmtWindowsActivation(host.os)}
+            </span>
+          </span>
+        )}
         <div className="ml-auto">
           <RemoteActions
             apiUrl={API_URL}
@@ -161,6 +180,17 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
         </button>
         <button
           type="button"
+          onClick={() => setTab("processes")}
+          className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+            tab === "processes"
+              ? "border-blue-600 text-blue-700"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          Processes
+        </button>
+        <button
+          type="button"
           onClick={() => setTab("health")}
           className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition ${
             tab === "health"
@@ -207,6 +237,8 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
             No disk data for this PC yet.
           </div>
         )
+      ) : tab === "processes" ? (
+        <ProcessesSection snapshot={host.processes} live={live?.processes} />
       ) : tab === "health" ? (
         <HealthSection health={host.health ?? null} />
       ) : tab === "emails" ? (
@@ -285,6 +317,24 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
                 {fmtAppVersion(host.app_version)
                   ? ` · Reporter ${fmtAppVersion(host.app_version)}`
                   : ""}
+                {fmtWindowsActivation(host.os) ? (
+                  <>
+                    <span className="mx-1 text-slate-300">·</span>
+                    Windows:{" "}
+                    <span
+                      className={
+                        isWindowsNotActivated(host.os)
+                          ? "font-semibold text-amber-700"
+                          : "font-semibold text-emerald-700"
+                      }
+                    >
+                      {fmtWindowsActivation(host.os)}
+                    </span>
+                    {windowsActivation(host.os)?.channel
+                      ? ` · ${windowsActivation(host.os)?.channel}`
+                      : ""}
+                  </>
+                ) : null}
               </InfoBlock>
             )}
           </div>
@@ -536,11 +586,58 @@ function SummarySection({
         />
       </div>
 
+      {r.os && (
+        <InfoBlock title="Operating system">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm sm:grid-cols-3">
+            <span className="text-slate-500">System</span>
+            <span className="font-medium text-slate-900 sm:col-span-2">
+              {r.os.system || "—"} {r.os.release || ""}
+            </span>
+            <span className="text-slate-500">Hostname</span>
+            <span className="font-medium text-slate-900 sm:col-span-2">{r.os.hostname || "—"}</span>
+            <span className="text-slate-500">Architecture</span>
+            <span className="font-medium text-slate-900 sm:col-span-2">{r.os.machine || "—"}</span>
+            {windowsActivation(r.os) ? (
+              <>
+                <span className="text-slate-500">Windows</span>
+                <span
+                  className={`font-medium sm:col-span-2 ${
+                    isWindowsNotActivated(r.os)
+                      ? "text-amber-700"
+                      : "text-emerald-700"
+                  }`}
+                >
+                  {fmtWindowsActivation(r.os)}
+                  {windowsActivation(r.os)?.channel
+                    ? ` · ${windowsActivation(r.os)?.channel}`
+                    : ""}
+                </span>
+                {windowsActivation(r.os)?.partial_key ? (
+                  <>
+                    <span className="text-slate-500">Product key</span>
+                    <span className="font-mono font-medium text-slate-900 sm:col-span-2">
+                      XXXXX-{windowsActivation(r.os)?.partial_key}
+                    </span>
+                  </>
+                ) : null}
+              </>
+            ) : r.os.system?.toLowerCase().includes("windows") ? (
+              <>
+                <span className="text-slate-500">Windows</span>
+                <span className="font-medium text-slate-500 sm:col-span-2">
+                  Unknown — collect a new report
+                </span>
+              </>
+            ) : null}
+          </div>
+        </InfoBlock>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-2">
         <InfoBlock title="CPU (full spec)">
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
             <span className="text-slate-500">Name</span>
-            <span className="font-medium text-slate-900">
+            <span className="break-words font-medium text-slate-900">
               {cpuDisplayName(r) || "—"}
             </span>
             <span className="text-slate-500">Brand</span>
@@ -1600,6 +1697,127 @@ function diskBarColor(percent: number): string {
           sub={`${pct.toFixed(0)}% used`}
         />
       </div>
+    </div>
+  );
+}
+
+function ProcessesSection({
+  snapshot,
+  live,
+}: {
+  snapshot?: Report["processes"];
+  live?: Report["processes"];
+}) {
+  const liveCount =
+    (live?.cpu?.length ?? 0) +
+    (live?.ram?.length ?? 0) +
+    (live?.network?.length ?? 0);
+  const isLive = liveCount > 0;
+  const data = isLive ? live : snapshot;
+  const cpu = data?.cpu ?? [];
+  const ram = data?.ram ?? [];
+  const network = data?.network ?? [];
+  const empty = cpu.length === 0 && ram.length === 0 && network.length === 0;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm text-slate-500">
+          Top processes by CPU, RAM, and open network connections.
+        </p>
+        <span
+          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+            isLive
+              ? "bg-emerald-50 text-emerald-700"
+              : "bg-slate-100 text-slate-500"
+          }`}
+        >
+          {isLive ? "Live" : "Last report"}
+        </span>
+      </div>
+      {empty ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500">
+          {isLive
+            ? "Waiting for the next live sample…"
+            : "No process data yet. The desktop app must be running (--watch) so this tab updates every 5 seconds."}
+        </div>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-3">
+          <ProcessTable
+            title="CPU"
+            rows={cpu}
+            value={(row) => fmtPercent(row.cpu_percent)}
+            bar={(row) => row.cpu_percent ?? 0}
+          />
+          <ProcessTable
+            title="RAM"
+            rows={ram}
+            value={(row) => fmtBytes(row.memory_rss)}
+            bar={(row) => row.memory_percent ?? 0}
+          />
+          <ProcessTable
+            title="Network"
+            rows={network}
+            value={(row) =>
+              `${row.connections ?? 0} conn${row.connections === 1 ? "" : "s"}`
+            }
+            bar={(row) => Math.min(100, (row.connections ?? 0) * 5)}
+            hint="Open TCP/UDP connections (per-process bytes are not available)"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProcessTable({
+  title,
+  rows,
+  value,
+  bar,
+  hint,
+}: {
+  title: string;
+  rows: ProcessRow[];
+  value: (row: ProcessRow) => string;
+  bar: (row: ProcessRow) => number;
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+      <h3 className="text-sm font-semibold text-slate-700">{title}</h3>
+      {hint && <p className="mt-0.5 text-[11px] text-slate-400">{hint}</p>}
+      {rows.length === 0 ? (
+        <p className="mt-3 text-sm text-slate-400">None</p>
+      ) : (
+        <ul className="mt-3 space-y-2.5">
+          {rows.map((row) => {
+            const pct = Math.min(100, Math.max(0, bar(row)));
+            return (
+              <li key={`${title}-${row.pid}-${row.name}`}>
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="min-w-0 truncate text-sm font-medium text-slate-900">
+                    {row.name || "—"}
+                  </p>
+                  <p className="shrink-0 text-xs font-semibold tabular-nums text-slate-700">
+                    {value(row)}
+                  </p>
+                </div>
+                <p className="mt-0.5 truncate font-mono text-[11px] text-slate-400">
+                  pid {row.pid ?? "—"}
+                  {row.username ? ` · ${row.username}` : ""}
+                </p>
+                <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full rounded-full bg-blue-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

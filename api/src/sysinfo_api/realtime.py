@@ -251,8 +251,39 @@ def _as_int(value) -> int:
         return 0
 
 
+def _as_process_row(row: dict) -> dict:
+    username = str(row.get("username") or "").strip()
+    return {
+        "pid": _as_int(row.get("pid")),
+        "name": str(row.get("name") or "")[:80],
+        "username": username[:80] if username else None,
+        "cpu_percent": _as_float(row.get("cpu_percent")),
+        "memory_rss": _as_int(row.get("memory_rss")),
+        "memory_percent": _as_float(row.get("memory_percent")),
+        "connections": _as_int(row.get("connections")),
+    }
+
+
+def _as_process_lists(value) -> dict:
+    """Cap and sanitize live top-process lists (not stored)."""
+    if not isinstance(value, dict):
+        return {"cpu": [], "ram": [], "network": []}
+    out: dict[str, list] = {}
+    for key in ("cpu", "ram", "network"):
+        rows = value.get(key) or []
+        if not isinstance(rows, list):
+            out[key] = []
+            continue
+        clean = []
+        for row in rows[:10]:
+            if isinstance(row, dict) and row.get("name"):
+                clean.append(_as_process_row(row))
+        out[key] = clean
+    return out
+
+
 async def broadcast_metrics(sample: dict) -> None:
-    """Broadcast a live CPU/RAM/network sample. Not persisted."""
+    """Broadcast a live CPU/RAM/network + top-process sample. Not persisted."""
     device_id = str(sample.get("device_id") or "").strip()
     if not device_id:
         return
@@ -270,6 +301,7 @@ async def broadcast_metrics(sample: dict) -> None:
             "bytes_recv": _as_int(sample.get("bytes_recv")),
             "send_rate_bps": _as_float(sample.get("send_rate_bps")),
             "recv_rate_bps": _as_float(sample.get("recv_rate_bps")),
+            "processes": _as_process_lists(sample.get("processes")),
         },
         "ts": time.time(),
     })
