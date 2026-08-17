@@ -32,7 +32,7 @@ docs/          Specs/plans (superpowers)
 - **Roles:** `super_admin`, `admin`, `user` (see below).
 - **Dashboard → API:** NextAuth Credentials → `POST /auth/token` → JWT stored on session as `apiToken`. If the API is restarted and the stored JWT is rejected (401 on `/reports`), **sign out and back in** to refresh the token.
 - **Refresh tokens:** `POST /auth/token` also returns `refresh_token` (opaque, 30 days, stored hashed in Mongo `refresh_tokens` collection). `POST /auth/refresh` rotates it for a new access + refresh pair (old one revoked). `POST /auth/revoke` revokes a refresh token. The dashboard (`auth.ts`) stores the refresh token in the NextAuth JWT and silently calls `/auth/refresh` ~60s before the access token expires — no manual sign-in needed unless the refresh token itself is invalidated.
-- **Password change:** `POST /auth/change-password` (JWT) takes `current_password` + `new_password` (min 6 chars); verifies current, updates the hash, and revokes **all** refresh tokens so other sessions must re-login. UI: `UserNav` in every sidebar footer — profile avatar + name + role badge with **Change password** + **Sign out** buttons (`user-nav.tsx`, modal).
+- **Password change:** `POST /auth/change-password` (JWT) takes `current_password` + `new_password` (min 6 chars); verifies current, updates the hash, and revokes **all** refresh tokens so other sessions must re-login. UI: `UserNav` in the top bar — profile avatar + name + role badge with **Change password** + **Sign out** buttons (`user-nav.tsx`, modal).
 
 ### Roles & group-scoped access
 
@@ -47,7 +47,7 @@ docs/          Specs/plans (superpowers)
 - **Group scoping is enforced server-side**: for a `user`, `GET /reports`, `/reports/export`, and `/reports/{id}` are filtered to the user's groups; `GET /groups` returns only their groups. `admin`/`super_admin` are unrestricted.
 - **Sub-categories**: a many-to-many refinement of groups. A sub-category can belong to **many groups** (group doc holds `subcategory_ids`; sub-category holds `group_ids`) and holds its own `machine_keys`. A PC sits in **exactly one bucket** — a main group **or** one sub-category. Assigning a machine key to either bucket removes it from ALL other groups and sub-categories (enforced server-side via `remove_machine_keys_from_groups`/`remove_machine_keys_from_sub_categories`). Group scoping (filters + `user` role) automatically includes the sub-categories linked to a group, so a sub-category's PCs show up under every parent group. `GET /reports`/`/reports/export` accept `sub_category_id`; `GET /sub-categories` returns all for admin, only those linked to the user's groups otherwise; CRUD is `super_admin` only (groups CRUD is likewise `super_admin` only).
 - **API keys** (`/api-keys` page + routes) are **super admin only** (403 otherwise).
-- **Dashboard:** session carries `role` + `groups` (fetched from `/auth/me` at login); sidebar hides API Keys/Users unless `super_admin`; Groups page is read-only for `admin`/`user` (only `super_admin` can create/rename/delete groups/sub-categories or assign PCs).
+- **Dashboard:** session carries `role` + `groups` (fetched from `/auth/me` at login); top-bar nav hides API Keys/Users unless `super_admin`; Groups page is read-only for `admin`/`user` (only `super_admin` can create/rename/delete groups/sub-categories or assign PCs).
 - A `user` with no groups assigned sees no reports (empty fleet).
 
 ## Data flow
@@ -367,7 +367,8 @@ Desktops report **completed print jobs** so the dashboard shows who is printing 
 
 ### Visual direction
 
-Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
+Slate + blue: dark fleet sidebar (PC lists / filters), light detail panes.
+Page navigation lives in the **sticky top bar** (not the sidebar). Avoid purple/glow themes.
 
 ### Routes
 
@@ -375,6 +376,7 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 |------|---------|
 | `/login` | Admin sign-in |
 | `/overview` | **Overview** — live installed / online / offline counts + graphs (WebSocket) |
+| `/graphs` | **Graphs** — live CPU %, RAM %, and network Mbps for every PC (WebSocket, last 15 min) |
 | `/dashboard` | **Fleet** — sidebar PC list + live detail for selected machine |
 | `/reports` | **Reports browser** — filters + one row per PC |
 | `/reports/[key]` | PC detail from reports (encoded machine key) |
@@ -386,7 +388,7 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
 
 ### Overview (`/overview`)
 
-- Sidebar nav pill **Overview** (all roles). Live **installed / online / offline**
+- Top-bar nav **Overview** (all roles). Live **installed / online / offline**
   counts for the current fleet (`groupMachines` from reports; a `user` only
   sees their groups). Group filter in the left list scopes the totals.
 - Counts use the same live presence map as Fleet (`presence.changed` over
@@ -397,6 +399,15 @@ Slate + blue: dark fleet sidebar, light detail panes. Avoid purple/glow themes.
   **5s** and on each presence change (last **15 min**, client-side only — not
   stored in Mongo). LIVE badge matches Print Activity.
 - Left list is online-first with status dots; rows link to `/reports/[key]`.
+
+### Graphs (`/graphs`)
+
+- Top-bar nav **Graphs** (all roles). Three live charts — **CPU usage**, **RAM
+  usage**, **network usage** — one line per PC from `metrics.sample` (fallback
+  to the last saved report). Client-side history is the last **15 minutes** at
+  **5s**. Network is send+receive bit rate (Mbps) on the preferred NIC.
+  Group filter in the left list; rows link to `/reports/[key]`. Not stored in
+  Mongo.
 
 ### Fleet (`/dashboard`)
 
