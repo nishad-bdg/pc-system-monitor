@@ -70,6 +70,22 @@ function formatClock(ts: number): string {
   });
 }
 
+/** Axis/tick font size shrinks as more PC series are drawn. */
+function axisFontSize(seriesCount: number): number {
+  if (seriesCount <= 5) return 11;
+  if (seriesCount <= 12) return 10;
+  if (seriesCount <= 24) return 9;
+  return 8;
+}
+
+/** Legend font size shrinks as more PC series are drawn. */
+function legendFontSize(seriesCount: number): number {
+  if (seriesCount <= 5) return 12;
+  if (seriesCount <= 12) return 11;
+  if (seriesCount <= 24) return 10;
+  return 9;
+}
+
 function seriesKey(m: MachineSummary): string {
   return (m.deviceId || m.key).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 48);
 }
@@ -499,9 +515,9 @@ function PrintingChart({
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="time" fontSize={11} stroke="#94a3b8" minTickGap={32} />
+              <XAxis dataKey="time" fontSize={axisFontSize(series.length)} stroke="#94a3b8" minTickGap={32} />
               <YAxis
-                fontSize={11}
+                fontSize={axisFontSize(series.length)}
                 stroke="#94a3b8"
                 allowDecimals={false}
                 width={32}
@@ -512,7 +528,10 @@ function PrintingChart({
                   String(name),
                 ]}
               />
-              <Legend />
+              <Legend
+                wrapperStyle={{ fontSize: legendFontSize(series.length), lineHeight: `${legendFontSize(series.length) + 6}px` }}
+                iconSize={legendFontSize(series.length) - 2}
+              />
               {series.map((s) => (
                 <Bar
                   key={s.key}
@@ -561,9 +580,9 @@ function UsageChart({
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="time" fontSize={11} stroke="#94a3b8" minTickGap={32} />
+              <XAxis dataKey="time" fontSize={axisFontSize(series.length)} stroke="#94a3b8" minTickGap={32} />
               <YAxis
-                fontSize={11}
+                fontSize={axisFontSize(series.length)}
                 stroke="#94a3b8"
                 domain={domain}
                 unit={unit}
@@ -575,7 +594,10 @@ function UsageChart({
                   String(name),
                 ]}
               />
-              <Legend />
+              <Legend
+                wrapperStyle={{ fontSize: legendFontSize(series.length), lineHeight: `${legendFontSize(series.length) + 6}px` }}
+                iconSize={legendFontSize(series.length) - 2}
+              />
               {series.map((s) => (
                 <Line
                   key={s.key}
