@@ -61,9 +61,11 @@ export type LiveMetricsSample = {
   ts?: number;
 };
 
-/** Live Ethernet send/receive in Mbps for the last few minutes. */
+/** Live CPU/RAM + Ethernet send/receive for the last few minutes. */
 export type LiveEthPoint = {
   t: number;
+  cpu?: number;
+  ram?: number;
   send: number;
   recv: number;
 };
@@ -229,6 +231,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         const recvBps = sample.eth_recv_rate_bps ?? sample.recv_rate_bps ?? 0;
         const point: LiveEthPoint = {
           t: now,
+          cpu: sample.cpu_percent,
+          ram: sample.ram_percent,
           send: (Math.max(0, sendBps) * 8) / 1_000_000,
           recv: (Math.max(0, recvBps) * 8) / 1_000_000,
         };

@@ -241,7 +241,14 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
           </div>
         )
       ) : tab === "processes" ? (
-        <ProcessesSection snapshot={host.processes} live={live?.processes} />
+        <ProcessesSection
+          snapshot={host.processes}
+          live={live?.processes}
+          liveMetrics={live}
+          liveSeries={metricsHistoryFor(machine.deviceId)}
+          cpuSeries={timeSeries}
+          bandwidthSeries={bandwidthSeries}
+        />
       ) : tab === "health" ? (
         <HealthSection health={host.health ?? null} />
       ) : tab === "emails" ? (
@@ -1818,9 +1825,17 @@ function diskBarColor(percent: number): string {
 function ProcessesSection({
   snapshot,
   live,
+  liveMetrics,
+  liveSeries,
+  cpuSeries,
+  bandwidthSeries,
 }: {
   snapshot?: Report["processes"];
   live?: Report["processes"];
+  liveMetrics?: LiveMetricsSample | null;
+  liveSeries?: LiveEthPoint[];
+  cpuSeries: { time: string; cpu: number; ram: number; swap: number }[];
+  bandwidthSeries: { time: string; upload: number; download: number }[];
 }) {
   const liveCount =
     (live?.cpu?.length ?? 0) +
@@ -1833,8 +1848,167 @@ function ProcessesSection({
   const network = data?.network ?? [];
   const empty = cpu.length === 0 && ram.length === 0 && network.length === 0;
 
+  const hasLiveHistory = (liveSeries ?? []).length > 1;
+  const usageChart: {
+    time: string;
+    cpu: number | null;
+    ram: number | null;
+    swap: number | null;
+    send: number | null;
+    recv: number | null;
+  }[] = hasLiveHistory
+    ? (liveSeries ?? []).map((p) => ({
+        time: fmtClock(p.t),
+        cpu: numberOrNull(p.cpu),
+        ram: numberOrNull(p.ram),
+        swap: null,
+        send: p.send,
+        recv: p.recv,
+      }))
+    : cpuSeries.map((p) => ({
+        time: p.time,
+        cpu: p.cpu,
+        ram: p.ram,
+        swap: p.swap,
+        send: null,
+        recv: null,
+      }));
+
+  const liveMax = usageChart.reduce(
+    (m, p) => Math.max(m, p.send ?? 0, p.recv ?? 0),
+    0,
+  );
+  const liveDomainMax = Math.max(0.1, Math.ceil(liveMax * 1.2 * 10) / 10);
+
+  const hasCpuRamSnapshot = cpuSeries.some((p) => p.cpu > 0 || p.ram > 0);
+  const liveOnline = liveMetrics != null && (liveMetrics.cpu_percent != null || liveMetrics.ram_percent != null);
+
   return (
     <div className="space-y-6">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm font-medium text-slate-700">
+            Process &amp; network usage over time
+          </h2>
+          <span
+            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+              hasLiveHistory || liveOnline
+                ? "bg-emerald-50 text-emerald-700"
+                : "bg-slate-100 text-slate-500"
+            }`}
+          >
+            {hasLiveHistory || liveOnline ? "Live" : "Last report"}
+          </span>
+        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          {hasLiveHistory || liveOnline
+            ? "CPU / RAM % and Ethernet send / receive · live over WebSocket"
+            : hasCpuRamSnapshot
+              ? "Hourly report snapshots of CPU, RAM and network rates"
+              : "No process or network usage history yet."}
+        </p>
+
+        {(hasLiveHistory || hasCpuRamSnapshot) && (
+          <div className="mt-4">
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={usageChart} margin={{ left: 4, right: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="time" fontSize={11} stroke="#94a3b8" minTickGap={24} />
+                <YAxis
+                  yAxisId="percent"
+                  domain={[0, 100]}
+                  fontSize={11}
+                  stroke="#94a3b8"
+                  width={34}
+                />
+                <YAxis
+                  yAxisId="mbps"
+                  orientation="right"
+                  domain={[0, liveDomainMax]}
+                  fontSize={11}
+                  stroke="#94a3b8"
+                  unit=" Mbps"
+                  width={56}
+                />
+                <Tooltip
+                  formatter={(value, name) => {
+                    if (name === "CPU %" || name === "RAM %")
+                      return [fmtPercent(Number(value ?? 0)), name];
+                    return [`${Number(value ?? 0).toFixed(2)} Mbps`, name];
+                  }}
+                />
+                <Legend />
+                {hasLiveHistory ? (
+                  <>
+                    <Line
+                      yAxisId="percent"
+                      type="monotone"
+                      dataKey="cpu"
+                      stroke="#2563eb"
+                      name="CPU %"
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                    />
+                    <Line
+                      yAxisId="percent"
+                      type="monotone"
+                      dataKey="ram"
+                      stroke="#0f766e"
+                      name="RAM %"
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                    />
+                    <Line
+                      yAxisId="mbps"
+                      type="monotone"
+                      dataKey="recv"
+                      stroke="#f59e0b"
+                      name="Receive Mbps"
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                    />
+                    <Line
+                      yAxisId="mbps"
+                      type="monotone"
+                      dataKey="send"
+                      stroke="#ea580c"
+                      name="Send Mbps"
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Line
+                      yAxisId="percent"
+                      type="monotone"
+                      dataKey="cpu"
+                      stroke="#2563eb"
+                      name="CPU %"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                    <Line
+                      yAxisId="percent"
+                      type="monotone"
+                      dataKey="ram"
+                      stroke="#0f766e"
+                      name="RAM %"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  </>
+                )}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-sm text-slate-500">
           Top processes by CPU, RAM, and open network connections.
@@ -1882,6 +2056,10 @@ function ProcessesSection({
       )}
     </div>
   );
+}
+
+function numberOrNull(value: number | undefined): number | null {
+  return value == null ? null : value;
 }
 
 function ProcessTable({
