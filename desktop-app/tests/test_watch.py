@@ -302,11 +302,16 @@ def test_tray_icon_shows_product_name(monkeypatch):
     labels = [getattr(item, "text", None) for item in created["menu"].items]
     assert f"{PRODUCT_NAME} — online" in labels
     assert "Exit" in labels
+    status_item = next(
+        item for item in created["menu"].items
+        if getattr(item, "text", None) == f"{PRODUCT_NAME} — online"
+    )
     update_item = next(
         item for item in created["menu"].items
         if getattr(item, "text", None) == "Check for updates…"
     )
-    assert update_item.default is True
+    assert status_item.default is True
+    assert update_item.default is False
 
 
 def test_watch_product_name_survives_missing_version_attr():
@@ -328,8 +333,9 @@ def test_watch_product_name_survives_missing_version_attr():
     icon = FakeIcon()
     _show_tray(icon)
     assert icon.visible is True
-    assert seen["title"] == PRODUCT_NAME
-    assert "system tray" in seen["message"].lower()
+    if os.name != "nt":
+        assert seen["title"] == PRODUCT_NAME
+        assert "system tray" in seen["message"].lower()
 
 
 def test_handle_restart_failure_reports_false(monkeypatch):
@@ -343,7 +349,13 @@ def test_handle_restart_failure_reports_false(monkeypatch):
     assert loop.handle_restart() is False
 
 
-def test_full_report_stops_when_update_staged(monkeypatch):
+def test_full_report_does_not_stop_for_hourly_update(monkeypatch):
+    """Hourly/startup collect must not exit the watcher to apply an update.
+
+    On Windows that collect can take a few minutes; stopping afterwards is
+    what made the tray vanish when the updater batch failed to relaunch.
+    Updates still apply from tray Check for updates and the remote command.
+    """
     loop = WatchLoop(_args())
     monkeypatch.setattr("system_info.cli.collect_all", lambda args: {})
     monkeypatch.setattr("system_info.cli.save_report", lambda *a, **k: None)
@@ -351,7 +363,7 @@ def test_full_report_stops_when_update_staged(monkeypatch):
     stopped = []
     monkeypatch.setattr(loop, "_stop_for_update", lambda: stopped.append(True))
     loop.full_report()
-    assert stopped == [True]
+    assert stopped == []
 
 
 def test_full_report_leaves_watcher_running_when_no_update(monkeypatch):
@@ -365,7 +377,46 @@ def test_full_report_leaves_watcher_running_when_no_update(monkeypatch):
     assert stopped == []
 
 
-def test_run_tray_or_wait_sets_stop_when_run_returns(monkeypatch):
+def test_run_tray_or_wait_keeps_running_when_run_returns(monkeypatch, tmp_path):
+    """pystray run() can return on Windows without Exit (Explorer, balloon).
+
+    That must recreate the icon, not stop the watcher.
+    """
+    from system_info.watch import WatchLoop, _run_tray_or_wait, _show_tray
+
+    seen = {}
+    runs = {"n": 0}
+
+    class Tray:
+        visible = False
+
+        def run(self, setup=None):
+            seen["setup"] = setup
+            runs["n"] += 1
+            if setup:
+                setup(self)
+
+    loop = WatchLoop(_args())
+    monkeypatch.setattr(
+        "system_info.win_runtime.crash_log_path", lambda: tmp_path / "crash.log"
+    )
+    monkeypatch.setattr("system_info.win_runtime.user_config_dir", lambda: tmp_path)
+
+    def fake_wait(timeout=None):
+        if runs["n"] >= 1:
+            loop._stop.set()
+            return True
+        return False
+
+    monkeypatch.setattr(loop._stop, "wait", fake_wait)
+    monkeypatch.setattr("system_info.watch._tray_icon", lambda loop: Tray())
+    _run_tray_or_wait(loop, Tray())
+    assert seen["setup"] is _show_tray
+    assert runs["n"] >= 1
+    assert (tmp_path / "crash.log").is_file()
+
+
+def test_run_tray_or_wait_exits_when_stop_already_set(monkeypatch):
     from system_info.watch import WatchLoop, _run_tray_or_wait, _show_tray
 
     seen = {}
@@ -377,6 +428,7 @@ def test_run_tray_or_wait_sets_stop_when_run_returns(monkeypatch):
             seen["setup"] = setup
             if setup:
                 setup(self)
+            loop._stop.set()
 
     loop = WatchLoop(_args())
     _run_tray_or_wait(loop, Tray())
@@ -384,17 +436,30 @@ def test_run_tray_or_wait_sets_stop_when_run_returns(monkeypatch):
     assert loop._stop.is_set()
 
 
-def test_run_tray_or_wait_falls_back_when_setup_unsupported():
+def test_run_tray_or_wait_falls_back_when_setup_unsupported(monkeypatch):
     from system_info.watch import WatchLoop, _run_tray_or_wait
+
+    runs = {"n": 0}
 
     class Tray:
         visible = False
 
         def run(self):
+            runs["n"] += 1
             self.visible = True
 
     loop = WatchLoop(_args())
+
+    def fake_wait(timeout=None):
+        if runs["n"] >= 1:
+            loop._stop.set()
+            return True
+        return False
+
+    monkeypatch.setattr(loop._stop, "wait", fake_wait)
+    monkeypatch.setattr("system_info.watch._tray_icon", lambda loop: Tray())
     _run_tray_or_wait(loop, Tray())
+    assert runs["n"] >= 1
     assert loop._stop.is_set()
 
 
@@ -447,7 +512,15 @@ def test_run_tray_or_wait_recovers_by_recreating_icon(monkeypatch, tmp_path):
         return GoodTray() if attempt["n"] >= 1 else FlakyTray()
 
     loop = WatchLoop(_args())
-    monkeypatch.setattr(loop._stop, "wait", lambda *a: waited.append(True))
+
+    def fake_wait(timeout=None):
+        waited.append(True)
+        if attempt["n"] >= 2:
+            loop._stop.set()
+            return True
+        return False
+
+    monkeypatch.setattr(loop._stop, "wait", fake_wait)
     monkeypatch.setattr(
         "system_info.win_runtime.crash_log_path", lambda: tmp_path / "crash.log"
     )

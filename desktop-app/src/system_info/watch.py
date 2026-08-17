@@ -70,6 +70,7 @@ class WatchLoop:
     def __init__(self, args: argparse.Namespace):
         self.args = args
         self._stop = threading.Event()
+        self._report_lock = threading.Lock()
         # Seeded at start so the immediate startup report is not duplicated;
         # the next hourly report fires ~HOUR_INTERVAL later.
         self._last_full = time.time()
@@ -152,16 +153,25 @@ class WatchLoop:
         full_args = watch_args(self.args, no_save=True)
         data = cli.collect_all(full_args)
         cli.save_report(data, self.args.api_url, self.args.api_key)
-        # Quiet release check, same as one-shot hourly runs. If a newer
-        # build is staged the updater batch waits for this process to exit,
-        # swaps the exe, and relaunches `--watch` (tray icon).
-        from .update import maybe_auto_update
+        # Do not apply+exit here. The first Windows collect can take minutes
+        # (WMI, printers, Outlook). Stopping afterwards left PCs with no tray
+        # whenever the updater batch failed to relaunch. Updates still apply
+        # from tray "Check for updates…" and the admin remote `update` command.
 
-        try:
-            if maybe_auto_update(quiet=True):
-                self._stop_for_update()
-        except Exception:
-            pass
+    def _start_full_report(self) -> None:
+        """Collect in a side thread so 60s heartbeats never stall on WMI."""
+        if not self._report_lock.acquire(blocking=False):
+            return
+
+        def _job() -> None:
+            try:
+                self.full_report()
+            except Exception:
+                pass
+            finally:
+                self._report_lock.release()
+
+        threading.Thread(target=_job, name="full-report", daemon=True).start()
 
     def should_full_report(self, now: float) -> bool:
         if now - self._last_full < HOUR_INTERVAL:
@@ -177,10 +187,7 @@ class WatchLoop:
             self.heartbeat()
         except Exception:
             pass
-        try:
-            self.full_report()
-        except Exception:
-            pass
+        self._start_full_report()
         last_heartbeat = time.time()
         while not self._stop.is_set():
             self._stop.wait(METRICS_INTERVAL)
@@ -198,10 +205,7 @@ class WatchLoop:
                 except Exception:
                     pass
             if self.should_full_report(now):
-                try:
-                    self.full_report()
-                except Exception:
-                    pass
+                self._start_full_report()
 
     def run_blocking(self) -> None:
         """Run the loop (optionally with a tray icon) until stopped."""
@@ -363,18 +367,21 @@ def _run_tray_or_wait(loop: "WatchLoop", tray) -> None:
                 # Very old pystray builds lack setup=: run() then shows the
                 # icon from its own setup thread, also after the loop exists.
                 tray.run()
-            # run() returns only after the icon has been stopped (Exit/Restart).
-            break
         except Exception as exc:
             log_watch_error("system tray failed; recreating icon", exc)
+        if loop._stop.is_set():
+            return
+        # run() returned without Exit/Restart/update. On Windows this happens
+        # when Explorer restarts, a balloon notification expires, or the
+        # watchdog force-stops a dead icon. Recreate — do not kill --watch.
+        log_watch_error("system tray stopped unexpectedly; recreating icon")
         tray = _tray_icon(loop)
         if tray is None:
             loop._stop.wait()
             return
         _start_tray_watchdog(loop, tray)
         if loop._stop.wait(5):
-            break
-    loop._stop.set()
+            return
 
 
 def _start_tray_watchdog(loop: "WatchLoop", tray) -> None:
@@ -437,6 +444,10 @@ def _safe_icon_stop(tray) -> None:
 def _show_tray(icon) -> None:
     """Make the notify icon visible and announce the product on first show."""
     icon.visible = True
+    # Windows: skip the balloon. NIF_INFO can drop the notify icon after the
+    # banner expires, which used to make pystray run() return and kill --watch.
+    if os.name == "nt":
+        return
     if hasattr(icon, "notify"):
         try:
             icon.notify(f"{PRODUCT_NAME} is running in the system tray.", PRODUCT_NAME)
@@ -504,10 +515,13 @@ def _tray_icon(loop: "WatchLoop"):
             _make_image(),
             PRODUCT_NAME,
             menu=pystray.Menu(
-                pystray.MenuItem(f"{PRODUCT_NAME} — online", lambda: None, enabled=False),
                 pystray.MenuItem(
-                    "Check for updates…", _on_check_update, default=True
+                    f"{PRODUCT_NAME} — online",
+                    lambda: None,
+                    enabled=False,
+                    default=True,
                 ),
+                pystray.MenuItem("Check for updates…", _on_check_update),
                 pystray.MenuItem("Restart", _on_restart),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Exit", _on_exit),

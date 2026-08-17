@@ -463,21 +463,26 @@ Tag `v*` (or Actions → Windows Release) builds the exe + Inno installer and pu
   with no one-shot flags defaults to `--watch` (double-click / Start Menu
   shows the tray).
 - **Always-on watcher (`--watch`):** persistent tray icon (**Check for
-  updates…** is the left-click default, plus **Restart**, **Exit**). Heartbeat
+  updates…**, **Restart**, **Exit**; left-click does not start an update). Heartbeat
   + print flush every **60s**, live CPU/RAM/network sample every **5s** over
-  `/ws/agent`, full report hourly. Stays open until tray Exit.
+  `/ws/agent`, full report hourly **on a side thread** so a slow Windows collect
+  (WMI/printers/Outlook) never stalls heartbeats. Stays open until tray Exit.
+  If the pystray message loop returns without Exit (Explorer restart, balloon
+  timeout), the icon is **recreated** — the watcher does not exit.
   One named mutex (`Local\RGM.SystemInfoReporter.Watch`) so installer + Run
   key + shortcuts cannot stack copies. If the tray backend fails, the
   heartbeat loop **keeps running** and appends `%APPDATA%\system-info\crash.log`
   (frozen crashes also MessageBox that path). Tray **Restart** spawns a
   detached `--watch` and stops this instance.
-- **Updates:** `SYSTEM_INFO_UPDATE_URL` JSON manifest. Hourly check, tray
-  Check for updates, and remote `update` all use `apply_update_and_restart`:
-  wait for PID, swap exe, PowerShell `Start-Process … --watch` so the **tray
-  comes back** (cmd `start ""` from a `CREATE_NO_WINDOW` updater often never
-  launched the new process). Do not use stage-only `apply_windows_update` for
-  those paths. Re-running the Inno installer **taskkill**s a live watcher
-  before replacing the exe, then launches `--watch` again.
+- **Updates:** `SYSTEM_INFO_UPDATE_URL` JSON manifest. Tray **Check for
+  updates…** and remote `update` use `apply_update_and_restart`: wait for PID,
+  swap exe, PowerShell `Start-Process … --watch` so the **tray comes back**
+  (cmd `start ""` from a `CREATE_NO_WINDOW` updater often never launched the
+  new process). The hourly/startup full report **does not** apply+exit — that
+  left Windows PCs dead after a few minutes when relaunch failed. Do not use
+  stage-only `apply_windows_update` for the apply paths. Re-running the Inno
+  installer **taskkill**s a live watcher before replacing the exe, then
+  launches `--watch` again.
 - **Auto-start on logon:** first run registers HKCU `...\Run` →
   `SystemInfoReporter` = `"system-info.exe" --watch`. Marker
   `%APPDATA%\system-info\startup-registered`. `SYSTEM_INFO_NO_STARTUP=1` skips.
