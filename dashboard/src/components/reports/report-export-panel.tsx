@@ -646,7 +646,7 @@ export function ReportExportPanel() {
             ]),
           },
           {
-            title: "Total print count by PC",
+            title: "Total printer connected count by PC",
             head: ["PC", "Device ID", "Printers", "Total prints"],
             body: lifetimePrintRows.map((r) => [
               r.name,
