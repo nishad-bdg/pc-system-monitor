@@ -431,7 +431,7 @@ Dashboard **Refresh** only reloads API data. It does **not** push collect comman
 
 ## Windows packaging (release updates)
 
-See `desktop-app/packaging/windows/README.md`. Current desktop version: **0.2.17**.
+See `desktop-app/packaging/windows/README.md`. Current desktop version: **0.2.26**.
 
 Tag `v*` (or Actions → Windows Release) builds the exe + Inno installer and publishes a GitHub Release (`system-info.exe`, `SystemInfoSetup-<ver>.exe`, `release-manifest.json`). Render dashboard rebuilds only when `dashboard/**` or `render.yaml` change (`buildFilter`).
 
