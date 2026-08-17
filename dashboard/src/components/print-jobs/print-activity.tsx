@@ -7,22 +7,35 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 import {
+  fetchGroups,
   fetchPrintJobs,
   fetchPrintSummary,
+  fetchReports,
+  fetchSubCategories,
   fmtRelative,
+  Group,
+  groupMachines,
+  groupOf,
+  MachineSummary,
   PrintJob,
+  SubCategory,
+  subCategoryOf,
 } from "@/lib/api";
 import { DashboardShell } from "@/components/dashboard/shell";
 import { PrintingBadge } from "@/components/dashboard/printing-badge";
 import { useRealtime } from "@/components/realtime-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const MAX_BAR = "#059669";
+const MIN_BAR = "#d97706";
+const OTHER_BAR = "#2563eb";
 
 type PcPrintGroup = {
   key: string;
@@ -30,6 +43,12 @@ type PcPrintGroup = {
   deviceId?: string;
   jobs: PrintJob[];
   last: number;
+};
+
+type PcPrintRow = {
+  key: string;
+  name: string;
+  prints: number;
 };
 
 function groupJobsByPc(jobs: PrintJob[]): PcPrintGroup[] {
@@ -49,15 +68,40 @@ function groupJobsByPc(jobs: PrintJob[]): PcPrintGroup[] {
   return [...map.values()].sort((a, b) => b.last - a.last);
 }
 
+function machineInGroup(
+  machine: MachineSummary,
+  groupId: string,
+  groups: Group[],
+  subCategories: SubCategory[],
+): boolean {
+  if (groupOf(machine, groups)?.id === groupId) return true;
+  const sub = subCategoryOf(machine, subCategories);
+  return !!sub && sub.group_ids.includes(groupId);
+}
+
+function machineForJob(
+  job: PrintJob,
+  machines: MachineSummary[],
+): MachineSummary | null {
+  if (job.device_id) {
+    const byId = machines.find((m) => m.deviceId === job.device_id);
+    if (byId) return byId;
+  }
+  const name = (job.pc_name || "").trim().toLowerCase();
+  if (!name) return null;
+  return machines.find((m) => m.name.toLowerCase() === name) ?? null;
+}
+
 export function PrintActivity() {
   const { data: session } = useSession();
   const apiToken = session?.user?.apiToken;
   const { connected, isPrinting, printingCount } = useRealtime();
   const [openKeys, setOpenKeys] = useState<Record<string, boolean>>({});
+  const [groupFilter, setGroupFilter] = useState("");
 
   const { data: jobsResp, isLoading, isError } = useQuery({
     queryKey: ["print-jobs"],
-    queryFn: () => fetchPrintJobs(API_URL, apiToken ?? "", 100),
+    queryFn: () => fetchPrintJobs(API_URL, apiToken ?? "", 500),
     enabled: !!apiToken,
     refetchInterval: 60_000,
   });
@@ -69,18 +113,99 @@ export function PrintActivity() {
     refetchInterval: 60_000,
   });
 
+  const { data: orgGroups = [] } = useQuery({
+    queryKey: ["groups"],
+    queryFn: () => fetchGroups(API_URL, apiToken ?? ""),
+    enabled: !!apiToken,
+  });
+
+  const { data: subCategories = [] } = useQuery({
+    queryKey: ["sub-categories"],
+    queryFn: () => fetchSubCategories(API_URL, apiToken ?? ""),
+    enabled: !!apiToken,
+  });
+
+  const { data: reportsData } = useQuery({
+    queryKey: ["reports"],
+    queryFn: () => fetchReports(API_URL, apiToken ?? "", 500),
+    enabled: !!apiToken,
+    staleTime: 30_000,
+  });
+
+  const machines = useMemo(
+    () => groupMachines(reportsData?.reports ?? []),
+    [reportsData?.reports],
+  );
+
   const jobs = jobsResp?.jobs ?? [];
-  const groups = useMemo(() => groupJobsByPc(jobs), [jobs]);
+
+  const scopedJobs = useMemo(() => {
+    if (!groupFilter) return jobs;
+    return jobs.filter((j) => {
+      const m = machineForJob(j, machines);
+      return m
+        ? machineInGroup(m, groupFilter, orgGroups, subCategories)
+        : false;
+    });
+  }, [jobs, groupFilter, machines, orgGroups, subCategories]);
+
+  const pcGroups = useMemo(
+    () => groupJobsByPc(scopedJobs),
+    [scopedJobs],
+  );
+
+  const perPcRows = useMemo((): PcPrintRow[] => {
+    if (groupFilter) {
+      const inGroup = machines.filter((m) =>
+        machineInGroup(m, groupFilter, orgGroups, subCategories),
+      );
+      const counts = new Map<string, number>();
+      for (const j of scopedJobs) {
+        const m = machineForJob(j, inGroup);
+        if (!m) continue;
+        counts.set(m.key, (counts.get(m.key) ?? 0) + 1);
+      }
+      return inGroup
+        .map((m) => ({
+          key: m.key,
+          name: m.name,
+          prints: counts.get(m.key) ?? 0,
+        }))
+        .sort((a, b) => b.prints - a.prints || a.name.localeCompare(b.name));
+    }
+    return groupJobsByPc(jobs)
+      .map((g) => ({
+        key: g.key,
+        name: g.name,
+        prints: g.jobs.length,
+      }))
+      .sort((a, b) => b.prints - a.prints || a.name.localeCompare(b.name));
+  }, [groupFilter, machines, orgGroups, subCategories, scopedJobs, jobs]);
+
+  const maxCount = perPcRows.reduce(
+    (n, r) => Math.max(n, r.prints),
+    0,
+  );
+  const minCount = perPcRows.reduce(
+    (n, r) => Math.min(n, r.prints),
+    perPcRows[0]?.prints ?? 0,
+  );
+  const maxPcs = perPcRows.filter((r) => r.prints === maxCount);
+  const minPcs = perPcRows.filter((r) => r.prints === minCount);
+  const sameExtremes = perPcRows.length > 0 && maxCount === minCount;
 
   const totalPages = useMemo(
     () =>
-      jobs.reduce((sum, j) => sum + (j.pages && j.pages > 0 ? j.pages : 0), 0),
-    [jobs],
+      scopedJobs.reduce(
+        (sum, j) => sum + (j.pages && j.pages > 0 ? j.pages : 0),
+        0,
+      ),
+    [scopedJobs],
   );
 
   const distinctPrinters = useMemo(
-    () => new Set(jobs.map((j) => j.printer).filter(Boolean)).size,
-    [jobs],
+    () => new Set(scopedJobs.map((j) => j.printer).filter(Boolean)).size,
+    [scopedJobs],
   );
 
   const isGroupOpen = (key: string, isFirst: boolean) =>
@@ -92,6 +217,16 @@ export function PrintActivity() {
       [key]: !(prev[key] ?? isFirst),
     }));
   };
+
+  const barColor = (prints: number) => {
+    if (sameExtremes) return OTHER_BAR;
+    if (prints === maxCount) return MAX_BAR;
+    if (prints === minCount) return MIN_BAR;
+    return OTHER_BAR;
+  };
+
+  const selectedGroupName =
+    orgGroups.find((g) => g.id === groupFilter)?.name ?? "All groups";
 
   const sidebar = (
     <>
@@ -115,14 +250,30 @@ export function PrintActivity() {
             {connected ? "LIVE" : "OFFLINE"}
           </span>
         </div>
-        {jobs.length === 0 && !isLoading && (
+        <label className="sr-only" htmlFor="print-group-filter">
+          Filter by group
+        </label>
+        <select
+          id="print-group-filter"
+          value={groupFilter}
+          onChange={(e) => setGroupFilter(e.target.value)}
+          className="mb-3 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+        >
+          <option value="">All groups</option>
+          {orgGroups.map((g: Group) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
+        {scopedJobs.length === 0 && !isLoading && (
           <p className="text-xs text-slate-500">
             No print jobs recorded yet. Jobs appear here as soon as the desktop
             agent reports them.
           </p>
         )}
         <ul className="space-y-1">
-          {groups.map((g, i) => {
+          {pcGroups.map((g, i) => {
             const open = isGroupOpen(g.key, i === 0);
             const printing = isPrinting(g.deviceId);
             const printCount = printingCount(g.deviceId);
@@ -206,13 +357,18 @@ export function PrintActivity() {
               </span>
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              {jobs.length} prints · {totalPages} pages · {distinctPrinters}{" "}
-              printers in the last {fmtRelative(jobs[0]?.created_at)}.
+              {scopedJobs.length} prints · {totalPages} pages · {distinctPrinters}{" "}
+              printers
+              {groupFilter ? ` · ${selectedGroupName}` : ""}
+              {scopedJobs[0]?.created_at
+                ? ` in the last ${fmtRelative(scopedJobs[0].created_at)}`
+                : ""}
+              .
             </p>
           </div>
           <div className="flex gap-3 text-xs text-slate-500">
             <span>
-              <b className="text-slate-900">{jobs.length}</b> jobs
+              <b className="text-slate-900">{scopedJobs.length}</b> jobs
             </span>
             <span>
               <b className="text-slate-900">{totalPages}</b> pages
@@ -230,6 +386,105 @@ export function PrintActivity() {
             Failed to load print activity from {API_URL}.
           </div>
         )}
+
+        <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-medium text-slate-700">
+                Prints per PC
+              </h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Job counts from the recent print feed. Pick a group to compare
+                only those PCs (zeros included). Green = most, amber = least.
+              </p>
+            </div>
+            <label className="text-xs text-slate-500">
+              Group
+              <select
+                value={groupFilter}
+                onChange={(e) => setGroupFilter(e.target.value)}
+                className="mt-1 block min-w-48 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+              >
+                <option value="">All groups</option>
+                {orgGroups.map((g: Group) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {perPcRows.length > 0 ? (
+            <>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">
+                    Most prints
+                  </p>
+                  <p className="mt-1 truncate text-sm font-semibold text-slate-900">
+                    {maxPcs.map((p) => p.name).join(", ")}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-600">
+                    {maxCount} job{maxCount === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-800">
+                    Least prints
+                  </p>
+                  <p className="mt-1 truncate text-sm font-semibold text-slate-900">
+                    {minPcs.map((p) => p.name).join(", ")}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-600">
+                    {minCount} job{minCount === 1 ? "" : "s"}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={perPcRows}
+                    margin={{ bottom: 48, left: 8, right: 8 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis
+                      dataKey="name"
+                      fontSize={11}
+                      stroke="#94a3b8"
+                      interval={0}
+                      angle={-35}
+                      textAnchor="end"
+                      height={70}
+                    />
+                    <YAxis
+                      allowDecimals={false}
+                      fontSize={11}
+                      stroke="#94a3b8"
+                    />
+                    <Tooltip
+                      formatter={(value) => [
+                        `${value} print${value === 1 ? "" : "s"}`,
+                        "Jobs",
+                      ]}
+                    />
+                    <Bar dataKey="prints" radius={[4, 4, 0, 0]}>
+                      {perPcRows.map((row) => (
+                        <Cell key={row.key} fill={barColor(row.prints)} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </>
+          ) : (
+            <p className="mt-4 text-sm text-slate-500">
+              {groupFilter
+                ? "No PCs in this group, or none have printed yet."
+                : "No print jobs yet — the per-PC chart fills in as jobs arrive."}
+            </p>
+          )}
+        </div>
 
         <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
           <h2 className="text-sm font-medium text-slate-700">
@@ -273,7 +528,7 @@ export function PrintActivity() {
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
           <h2 className="text-sm font-medium text-slate-700">Recent prints</h2>
-          {jobs.length === 0 ? (
+          {scopedJobs.length === 0 ? (
             <p className="mt-3 text-sm text-slate-500">
               Waiting for print jobs…
             </p>
@@ -291,7 +546,7 @@ export function PrintActivity() {
                   </tr>
                 </thead>
                 <tbody>
-                  {jobs.map((j: PrintJob) => (
+                  {scopedJobs.map((j: PrintJob) => (
                     <tr
                       key={j._id}
                       className="border-b border-slate-100 last:border-0 hover:bg-slate-50/80"
