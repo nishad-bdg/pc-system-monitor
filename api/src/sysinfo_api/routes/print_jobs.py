@@ -156,3 +156,38 @@ def print_jobs_by_pc(
         "total_pages": sum(p["pages"] for p in pcs),
         "pcs": pcs,
     }
+
+
+@router.get("/by-printer")
+def print_jobs_by_printer(
+    from_ts: float | None = None,
+    to_ts: float | None = None,
+    device_id: str | None = None,
+    pc_name: str | None = None,
+    group_id: str | None = None,
+    user: CurrentUser = None,
+) -> dict:
+    """Print job + page totals per printer for a date range (admin JWT)."""
+    group_ids = _effective_group_ids(user, group_id)
+    if group_id and group_ids == []:
+        return {
+            "from_ts": from_ts,
+            "to_ts": to_ts,
+            "total_jobs": 0,
+            "total_pages": 0,
+            "printers": [],
+        }
+    printers = db.print_jobs_by_printer(
+        device_id=device_id or None,
+        pc_name=pc_name or None,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        group_ids=group_ids,
+    )
+    return {
+        "from_ts": from_ts,
+        "to_ts": to_ts,
+        "total_jobs": sum(p["jobs"] for p in printers),
+        "total_pages": sum(p["pages"] for p in printers),
+        "printers": printers,
+    }

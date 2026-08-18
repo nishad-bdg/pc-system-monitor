@@ -7,6 +7,7 @@ import {
   exportReportsCsv,
   fetchGroups,
   fetchPrintJobsByPc,
+  fetchPrintJobsByPrinter,
   fetchReports,
   fetchSubCategories,
   fmtBytes,
@@ -254,6 +255,24 @@ export function ReportExportPanel() {
     enabled: !!apiToken && !!applied,
   });
 
+  const { data: printByPrinter } = useQuery({
+    queryKey: [
+      "print-jobs-by-printer",
+      applied?.fromTs,
+      applied?.toTs,
+      applied?.groupId,
+      applied?.pcName,
+    ],
+    queryFn: () =>
+      fetchPrintJobsByPrinter(API_URL, apiToken ?? "", {
+        fromTs: applied?.fromTs,
+        toTs: applied?.toTs,
+        groupId: applied?.groupId || undefined,
+        pcName: applied?.pcName || undefined,
+      }),
+    enabled: !!apiToken && !!applied,
+  });
+
   const machines = useMemo(() => {
     let list = groupMachines(data?.reports ?? []);
     if (applied?.groupId) {
@@ -342,6 +361,17 @@ export function ReportExportPanel() {
       minPcs: ranked.filter((r) => r.jobs === minCount).map((r) => r.name),
     };
   }, [printByPc, printPreviewRows]);
+
+  const topPrinters = useMemo(() => {
+    const rows = printByPrinter?.printers ?? [];
+    const ranked = rows.slice().sort((a, b) => b.jobs - a.jobs);
+    const max = ranked.length ? ranked[0].jobs : 0;
+    return {
+      top: ranked.slice(0, 5),
+      maxPrinter: ranked.filter((r) => r.jobs === max).map((r) => r.printer),
+      maxCount: max,
+    };
+  }, [printByPrinter]);
 
   const lifetimePrintRows = useMemo(() => {
     return machines
@@ -1028,7 +1058,7 @@ export function ReportExportPanel() {
                 </div>
               </div>
               {printPreviewRows.length > 0 && (
-                <div className="grid gap-3 border-b border-slate-100 px-4 py-3 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="grid gap-3 border-b border-slate-100 px-4 py-3 sm:grid-cols-2 lg:grid-cols-6">
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                       Total prints
@@ -1059,6 +1089,21 @@ export function ReportExportPanel() {
                       {printTotals.pages.toLocaleString()}
                     </p>
                     <p className="mt-0.5 text-xs text-slate-500">sum of job page counts</p>
+                  </div>
+                  <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">
+                      Most used printer
+                    </p>
+                    <p className="mt-1 truncate text-sm font-semibold text-slate-900">
+                      {topPrinters.maxPrinter.length
+                        ? topPrinters.maxPrinter.join(", ")
+                        : "—"}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-600">
+                      {topPrinters.maxPrinter.length
+                        ? `${topPrinters.maxCount} job${topPrinters.maxCount === 1 ? "" : "s"} in range`
+                        : "no jobs in range"}
+                    </p>
                   </div>
                   <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">
@@ -1111,6 +1156,41 @@ export function ReportExportPanel() {
                         </span>
                         <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
                           {row.name}
+                        </span>
+                        <span className="shrink-0 text-sm font-semibold text-slate-600">
+                          {row.jobs.toLocaleString()} job{row.jobs === 1 ? "" : "s"}
+                        </span>
+                        <span className="w-24 shrink-0 text-right text-xs text-slate-500">
+                          {row.pages.toLocaleString()} pages
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+              {topPrinters.top.length > 0 && (
+                <div className="border-b border-slate-100 px-4 py-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    Top printers · usage ranking
+                  </p>
+                  <ol className="mt-3 space-y-1.5">
+                    {topPrinters.top.map((row, i) => (
+                      <li key={`${row.printer}-${i}`} className="flex items-center gap-3">
+                        <span
+                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                            i === 0
+                              ? "bg-blue-100 text-blue-700"
+                              : i === 1
+                                ? "bg-slate-200 text-slate-600"
+                                : i === 2
+                                  ? "bg-orange-100 text-orange-700"
+                                  : "bg-slate-100 text-slate-500"
+                          }`}
+                        >
+                          {i + 1}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
+                          {row.printer}
                         </span>
                         <span className="shrink-0 text-sm font-semibold text-slate-600">
                           {row.jobs.toLocaleString()} job{row.jobs === 1 ? "" : "s"}

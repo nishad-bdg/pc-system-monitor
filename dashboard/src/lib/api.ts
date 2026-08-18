@@ -1085,6 +1085,45 @@ export function fetchPrintJobsByPc(
   return apiRequest(apiUrl, apiToken, `/print-jobs/by-pc${qs ? `?${qs}` : ""}`);
 }
 
+export type PrintJobsByPrinterRow = {
+  printer: string;
+  jobs: number;
+  pages: number;
+};
+
+export type PrintJobsByPrinter = {
+  from_ts?: number | null;
+  to_ts?: number | null;
+  total_jobs: number;
+  total_pages: number;
+  printers: PrintJobsByPrinterRow[];
+};
+
+export function fetchPrintJobsByPrinter(
+  apiUrl: string,
+  apiToken: string,
+  filters?: {
+    fromTs?: number;
+    toTs?: number;
+    deviceId?: string;
+    pcName?: string;
+    groupId?: string;
+  },
+): Promise<PrintJobsByPrinter> {
+  const params = new URLSearchParams();
+  if (filters?.fromTs != null) params.set("from_ts", String(filters.fromTs));
+  if (filters?.toTs != null) params.set("to_ts", String(filters.toTs));
+  if (filters?.deviceId) params.set("device_id", filters.deviceId);
+  if (filters?.pcName) params.set("pc_name", filters.pcName);
+  if (filters?.groupId) params.set("group_id", filters.groupId);
+  const qs = params.toString();
+  return apiRequest(
+    apiUrl,
+    apiToken,
+    `/print-jobs/by-printer${qs ? `?${qs}` : ""}`,
+  );
+}
+
 // ---- remote commands (restart / shutdown / collect) ----
 
 export type Command = {

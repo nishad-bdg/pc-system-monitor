@@ -928,6 +928,61 @@ def print_jobs_by_pc(
     return results
 
 
+def print_jobs_by_printer(
+    device_id: str | None = None,
+    pc_name: str | None = None,
+    from_ts: float | None = None,
+    to_ts: float | None = None,
+    group_ids: list[str] | None = None,
+) -> list[dict]:
+    """Job + page totals per printer for the same filters as `list_print_jobs`.
+
+    Sorted by jobs descending.
+    """
+    query = _print_jobs_query(
+        device_id=device_id,
+        pc_name=pc_name,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        group_ids=group_ids,
+    )
+    results: list[dict] = []
+    try:
+        pipeline = [
+            {"$match": query},
+            {
+                "$group": {
+                    "_id": {"$ifNull": ["$printer", "unknown"]},
+                    "jobs": {"$sum": 1},
+                    "pages": {
+                        "$sum": {
+                            "$cond": [
+                                {"$gt": [{"$ifNull": ["$pages", 0]}, 0]},
+                                "$pages",
+                                0,
+                            ]
+                        }
+                    },
+                    "printer": {"$last": "$printer"},
+                }
+            },
+            {"$sort": {"jobs": -1, "_id": 1}},
+        ]
+        for doc in _print_jobs().aggregate(pipeline):
+            results.append(
+                {
+                    "printer": doc.get("printer")
+                    or (doc.get("_id") if doc.get("_id") != "unknown" else None)
+                    or "Unknown printer",
+                    "jobs": int(doc.get("jobs") or 0),
+                    "pages": int(doc.get("pages") or 0),
+                }
+            )
+    except (ConnectionFailure, PyMongoError):
+        return results
+    return results
+
+
 def print_jobs_hourly_counts(
     hours: int = 24,
     group_ids: list[str] | None = None,

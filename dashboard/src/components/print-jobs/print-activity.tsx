@@ -341,6 +341,23 @@ export function PrintActivity() {
     [scopedJobs],
   );
 
+  const topPrinters = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const j of pcJobs) {
+      const p = j.printer || "Unknown printer";
+      counts.set(p, (counts.get(p) ?? 0) + 1);
+    }
+    const rows = [...counts.entries()]
+      .map(([printer, jobs]) => ({ printer, jobs }))
+      .sort((a, b) => b.jobs - a.jobs || a.printer.localeCompare(b.printer));
+    const max = rows.length ? rows[0].jobs : 0;
+    return {
+      top: rows.slice(0, 5),
+      maxPrinter: rows.filter((r) => r.jobs === max).map((r) => r.printer),
+      maxCount: max,
+    };
+  }, [pcJobs]);
+
   const isGroupOpen = (key: string) => openKeys[key] ?? true;
 
   const toggleGroup = (key: string) => {
@@ -609,7 +626,7 @@ export function PrintActivity() {
 
           {perPcRows.length > 0 ? (
             <>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">
                     Most prints
@@ -632,7 +649,54 @@ export function PrintActivity() {
                     {minCount} job{minCount === 1 ? "" : "s"}
                   </p>
                 </div>
+                <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">
+                    Most used printer
+                  </p>
+                  <p className="mt-1 truncate text-sm font-semibold text-slate-900">
+                    {topPrinters.maxPrinter.length
+                      ? topPrinters.maxPrinter.join(", ")
+                      : "—"}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-600">
+                    {topPrinters.maxPrinter.length
+                      ? `${topPrinters.maxCount} job${topPrinters.maxCount === 1 ? "" : "s"}`
+                      : "no jobs in the selected range"}
+                  </p>
+                </div>
               </div>
+              {topPrinters.top.length > 0 && (
+                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    Top printers · usage ranking
+                  </p>
+                  <ol className="mt-2 space-y-1.5">
+                    {topPrinters.top.map((row, i) => (
+                      <li key={`${row.printer}-${i}`} className="flex items-center gap-3">
+                        <span
+                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                            i === 0
+                              ? "bg-blue-100 text-blue-700"
+                              : i === 1
+                                ? "bg-slate-200 text-slate-600"
+                                : i === 2
+                                  ? "bg-orange-100 text-orange-700"
+                                  : "bg-slate-100 text-slate-500"
+                          }`}
+                        >
+                          {i + 1}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
+                          {row.printer}
+                        </span>
+                        <span className="shrink-0 text-sm font-semibold text-slate-600">
+                          {row.jobs} job{row.jobs === 1 ? "" : "s"}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
               <div className="mt-4 h-80">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
