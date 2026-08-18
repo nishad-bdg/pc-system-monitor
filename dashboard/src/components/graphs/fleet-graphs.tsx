@@ -650,6 +650,17 @@ function PrintingChart({
                   `${Number(value ?? 0)} print${Number(value) === 1 ? "" : "s"}`,
                   String(name),
                 ]}
+                wrapperStyle={{ zIndex: 60, pointerEvents: "none" }}
+                contentStyle={{
+                  backgroundColor: "#ffffff",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "0.75rem",
+                  boxShadow: "0 10px 25px -5px rgb(15 23 42 / 0.2)",
+                  padding: "0.5rem 0.75rem",
+                }}
+                itemStyle={{ color: "#0f172a" }}
+                labelStyle={{ color: "#475569", fontWeight: 600 }}
+                cursor={{ fill: "rgba(37, 99, 235, 0.06)" }}
               />
               <Legend
                 wrapperStyle={{ fontSize: legendFontSize(series.length), lineHeight: `${legendFontSize(series.length) + 6}px` }}
@@ -716,6 +727,17 @@ function UsageChart({
                   `${Number(value ?? 0).toFixed(1)}${unit}`,
                   String(name),
                 ]}
+                wrapperStyle={{ zIndex: 60, pointerEvents: "none" }}
+                contentStyle={{
+                  backgroundColor: "#ffffff",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "0.75rem",
+                  boxShadow: "0 10px 25px -5px rgb(15 23 42 / 0.2)",
+                  padding: "0.5rem 0.75rem",
+                }}
+                itemStyle={{ color: "#0f172a" }}
+                labelStyle={{ color: "#475569", fontWeight: 600 }}
+                cursor={{ stroke: "#2563eb", strokeWidth: 1, strokeDasharray: "4 4" }}
               />
               <Legend
                 wrapperStyle={{ fontSize: legendFontSize(series.length), lineHeight: `${legendFontSize(series.length) + 6}px` }}
