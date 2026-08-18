@@ -188,6 +188,9 @@ export function PrintActivity() {
   const [summaryRange, setSummaryRange] = useState<SummaryRange>("last24h");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  const [pcRange, setPcRange] = useState<SummaryRange>("last24h");
+  const [pcCustomFrom, setPcCustomFrom] = useState("");
+  const [pcCustomTo, setPcCustomTo] = useState("");
 
   const groupQuery = groupFilter || undefined;
 
@@ -260,6 +263,25 @@ export function PrintActivity() {
 
   const scopedJobs = jobs;
 
+  const pcRangeWindow = useMemo(() => {
+    if (pcRange === "last24h") return null;
+    return summaryRangeFor(pcRange, pcCustomFrom, pcCustomTo);
+  }, [pcRange, pcCustomFrom, pcCustomTo]);
+
+  const pcJobs = useMemo(() => {
+    let rows = jobs;
+    const win = pcRangeWindow;
+    if (win) {
+      rows = rows.filter((j) => {
+        const t = j.completed_at ?? j.created_at ?? 0;
+        if (win.fromTs != null && t < win.fromTs) return false;
+        if (win.toTs != null && t > win.toTs) return false;
+        return true;
+      });
+    }
+    return rows;
+  }, [jobs, pcRangeWindow]);
+
   const pcGroups = useMemo(
     () => groupJobsByPc(scopedJobs),
     [scopedJobs],
@@ -271,7 +293,7 @@ export function PrintActivity() {
         machineInGroup(m, groupFilter, orgGroups, subCategories),
       );
       const counts = new Map<string, number>();
-      for (const j of scopedJobs) {
+      for (const j of pcJobs) {
         const m = machineForJob(j, inGroup);
         if (!m) continue;
         counts.set(m.key, (counts.get(m.key) ?? 0) + 1);
@@ -284,14 +306,14 @@ export function PrintActivity() {
         }))
         .sort((a, b) => b.prints - a.prints || a.name.localeCompare(b.name));
     }
-    return groupJobsByPc(jobs)
+    return groupJobsByPc(pcJobs)
       .map((g) => ({
         key: g.key,
         name: g.name,
         prints: g.jobs.length,
       }))
       .sort((a, b) => b.prints - a.prints || a.name.localeCompare(b.name));
-  }, [groupFilter, machines, orgGroups, subCategories, scopedJobs, jobs]);
+  }, [groupFilter, machines, orgGroups, subCategories, pcJobs]);
 
   const maxCount = perPcRows.reduce(
     (n, r) => Math.max(n, r.prints),
@@ -527,24 +549,62 @@ export function PrintActivity() {
                 only those PCs (zeros included). Green = most, amber = least.
               </p>
             </div>
-            <label className="text-xs text-slate-500">
-              Group
-              <select
-                value={groupFilter}
-                onChange={(e) => {
-                  setGroupFilter(e.target.value);
-                  setPage(1);
-                }}
-                className="mt-1 block min-w-48 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
-              >
-                <option value="">All groups</option>
-                {orgGroups.map((g: Group) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="text-xs text-slate-500">
+                Range
+                <select
+                  value={pcRange}
+                  onChange={(e) => setPcRange(e.target.value as SummaryRange)}
+                  className="mt-1 block min-w-36 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+                >
+                  {SUMMARY_RANGES.map((r) => (
+                    <option key={r.key} value={r.key}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {pcRange === "custom" && (
+                <>
+                  <label className="text-xs text-slate-500">
+                    From
+                    <input
+                      type="date"
+                      value={pcCustomFrom}
+                      onChange={(e) => setPcCustomFrom(e.target.value)}
+                      className="mt-1 block rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+                    />
+                  </label>
+                  <label className="text-xs text-slate-500">
+                    To
+                    <input
+                      type="date"
+                      value={pcCustomTo}
+                      onChange={(e) => setPcCustomTo(e.target.value)}
+                      className="mt-1 block rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+                    />
+                  </label>
+                </>
+              )}
+              <label className="text-xs text-slate-500">
+                Group
+                <select
+                  value={groupFilter}
+                  onChange={(e) => {
+                    setGroupFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  className="mt-1 block min-w-48 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+                >
+                  <option value="">All groups</option>
+                  {orgGroups.map((g: Group) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </div>
 
           {perPcRows.length > 0 ? (
@@ -612,8 +672,8 @@ export function PrintActivity() {
           ) : (
             <p className="mt-4 text-sm text-slate-500">
               {groupFilter
-                ? "No PCs in this group, or none have printed yet."
-                : "No print jobs yet — the per-PC chart fills in as jobs arrive."}
+                ? "No PCs in this group, or none have printed in the selected range."
+                : `No print jobs ${pcRange === "last24h" ? "yet" : `in the ${summaryRangeLabel(pcRange)}`} — the per-PC chart fills in as jobs arrive.`}
             </p>
           )}
         </div>
