@@ -63,6 +63,16 @@ type HistPoint = {
   net: Record<string, number>;
 };
 
+type TopEntry = { name: string; deviceId?: string | null; value: number };
+
+function liveNetworkMbps(m: MachineSummary, live?: LiveMetricsSample | null): number {
+  const send =
+    live?.eth_send_rate_bps ?? live?.send_rate_bps ?? m.latest.network?.send_rate_bps ?? 0;
+  const recv =
+    live?.eth_recv_rate_bps ?? live?.recv_rate_bps ?? m.latest.network?.recv_rate_bps ?? 0;
+  return ((Math.max(0, send) + Math.max(0, recv)) * 8) / 1_000_000;
+}
+
 function formatClock(ts: number): string {
   return new Date(ts).toLocaleTimeString([], {
     hour: "2-digit",
@@ -194,6 +204,27 @@ export function FleetGraphs() {
       })),
     [filtered],
   );
+
+  const topUsage = useMemo(() => {
+    const cpu: TopEntry[] = [];
+    const ram: TopEntry[] = [];
+    const net: TopEntry[] = [];
+    const printer: TopEntry[] = [];
+    for (const m of listed) {
+      const live = metricsFor(m.deviceId);
+      const cpuV = live?.cpu_percent ?? m.latest.resources?.cpu_percent;
+      const ramV = live?.ram_percent ?? m.latest.resources?.ram_percent;
+      const netV = liveNetworkMbps(m, live);
+      const printEvents = printEventsFor(m.deviceId).length;
+      if (cpuV != null) cpu.push({ name: m.name, deviceId: m.deviceId, value: cpuV });
+      if (ramV != null) ram.push({ name: m.name, deviceId: m.deviceId, value: ramV });
+      net.push({ name: m.name, deviceId: m.deviceId, value: netV });
+      if (printEvents > 0) printer.push({ name: m.name, deviceId: m.deviceId, value: printEvents });
+    }
+    const top = (rows: TopEntry[]) =>
+      rows.sort((a, b) => b.value - a.value).slice(0, 5);
+    return { cpu: top(cpu), ram: top(ram), net: top(net), printer: top(printer) };
+  }, [listed, metricsFor, printEventsFor]);
 
   const historyScope = `${groupFilter}|${pcQuery}|${listed.length}`;
   const [activeScope, setActiveScope] = useState(historyScope);
@@ -439,6 +470,16 @@ export function FleetGraphs() {
             Failed to load reports from the API at {API_URL}. Is it running?
           </div>
         )}
+        <TopUsageSection
+          cpu={topUsage.cpu}
+          ram={topUsage.ram}
+          net={topUsage.net}
+          printer={topUsage.printer}
+          onSelect={(deviceId) => {
+            const m = listed.find((x) => x.deviceId === deviceId);
+            if (m) setPcKey(m.key);
+          }}
+        />
         <UsageChart
           title="CPU usage"
           unit="%"
@@ -471,6 +512,86 @@ export function FleetGraphs() {
         />
       </div>
     </DashboardShell>
+  );
+}
+
+function TopUsageSection({
+  cpu,
+  ram,
+  net,
+  printer,
+  onSelect,
+}: {
+  cpu: TopEntry[];
+  ram: TopEntry[];
+  net: TopEntry[];
+  printer: TopEntry[];
+  onSelect: (deviceId?: string | null) => void;
+}) {
+  const cards: { title: string; unit: string; rows: TopEntry[] }[] = [
+    {
+      title: "Top CPU usage",
+      unit: "%",
+      rows: cpu,
+    },
+    { title: "Top RAM usage", unit: "%", rows: ram },
+    { title: "Top network usage", unit: " Mbps", rows: net },
+    {
+      title: "Top printing",
+      unit: " print",
+      rows: printer,
+    },
+  ];
+  return (
+    <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      {cards.map((card) => (
+        <div
+          key={card.title}
+          className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50"
+        >
+          <h3 className="text-sm font-medium text-slate-700">{card.title}</h3>
+          {card.rows.length === 0 ? (
+            <p className="mt-6 text-center text-sm text-slate-400">
+              No data yet
+            </p>
+          ) : (
+            <ol className="mt-3 space-y-1">
+              {card.rows.map((entry, i) => (
+                <li key={`${entry.name}-${i}`}>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(entry.deviceId)}
+                    className="flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left transition hover:bg-slate-50"
+                  >
+                    <span
+                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                        i === 0
+                          ? "bg-amber-100 text-amber-700"
+                          : i === 1
+                            ? "bg-slate-200 text-slate-600"
+                            : i === 2
+                              ? "bg-orange-100 text-orange-700"
+                              : "bg-slate-100 text-slate-500"
+                      }`}
+                    >
+                      {i + 1}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
+                      {entry.name}
+                    </span>
+                    <span className="shrink-0 text-sm font-semibold text-blue-600">
+                      {card.unit === " print"
+                        ? `${Math.round(entry.value)}${card.unit}${Math.round(entry.value) === 1 ? "" : "s"}`
+                        : `${entry.value.toFixed(1)}${card.unit}`}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      ))}
+    </section>
   );
 }
 
