@@ -401,13 +401,21 @@ export function PrintActivity() {
 
   const printerRows = useMemo(
     () =>
-      (printByPrinter?.printers ?? []).map((p) => ({
-        printer: p.printer || "Unknown printer",
-        jobs: p.jobs,
-        pages: p.pages,
-        pcs: p.pcs ?? [],
-      })),
-    [printByPrinter],
+      (printByPrinter?.printers ?? []).map((p) => {
+        const ip = printerIp.get((p.printer || "Unknown printer").trim().toLowerCase());
+        return {
+          printer: p.printer || "Unknown printer",
+          jobs: p.jobs,
+          pages: p.pages,
+          pcs: p.pcs ?? [],
+          label: ip
+            ? `${p.printer || "Unknown printer"} · ${ip}`
+            : (p.pcs ?? []).filter(Boolean).length
+              ? `${p.printer || "Unknown printer"} · via ${(p.pcs ?? []).filter(Boolean).join(", ")}`
+              : p.printer || "Unknown printer",
+        };
+      }),
+    [printByPrinter, printerIp],
   );
 
   const handlePrinterPdf = async () => {
@@ -935,7 +943,7 @@ export function PrintActivity() {
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis
-                    dataKey="printer"
+                    dataKey="label"
                     fontSize={11}
                     stroke="#94a3b8"
                     interval={0}
