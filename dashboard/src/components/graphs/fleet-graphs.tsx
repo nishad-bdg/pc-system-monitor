@@ -97,6 +97,75 @@ function legendFontSize(seriesCount: number): number {
   return 9;
 }
 
+type TooltipSeries = { key: string; name: string; color: string };
+
+/**
+ * Shared chart hover tooltip. Rows are tinted with each PC's series color so
+ * the floating card matches the line/bar it refers to, and the font scales
+ * down as more PC series exist (same rules as axis/legend).
+ */
+function SeriesTooltip({
+  active,
+  payload,
+  label,
+  series,
+  unit,
+  format,
+}: {
+  active?: boolean;
+  payload?: readonly unknown[];
+  label?: string | number | undefined;
+  series: TooltipSeries[];
+  unit?: string;
+  format?: (value: number) => string;
+}) {
+  if (!active || !payload?.length) return null;
+  const rows = payload
+    .map((p) => ({
+      name: String((p as { name?: unknown })?.name ?? ""),
+      value: Number((p as { value?: unknown })?.value ?? 0),
+    }))
+    .filter((p) => Number(p.value) > 0 || unit !== " print");
+  const fontSize = legendFontSize(series.length);
+  return (
+    <div
+      className="pointer-events-auto rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-lg shadow-slate-900/10"
+      style={{ maxHeight: 320, overflowY: "auto" }}
+    >
+      {label != null ? (
+        <p className="mb-1 font-semibold text-slate-500" style={{ fontSize }}>
+          {String(label)}
+        </p>
+      ) : null}
+      <ul className="space-y-1">
+        {rows.map((row) => {
+          const s = series.find((x) => x.name === row.name);
+          const color = s?.color ?? "#334155";
+          const value = Number(row.value ?? 0);
+          return (
+            <li
+              key={row.name}
+              className="flex items-center gap-2"
+              style={{ fontSize: Math.max(10, fontSize - 1) }}
+            >
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{ background: color }}
+              />
+              <span className="min-w-0 flex-1 truncate text-slate-700">
+                {row.name}
+              </span>
+              <span className="shrink-0 font-semibold" style={{ color }}>
+                {format ? format(value) : `${value.toFixed(1)}${unit ?? ""}`}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function seriesKey(m: MachineSummary): string {
   return (m.deviceId || m.key).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 48);
 }
@@ -646,21 +715,18 @@ function PrintingChart({
                 width={32}
               />
               <Tooltip
-                formatter={(value, name) => [
-                  `${Number(value ?? 0)} print${Number(value) === 1 ? "" : "s"}`,
-                  String(name),
-                ]}
-                wrapperStyle={{ zIndex: 60, pointerEvents: "none" }}
-                contentStyle={{
-                  backgroundColor: "#ffffff",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: "0.75rem",
-                  boxShadow: "0 10px 25px -5px rgb(15 23 42 / 0.2)",
-                  padding: "0.5rem 0.75rem",
-                }}
-                itemStyle={{ color: "#0f172a" }}
-                labelStyle={{ color: "#475569", fontWeight: 600 }}
-                cursor={{ fill: "rgba(37, 99, 235, 0.06)" }}
+                content={({ active, payload, label }) => (
+                  <SeriesTooltip
+                    active={active}
+                    payload={payload}
+                    label={label}
+                    series={series}
+                    unit="print"
+                    format={(value) =>
+                      `${Number(value)} print${Number(value) === 1 ? "" : "s"}`
+                    }
+                  />
+                )}
               />
               <Legend
                 wrapperStyle={{ fontSize: legendFontSize(series.length), lineHeight: `${legendFontSize(series.length) + 6}px` }}
@@ -723,20 +789,16 @@ function UsageChart({
                 width={56}
               />
               <Tooltip
-                formatter={(value, name) => [
-                  `${Number(value ?? 0).toFixed(1)}${unit}`,
-                  String(name),
-                ]}
-                wrapperStyle={{ zIndex: 60, pointerEvents: "none" }}
-                contentStyle={{
-                  backgroundColor: "#ffffff",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: "0.75rem",
-                  boxShadow: "0 10px 25px -5px rgb(15 23 42 / 0.2)",
-                  padding: "0.5rem 0.75rem",
-                }}
-                itemStyle={{ color: "#0f172a" }}
-                labelStyle={{ color: "#475569", fontWeight: 600 }}
+                content={({ active, payload, label }) => (
+                  <SeriesTooltip
+                    active={active}
+                    payload={payload}
+                    label={label}
+                    series={series}
+                    unit={unit}
+                    format={(value) => `${Number(value).toFixed(1)}${unit}`}
+                  />
+                )}
                 cursor={{ stroke: "#2563eb", strokeWidth: 1, strokeDasharray: "4 4" }}
               />
               <Legend
