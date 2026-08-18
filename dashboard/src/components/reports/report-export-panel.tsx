@@ -329,14 +329,15 @@ export function ReportExportPanel() {
     const jobs = printByPc?.total_jobs ?? printPreviewRows.reduce((s, r) => s + r.jobs, 0);
     const pages = printByPc?.total_pages ?? printPreviewRows.reduce((s, r) => s + r.pages, 0);
     const withJobs = printPreviewRows.filter((r) => r.jobs > 0);
-    const ranked = (withJobs.length ? withJobs : printPreviewRows).slice();
-    const maxCount = ranked.length ? Math.max(...ranked.map((r) => r.jobs)) : 0;
-    const minCount = ranked.length ? Math.min(...ranked.map((r) => r.jobs)) : 0;
+    const ranked = (withJobs.length ? withJobs : printPreviewRows).slice().sort((a, b) => b.jobs - a.jobs);
+    const maxCount = ranked.length ? ranked[0].jobs : 0;
+    const minCount = ranked.length ? ranked[ranked.length - 1].jobs : 0;
     return {
       jobs,
       pages,
       maxCount,
       minCount,
+      topPcs: ranked.slice(0, 5),
       maxPcs: ranked.filter((r) => r.jobs === maxCount).map((r) => r.name),
       minPcs: ranked.filter((r) => r.jobs === minCount).map((r) => r.name),
     };
@@ -1084,6 +1085,41 @@ export function ReportExportPanel() {
                         : "no jobs in range"}
                     </p>
                   </div>
+                </div>
+              )}
+              {printTotals.topPcs.length > 0 && (
+                <div className="border-b border-slate-100 px-4 py-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    Top prints · PC ranking
+                  </p>
+                  <ol className="mt-3 space-y-1.5">
+                    {printTotals.topPcs.map((row, i) => (
+                      <li key={`${row.name}-${i}`} className="flex items-center gap-3">
+                        <span
+                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                            i === 0
+                              ? "bg-emerald-100 text-emerald-700"
+                              : i === 1
+                                ? "bg-slate-200 text-slate-600"
+                                : i === 2
+                                  ? "bg-orange-100 text-orange-700"
+                                  : "bg-slate-100 text-slate-500"
+                          }`}
+                        >
+                          {i + 1}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
+                          {row.name}
+                        </span>
+                        <span className="shrink-0 text-sm font-semibold text-slate-600">
+                          {row.jobs.toLocaleString()} job{row.jobs === 1 ? "" : "s"}
+                        </span>
+                        <span className="w-24 shrink-0 text-right text-xs text-slate-500">
+                          {row.pages.toLocaleString()} pages
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
                 </div>
               )}
               {machines.length === 0 ? (
