@@ -263,17 +263,19 @@ export function FleetGraphs() {
     return listed.filter((m) => m.key === selectedKey);
   }, [listed, selectedKey]);
 
-  const series = useMemo(
-    () =>
-      filtered.map((m, i) => ({
-        key: seriesKey(m),
-        machineKey: m.key,
-        name: m.name,
-        color: PALETTE[i % PALETTE.length],
-        deviceId: m.deviceId,
-      })),
-    [filtered],
-  );
+  const series = useMemo(() => {
+    const colorOf = (m: MachineSummary): string => {
+      const idx = listed.findIndex((x) => x.key === m.key);
+      return PALETTE[(idx >= 0 ? idx : 0) % PALETTE.length];
+    };
+    return filtered.map((m) => ({
+      key: seriesKey(m),
+      machineKey: m.key,
+      name: m.name,
+      color: colorOf(m),
+      deviceId: m.deviceId,
+    }));
+  }, [filtered, listed]);
 
   const topUsage = useMemo(() => {
     const cpu: TopEntry[] = [];
