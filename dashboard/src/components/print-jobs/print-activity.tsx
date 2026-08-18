@@ -623,6 +623,12 @@ export function PrintActivity() {
             <div>
               <h2 className="text-sm font-medium text-slate-700">
                 {summaryRangeTitle(summaryRange)}
+                {chartData.length > 0 && (
+                  <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                    {chartData.reduce((s, b) => s + (Number(b.prints) || 0), 0).toLocaleString()}{" "}
+                    total
+                  </span>
+                )}
               </h2>
               <p className="mt-1 text-xs text-slate-500">
                 {summaryRange === "last24h"
