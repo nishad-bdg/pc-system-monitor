@@ -16,6 +16,7 @@ import {
 import {
   fetchGroups,
   fetchPrintJobs,
+  fetchPrintJobsByPrinter,
   fetchPrintSummary,
   fetchReports,
   fetchSubCategories,
@@ -29,6 +30,7 @@ import {
   SubCategory,
   subCategoryOf,
 } from "@/lib/api";
+import { downloadExportPdf } from "@/lib/export-pdf";
 import { DashboardShell } from "@/components/dashboard/shell";
 import { PrintingBadge } from "@/components/dashboard/printing-badge";
 import { useRealtime } from "@/components/realtime-provider";
@@ -192,6 +194,10 @@ export function PrintActivity() {
   const [pcRange, setPcRange] = useState<SummaryRange>("last24h");
   const [pcCustomFrom, setPcCustomFrom] = useState("");
   const [pcCustomTo, setPcCustomTo] = useState("");
+  const [printerRange, setPrinterRange] = useState<SummaryRange>("weekly");
+  const [printerCustomFrom, setPrinterCustomFrom] = useState("");
+  const [printerCustomTo, setPrinterCustomTo] = useState("");
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   const groupQuery = groupFilter || undefined;
 
@@ -235,6 +241,29 @@ export function PrintActivity() {
     queryKey: ["groups"],
     queryFn: () => fetchGroups(API_URL, apiToken ?? ""),
     enabled: !!apiToken,
+  });
+
+  const printerRangeWindow = useMemo(() => {
+    if (printerRange === "last24h") return null;
+    return summaryRangeFor(printerRange, printerCustomFrom, printerCustomTo);
+  }, [printerRange, printerCustomFrom, printerCustomTo]);
+
+  const { data: printByPrinter } = useQuery({
+    queryKey: [
+      "print-jobs-by-printer",
+      printerRange,
+      printerCustomFrom,
+      printerCustomTo,
+      groupFilter,
+    ],
+    queryFn: () =>
+      fetchPrintJobsByPrinter(API_URL, apiToken ?? "", {
+        fromTs: printerRangeWindow?.fromTs,
+        toTs: printerRangeWindow?.toTs,
+        groupId: groupFilter || undefined,
+      }),
+    enabled: !!apiToken,
+    refetchInterval: 60_000,
   });
 
   const { data: subCategories = [] } = useQuery({
@@ -369,6 +398,69 @@ export function PrintActivity() {
   }, [pcJobs]);
 
   const printerIp = useMemo(() => printerIpLookup(machines), [machines]);
+
+  const printerRows = useMemo(
+    () =>
+      (printByPrinter?.printers ?? []).map((p) => ({
+        printer: p.printer || "Unknown printer",
+        jobs: p.jobs,
+        pages: p.pages,
+        pcs: p.pcs ?? [],
+      })),
+    [printByPrinter],
+  );
+
+  const handlePrinterPdf = async () => {
+    if (pdfBusy || !apiToken) return;
+    setPdfBusy(true);
+    try {
+      const win = printerRangeWindow;
+      const span = win
+        ? `${new Date((win.fromTs ?? 0) * 1000).toLocaleDateString()} – ${new Date((win.toTs ?? Date.now() / 1000) * 1000).toLocaleDateString()}`
+        : "Last 24 hours";
+      const most = printerRows.length ? printerRows[0] : null;
+      await downloadExportPdf({
+        filename: `printer-report-${printerRange}-${Date.now()}.pdf`,
+        title: "Printer Usage Report",
+        subtitle: [
+          `${summaryRangeLabel(printerRange)} · ${span}`,
+          groupFilter
+            ? `Group: ${selectedGroupName}`
+            : "Group: All groups",
+          `${printerRows.length} printer${printerRows.length === 1 ? "" : "s"} used`,
+          `Generated ${new Date().toLocaleString()}`,
+        ],
+        stats: [
+          { label: "Total prints", value: (printByPrinter?.total_jobs ?? 0).toLocaleString() },
+          { label: "Total pages", value: (printByPrinter?.total_pages ?? 0).toLocaleString() },
+          {
+            label: "Most used",
+            value: most ? `${most.printer} (${most.jobs})` : "-",
+          },
+          {
+            label: "Top printer pages",
+            value: most ? most.pages.toLocaleString() : "-",
+          },
+        ],
+        tables: [
+          {
+            title: "Printers - jobs and pages",
+            head: ["Printer", "Jobs", "Pages", "Connected PC(s)"],
+            body: printerRows.map((p) => [
+              p.printer,
+              p.jobs.toLocaleString(),
+              p.pages.toLocaleString(),
+              p.pcs.length
+                ? p.pcs.filter(Boolean).join(", ")
+                : (printerIp.get(p.printer.trim().toLowerCase()) ?? "-"),
+            ]),
+          },
+        ],
+      });
+    } finally {
+      setPdfBusy(false);
+    }
+  };
 
   const isGroupOpen = (key: string) => openKeys[key] ?? true;
 
@@ -764,6 +856,122 @@ export function PrintActivity() {
               {groupFilter
                 ? "No PCs in this group, or none have printed in the selected range."
                 : `No print jobs ${pcRange === "last24h" ? "yet" : `in the ${summaryRangeLabel(pcRange)}`} — the per-PC chart fills in as jobs arrive.`}
+            </p>
+          )}
+        </div>
+
+        <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-medium text-slate-700">
+                Prints per printer
+                {printerRows.length > 0 && (
+                  <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                    {printerRows.reduce((s, p) => s + p.jobs, 0).toLocaleString()}{" "}
+                    total
+                  </span>
+                )}
+              </h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Job counts per printer from the print-job database — pick a
+                range and export the report as PDF.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="text-xs text-slate-500">
+                Range
+                <select
+                  value={printerRange}
+                  onChange={(e) =>
+                    setPrinterRange(e.target.value as SummaryRange)
+                  }
+                  className="mt-1 block min-w-36 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+                >
+                  {SUMMARY_RANGES.map((r) => (
+                    <option key={r.key} value={r.key}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {printerRange === "custom" && (
+                <>
+                  <label className="text-xs text-slate-500">
+                    From
+                    <input
+                      type="date"
+                      value={printerCustomFrom}
+                      onChange={(e) => setPrinterCustomFrom(e.target.value)}
+                      className="mt-1 block rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+                    />
+                  </label>
+                  <label className="text-xs text-slate-500">
+                    To
+                    <input
+                      type="date"
+                      value={printerCustomTo}
+                      onChange={(e) => setPrinterCustomTo(e.target.value)}
+                      className="mt-1 block rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+                    />
+                  </label>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={handlePrinterPdf}
+                disabled={pdfBusy || printerRows.length === 0}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {pdfBusy ? "Building…" : "Export PDF"}
+              </button>
+            </div>
+          </div>
+          {printerRows.length > 0 ? (
+            <div className="mt-3 h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={printerRows}
+                  margin={{ bottom: 48, left: 8, right: 8 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis
+                    dataKey="printer"
+                    fontSize={11}
+                    stroke="#94a3b8"
+                    interval={0}
+                    angle={-35}
+                    textAnchor="end"
+                    height={70}
+                  />
+                  <YAxis
+                    allowDecimals={false}
+                    fontSize={11}
+                    stroke="#94a3b8"
+                  />
+                  <Tooltip
+                    formatter={(value, _name, entry) => {
+                      const row = entry.payload as (typeof printerRows)[number];
+                      return [
+                        `${value} print${value === 1 ? "" : "s"} · ${row.pages} page${row.pages === 1 ? "" : "s"}`,
+                        "Jobs",
+                      ];
+                    }}
+                  />
+                  <Bar
+                    dataKey="jobs"
+                    radius={[4, 4, 0, 0]}
+                    fill="#2563eb"
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-slate-500">
+              No print jobs{" "}
+              {printerRange === "last24h"
+                ? "yet"
+                : `in the ${summaryRangeLabel(printerRange)}`}{" "}
+              — the per-printer chart fills in as the agent reports jobs.
             </p>
           )}
         </div>
