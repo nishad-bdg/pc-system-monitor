@@ -63,7 +63,7 @@ type HistPoint = {
   net: Record<string, number>;
 };
 
-type TopEntry = { name: string; deviceId?: string | null; value: number };
+type TopEntry = { key: string; name: string; deviceId?: string | null; value: number };
 
 function liveNetworkMbps(m: MachineSummary, live?: LiveMetricsSample | null): number {
   const send =
@@ -285,10 +285,10 @@ export function FleetGraphs() {
       const ramV = live?.ram_percent ?? m.latest.resources?.ram_percent;
       const netV = liveNetworkMbps(m, live);
       const printEvents = printEventsFor(m.deviceId).length;
-      if (cpuV != null) cpu.push({ name: m.name, deviceId: m.deviceId, value: cpuV });
-      if (ramV != null) ram.push({ name: m.name, deviceId: m.deviceId, value: ramV });
-      net.push({ name: m.name, deviceId: m.deviceId, value: netV });
-      if (printEvents > 0) printer.push({ name: m.name, deviceId: m.deviceId, value: printEvents });
+      if (cpuV != null) cpu.push({ key: m.key, name: m.name, deviceId: m.deviceId, value: cpuV });
+      if (ramV != null) ram.push({ key: m.key, name: m.name, deviceId: m.deviceId, value: ramV });
+      net.push({ key: m.key, name: m.name, deviceId: m.deviceId, value: netV });
+      if (printEvents > 0) printer.push({ key: m.key, name: m.name, deviceId: m.deviceId, value: printEvents });
     }
     const top = (rows: TopEntry[]) =>
       rows.sort((a, b) => b.value - a.value).slice(0, 5);
@@ -544,9 +544,14 @@ export function FleetGraphs() {
           ram={topUsage.ram}
           net={topUsage.net}
           printer={topUsage.printer}
+          selectedKey={selectedKey}
           onSelect={(deviceId) => {
             const m = listed.find((x) => x.deviceId === deviceId);
-            if (m) setPcKey(m.key);
+            if (!m) return;
+            // Clicking the already-selected PC in the top list shows all PCs
+            // again (toggle), same as the sidebar rows.
+            if (selectedKey === m.key) setPcKey("");
+            else setPcKey(m.key);
           }}
         />
         <UsageChart
@@ -556,6 +561,8 @@ export function FleetGraphs() {
           data={cpuData}
           series={series}
           empty={filtered.length === 0}
+          selectedKey={selectedKey}
+          onSelectKey={setPcKey}
         />
         <UsageChart
           title="RAM usage"
@@ -564,6 +571,8 @@ export function FleetGraphs() {
           data={ramData}
           series={series}
           empty={filtered.length === 0}
+          selectedKey={selectedKey}
+          onSelectKey={setPcKey}
         />
         <UsageChart
           title="Network usage"
@@ -572,12 +581,16 @@ export function FleetGraphs() {
           series={series}
           empty={filtered.length === 0}
           hint="Send + receive on the preferred NIC (live) or last report sample"
+          selectedKey={selectedKey}
+          onSelectKey={setPcKey}
         />
         <PrintingChart
           data={printHist}
           series={series}
           empty={filtered.length === 0}
           live={connected}
+          selectedKey={selectedKey}
+          onSelectKey={setPcKey}
         />
       </div>
     </DashboardShell>
@@ -589,12 +602,14 @@ function TopUsageSection({
   ram,
   net,
   printer,
+  selectedKey,
   onSelect,
 }: {
   cpu: TopEntry[];
   ram: TopEntry[];
   net: TopEntry[];
   printer: TopEntry[];
+  selectedKey: string;
   onSelect: (deviceId?: string | null) => void;
 }) {
   const cards: { title: string; unit: string; rows: TopEntry[] }[] = [
@@ -625,37 +640,44 @@ function TopUsageSection({
             </p>
           ) : (
             <ol className="mt-3 space-y-1">
-              {card.rows.map((entry, i) => (
-                <li key={`${entry.name}-${i}`}>
-                  <button
-                    type="button"
-                    onClick={() => onSelect(entry.deviceId)}
-                    className="flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left transition hover:bg-slate-50"
-                  >
-                    <span
-                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-                        i === 0
-                          ? "bg-amber-100 text-amber-700"
-                          : i === 1
-                            ? "bg-slate-200 text-slate-600"
-                            : i === 2
-                              ? "bg-orange-100 text-orange-700"
-                              : "bg-slate-100 text-slate-500"
+              {card.rows.map((entry, i) => {
+                const active = selectedKey === entry.key;
+                return (
+                  <li key={`${entry.name}-${i}`}>
+                    <button
+                      type="button"
+                      onClick={() => onSelect(entry.deviceId)}
+                      className={`flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left transition ${
+                        active
+                          ? "bg-blue-50 ring-1 ring-blue-200"
+                          : "hover:bg-slate-50"
                       }`}
                     >
-                      {i + 1}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
-                      {entry.name}
-                    </span>
-                    <span className="shrink-0 text-sm font-semibold text-blue-600">
-                      {card.unit === " print"
-                        ? `${Math.round(entry.value)}${card.unit}${Math.round(entry.value) === 1 ? "" : "s"}`
-                        : `${entry.value.toFixed(1)}${card.unit}`}
-                    </span>
-                  </button>
-                </li>
-              ))}
+                      <span
+                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                          i === 0
+                            ? "bg-amber-100 text-amber-700"
+                            : i === 1
+                              ? "bg-slate-200 text-slate-600"
+                              : i === 2
+                                ? "bg-orange-100 text-orange-700"
+                                : "bg-slate-100 text-slate-500"
+                        }`}
+                      >
+                        {i + 1}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
+                        {entry.name}
+                      </span>
+                      <span className="shrink-0 text-sm font-semibold text-blue-600">
+                        {card.unit === " print"
+                          ? `${Math.round(entry.value)}${card.unit}${Math.round(entry.value) === 1 ? "" : "s"}`
+                          : `${entry.value.toFixed(1)}${card.unit}`}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
             </ol>
           )}
         </div>
@@ -669,11 +691,15 @@ function PrintingChart({
   series,
   empty,
   live,
+  selectedKey,
+  onSelectKey,
 }: {
   data: { time: string; [key: string]: string | number }[];
   series: { key: string; name: string; color: string }[];
   empty: boolean;
   live: boolean;
+  selectedKey: string;
+  onSelectKey: (key: string) => void;
 }) {
   const totalPrints = data.reduce(
     (sum, row) =>
@@ -731,6 +757,10 @@ function PrintingChart({
               <Legend
                 wrapperStyle={{ fontSize: legendFontSize(series.length), lineHeight: `${legendFontSize(series.length) + 6}px` }}
                 iconSize={legendFontSize(series.length) - 2}
+                onClick={(entry) => {
+                  const s = series.find((x) => x.name === (entry as { value?: string }).value);
+                  if (s) onSelectKey(selectedKey === s.key ? "" : s.key);
+                }}
               />
               {series.map((s) => (
                 <Bar
@@ -739,6 +769,7 @@ function PrintingChart({
                   name={s.name}
                   stackId="prints"
                   fill={s.color}
+                  opacity={selectedKey && selectedKey !== s.key ? 0.25 : 1}
                   isAnimationActive={false}
                 />
               ))}
@@ -758,6 +789,8 @@ function UsageChart({
   series,
   empty,
   hint,
+  selectedKey,
+  onSelectKey,
 }: {
   title: string;
   unit: string;
@@ -766,6 +799,8 @@ function UsageChart({
   series: { key: string; name: string; color: string }[];
   empty: boolean;
   hint?: string;
+  selectedKey: string;
+  onSelectKey: (key: string) => void;
 }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
@@ -804,6 +839,10 @@ function UsageChart({
               <Legend
                 wrapperStyle={{ fontSize: legendFontSize(series.length), lineHeight: `${legendFontSize(series.length) + 6}px` }}
                 iconSize={legendFontSize(series.length) - 2}
+                onClick={(entry) => {
+                  const s = series.find((x) => x.name === (entry as { value?: string }).value);
+                  if (s) onSelectKey(selectedKey === s.key ? "" : s.key);
+                }}
               />
               {series.map((s) => (
                 <Line
@@ -812,7 +851,8 @@ function UsageChart({
                   dataKey={s.key}
                   name={s.name}
                   stroke={s.color}
-                  strokeWidth={2}
+                  strokeWidth={selectedKey && selectedKey !== s.key ? 1 : 2}
+                  strokeOpacity={selectedKey && selectedKey !== s.key ? 0.25 : 1}
                   dot={false}
                   isAnimationActive={false}
                   connectNulls
