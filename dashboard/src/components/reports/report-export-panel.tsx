@@ -18,6 +18,7 @@ import {
   groupOf,
   MachineSortKey,
   machineEmails,
+  printerIpLookup,
   machineMac,
   maxDiskPercent,
   networkTotalBytes,
@@ -372,6 +373,8 @@ export function ReportExportPanel() {
       maxCount: max,
     };
   }, [printByPrinter]);
+
+  const printerIp = useMemo(() => printerIpLookup(machines), [machines]);
 
   const lifetimePrintRows = useMemo(() => {
     return machines
@@ -1099,10 +1102,21 @@ export function ReportExportPanel() {
                         ? topPrinters.maxPrinter.join(", ")
                         : "—"}
                     </p>
-                    <p className="mt-0.5 text-xs text-slate-600">
-                      {topPrinters.maxPrinter.length
-                        ? `${topPrinters.maxCount} job${topPrinters.maxCount === 1 ? "" : "s"} in range`
-                        : "no jobs in range"}
+                    <p className="mt-0.5 truncate text-xs text-slate-600">
+                      {(() => {
+                        const topRow = printByPrinter?.printers
+                          ?.slice()
+                          .sort((a, b) => b.jobs - a.jobs)[0];
+                        if (!topRow) return "no jobs in range";
+                        const ip = printerIp.get(
+                          topRow.printer.trim().toLowerCase(),
+                        );
+                        return ip
+                          ? `${ip} · ${topPrinters.maxCount} job${topPrinters.maxCount === 1 ? "" : "s"} in range`
+                          : topRow.pcs?.length
+                            ? `via ${topRow.pcs.join(", ")} · ${topPrinters.maxCount} job${topPrinters.maxCount === 1 ? "" : "s"} in range`
+                            : `${topPrinters.maxCount} job${topPrinters.maxCount === 1 ? "" : "s"} in range`;
+                      })()}
                     </p>
                   </div>
                   <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
@@ -1191,6 +1205,12 @@ export function ReportExportPanel() {
                         </span>
                         <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
                           {row.printer}
+                        </span>
+                        <span className="hidden shrink-0 truncate text-xs text-slate-500 sm:block">
+                          {printerIp.get(row.printer.trim().toLowerCase()) ??
+                            (row.pcs?.length
+                              ? `via ${row.pcs.join(", ")}`
+                              : "")}
                         </span>
                         <span className="shrink-0 text-sm font-semibold text-slate-600">
                           {row.jobs.toLocaleString()} job{row.jobs === 1 ? "" : "s"}

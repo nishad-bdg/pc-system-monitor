@@ -1089,7 +1089,27 @@ export type PrintJobsByPrinterRow = {
   printer: string;
   jobs: number;
   pages: number;
+  pcs?: (string | null)[];
 };
+
+export function printerIpLookup(machines: MachineSummary[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const m of machines) {
+    const prv = m.latest.printers;
+    if (!prv) continue;
+    const groups = [
+      ...(prv.usb ?? []),
+      ...(prv.network ?? []),
+      ...(prv.other ?? []),
+    ];
+    for (const p of groups) {
+      if (!p.ip) continue;
+      const key = p.name.trim().toLowerCase();
+      if (key && !map.has(key)) map.set(key, p.ip);
+    }
+  }
+  return map;
+}
 
 export type PrintJobsByPrinter = {
   from_ts?: number | null;

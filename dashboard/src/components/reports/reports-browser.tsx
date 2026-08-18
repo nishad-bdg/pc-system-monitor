@@ -19,6 +19,7 @@ import {
   machineMac,
   maxDiskPercent,
   networkTotalBytes,
+  printerIpLookup,
   sortMachines,
   subCategoryOf,
   fmtAppVersion,
@@ -152,10 +153,12 @@ export function ReportsBrowser() {
     const rows = printByPrinter?.printers ?? [];
     const ranked = rows.slice().sort((a, b) => b.jobs - a.jobs);
     const max = ranked.length ? ranked[0].jobs : 0;
+    const topRow = ranked.find((r) => r.jobs === max);
     return {
       top: ranked.slice(0, 5),
       maxPrinter: ranked.filter((r) => r.jobs === max).map((r) => r.printer),
       maxCount: max,
+      topRow,
     };
   }, [printByPrinter]);
 
@@ -207,6 +210,8 @@ export function ReportsBrowser() {
     });
     return sortMachines(list, applied.sort);
   }, [data?.reports, applied, groups, subCategories]);
+
+  const printerIp = useMemo(() => printerIpLookup(machines), [machines]);
 
   const selected =
     (selectedKey && machines.find((m) => m.key === selectedKey)) ||
@@ -663,9 +668,23 @@ export function ReportsBrowser() {
                   Most used printer
                 </h3>
                 <p className="mt-1 text-xs text-slate-500">
-                  {topPrinters.maxPrinter.length
-                    ? `${topPrinters.maxPrinter.join(", ")} · ${topPrinters.maxCount} job${topPrinters.maxCount === 1 ? "" : "s"}`
-                    : "—"}{" "}
+                  {(() => {
+                    const r = topPrinters.topRow;
+                    if (!r) return "—";
+                    const ip = printerIp.get(r.printer.trim().toLowerCase());
+                    const loc = ip
+                      ? ip
+                      : r.pcs?.length
+                        ? `via ${r.pcs.join(", ")}`
+                        : "";
+                    return [
+                      topPrinters.maxPrinter.join(", "),
+                      loc,
+                      `${topPrinters.maxCount} job${topPrinters.maxCount === 1 ? "" : "s"}`,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ");
+                  })()}{" "}
                   · top printers by print-job count in the applied range/group.
                 </p>
               </div>
@@ -681,6 +700,10 @@ export function ReportsBrowser() {
                   </span>
                   <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">
                     {row.printer}
+                  </span>
+                  <span className="hidden shrink-0 truncate text-[10px] text-slate-500 sm:block">
+                    {printerIp.get(row.printer.trim().toLowerCase()) ??
+                      (row.pcs?.length ? `via ${row.pcs.join(", ")}` : "")}
                   </span>
                   <span className="shrink-0 text-xs font-semibold text-slate-600">
                     {row.jobs}

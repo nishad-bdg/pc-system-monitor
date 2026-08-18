@@ -964,6 +964,11 @@ def print_jobs_by_printer(
                         }
                     },
                     "printer": {"$last": "$printer"},
+                    "pcs": {
+                        "$addToSet": {
+                            "$ifNull": ["$pc_name", "$device_id", "Unknown PC"]
+                        }
+                    },
                 }
             },
             {"$sort": {"jobs": -1, "_id": 1}},
@@ -976,6 +981,14 @@ def print_jobs_by_printer(
                     or "Unknown printer",
                     "jobs": int(doc.get("jobs") or 0),
                     "pages": int(doc.get("pages") or 0),
+                    "pcs": sorted(
+                        [
+                            p
+                            for p in (doc.get("pcs") or [])
+                            if p and str(p).strip()
+                        ],
+                        key=lambda p: str(p).lower(),
+                    ),
                 }
             )
     except (ConnectionFailure, PyMongoError):

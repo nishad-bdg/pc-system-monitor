@@ -23,6 +23,7 @@ import {
   Group,
   groupMachines,
   groupOf,
+  printerIpLookup,
   MachineSummary,
   PrintJob,
   SubCategory,
@@ -342,21 +343,32 @@ export function PrintActivity() {
   );
 
   const topPrinters = useMemo(() => {
-    const counts = new Map<string, number>();
+    const counts = new Map<string, { jobs: number; pcs: Set<string> }>();
     for (const j of pcJobs) {
       const p = j.printer || "Unknown printer";
-      counts.set(p, (counts.get(p) ?? 0) + 1);
+      const cur = counts.get(p) ?? { jobs: 0, pcs: new Set<string>() };
+      cur.jobs += 1;
+      if (j.pc_name) cur.pcs.add(j.pc_name);
+      counts.set(p, cur);
     }
     const rows = [...counts.entries()]
-      .map(([printer, jobs]) => ({ printer, jobs }))
+      .map(([printer, v]) => ({
+        printer,
+        jobs: v.jobs,
+        pcs: [...v.pcs].sort((a, b) => a.localeCompare(b)),
+      }))
       .sort((a, b) => b.jobs - a.jobs || a.printer.localeCompare(b.printer));
     const max = rows.length ? rows[0].jobs : 0;
+    const topRow = rows.find((r) => r.jobs === max);
     return {
       top: rows.slice(0, 5),
       maxPrinter: rows.filter((r) => r.jobs === max).map((r) => r.printer),
       maxCount: max,
+      topRow,
     };
   }, [pcJobs]);
+
+  const printerIp = useMemo(() => printerIpLookup(machines), [machines]);
 
   const isGroupOpen = (key: string) => openKeys[key] ?? true;
 
@@ -658,10 +670,20 @@ export function PrintActivity() {
                       ? topPrinters.maxPrinter.join(", ")
                       : "—"}
                   </p>
-                  <p className="mt-0.5 text-xs text-slate-600">
-                    {topPrinters.maxPrinter.length
-                      ? `${topPrinters.maxCount} job${topPrinters.maxCount === 1 ? "" : "s"}`
-                      : "no jobs in the selected range"}
+                  <p className="mt-0.5 truncate text-xs text-slate-600">
+                    {(() => {
+                      const r = topPrinters.topRow;
+                      if (!r) return "no jobs in the selected range";
+                      const ip = printerIp.get(r.printer.trim().toLowerCase());
+                      const loc = ip
+                        ? ip
+                        : r.pcs.length
+                          ? `via ${r.pcs.join(", ")}`
+                          : "";
+                      return [loc, `${topPrinters.maxCount} job${topPrinters.maxCount === 1 ? "" : "s"}`]
+                        .filter(Boolean)
+                        .join(" · ");
+                    })()}
                   </p>
                 </div>
               </div>
@@ -688,6 +710,10 @@ export function PrintActivity() {
                         </span>
                         <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
                           {row.printer}
+                        </span>
+                        <span className="hidden shrink-0 truncate text-xs text-slate-500 sm:block">
+                          {printerIp.get(row.printer.trim().toLowerCase()) ??
+                            (row.pcs.length ? `via ${row.pcs.join(", ")}` : "")}
                         </span>
                         <span className="shrink-0 text-sm font-semibold text-slate-600">
                           {row.jobs} job{row.jobs === 1 ? "" : "s"}
