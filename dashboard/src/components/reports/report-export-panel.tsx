@@ -836,6 +836,24 @@ export function ReportExportPanel() {
             Sort by
           </p>
           <label className="block text-xs text-slate-400">
+            Top network user
+            <select
+              value={sort === "network" ? order : ""}
+              onChange={(e) => {
+                const v = e.target.value as SortOrder;
+                if (v === "asc" || v === "desc") {
+                  setSort("network");
+                  setOrder(v);
+                }
+              }}
+              className={inputClass}
+            >
+              <option value="">Not sorting by network</option>
+              <option value="desc">Descending (highest network first)</option>
+              <option value="asc">Ascending (lowest network first)</option>
+            </select>
+          </label>
+          <label className="block text-xs text-slate-400">
             Metric
             <select
               value={sort}
