@@ -1895,6 +1895,28 @@ def test_print_jobs_summary(monkeypatch):
     assert body["buckets"][1]["hour"] == "2026-08-15T11:00"
 
 
+def test_print_jobs_summary_date_range_bucket(monkeypatch):
+    _patch_db(monkeypatch)
+    monkeypatch.setattr(
+        db,
+        "print_jobs_bucket_counts",
+        lambda from_ts=None, to_ts=None, bucket="hour", group_ids=None: [
+            {"hour": "2026-08-14", "count": 2},
+            {"hour": "2026-08-15", "count": 7},
+        ],
+    )
+    resp = client.get(
+        "/print-jobs/summary?from_ts=1786800000&to_ts=1786973797&bucket=day",
+        headers=_auth_header(),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["bucket"] == "day"
+    assert body["from_ts"] == 1786800000
+    assert body["to_ts"] == 1786973797
+    assert body["buckets"][1]["count"] == 7
+
+
 def test_print_jobs_by_pc(monkeypatch):
     _patch_db(monkeypatch)
     monkeypatch.setattr(

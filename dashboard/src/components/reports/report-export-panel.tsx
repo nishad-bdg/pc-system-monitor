@@ -868,6 +868,7 @@ export function ReportExportPanel() {
               <option value="ssd">Most SSD capacity</option>
               <option value="hdd">Most HDD capacity</option>
               <option value="network">Most network usage</option>
+              <option value="prints">Most prints</option>
             </select>
           </label>
           <label className="block text-xs text-slate-400">

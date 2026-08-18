@@ -937,28 +937,76 @@ def print_jobs_hourly_counts(
     Buckets are keyed by local ISO hour string ("YYYY-MM-DDTHH:00"); entries
     count every job (not pages) over the lookback. Oldest first.
     """
+    return _print_jobs_bucket_counts(
+        hours=hours,
+        group_ids=group_ids,
+    )
+
+
+def print_jobs_bucket_counts(
+    from_ts: float | None = None,
+    to_ts: float | None = None,
+    bucket: str = "hour",
+    group_ids: list[str] | None = None,
+) -> list[dict]:
+    """Aggregate print jobs into time buckets for a date range.
+
+    `bucket` is one of "hour" | "day" | "month". When a range is given
+    (`from_ts`/`to_ts`) it filters by `created_at`; otherwise the current
+    hour fallback keeps the last-24h behaviour. Oldest first.
+    """
+    return _print_jobs_bucket_counts(
+        from_ts=from_ts,
+        to_ts=to_ts,
+        bucket=bucket,
+        group_ids=group_ids,
+    )
+
+
+def _print_jobs_bucket_counts(
+    hours: int = 24,
+    from_ts: float | None = None,
+    to_ts: float | None = None,
+    bucket: str = "hour",
+    group_ids: list[str] | None = None,
+) -> list[dict]:
+    """Shared aggregation for print-job time buckets (hour/day/month)."""
     results: list[dict] = []
-    if hours <= 0:
-        return results
-    start = time.time() - hours * 3600
-    match: dict = {"created_at": {"$gte": start}}
+    if bucket not in ("hour", "day", "month"):
+        bucket = "hour"
+    fmt = {
+        "hour": "%Y-%m-%dT%H:00",
+        "day": "%Y-%m-%d",
+        "month": "%Y-%m",
+    }[bucket]
+    match: dict = {}
+    if from_ts is not None or to_ts is not None:
+        created: dict = {}
+        if from_ts is not None:
+            created["$gte"] = from_ts
+        if to_ts is not None:
+            created["$lte"] = to_ts
+        match["created_at"] = created
+    else:
+        if hours <= 0:
+            return results
+        match["created_at"] = {"$gte": time.time() - hours * 3600}
     if group_ids is not None:
-        group_clause = _groups_filter(group_ids)
-        match["$and"] = [group_clause]
+        match["$and"] = [_groups_filter(group_ids)]
     try:
         pipeline = [
             {"$match": match},
             {
                 "$project": {
-                    "hour": {
+                    "bucket": {
                         "$dateToString": {
-                            "format": "%Y-%m-%dT%H:00",
+                            "format": fmt,
                             "date": {"$toDate": {"$multiply": ["$created_at", 1000]}},
                         }
                     },
                 }
             },
-            {"$group": {"_id": "$hour", "count": {"$sum": 1}}},
+            {"$group": {"_id": "$bucket", "count": {"$sum": 1}}},
             {"$sort": {"_id": 1}},
         ]
         for doc in _print_jobs().aggregate(pipeline):

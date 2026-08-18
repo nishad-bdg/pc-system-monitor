@@ -407,7 +407,8 @@ export type MachineSortKey =
   | "disk"
   | "ssd"
   | "hdd"
-  | "network";
+  | "network"
+  | "prints";
 
 export type SortOrder = "desc" | "asc";
 
@@ -432,6 +433,8 @@ export function sortMachines(
         return diskBytesByType(r, "hdd");
       case "network":
         return networkTotalBytes(r);
+      case "prints":
+        return totalPrints(r);
       case "last_seen":
       default:
         return r.created_at ?? 0;
@@ -1011,6 +1014,9 @@ export type PrintHourBucket = {
 
 export type PrintJobsSummary = {
   hours: number;
+  from_ts?: number | null;
+  to_ts?: number | null;
+  bucket?: string;
   buckets: PrintHourBucket[];
 };
 
@@ -1034,8 +1040,13 @@ export function fetchPrintSummary(
   apiUrl: string,
   apiToken: string,
   hours = 24,
+  range?: { fromTs?: number; toTs?: number; bucket?: string },
 ): Promise<PrintJobsSummary> {
-  return apiRequest(apiUrl, apiToken, `/print-jobs/summary?hours=${hours}`);
+  const params = new URLSearchParams({ hours: String(hours) });
+  if (range?.fromTs != null) params.set("from_ts", String(range.fromTs));
+  if (range?.toTs != null) params.set("to_ts", String(range.toTs));
+  if (range?.bucket) params.set("bucket", range.bucket);
+  return apiRequest(apiUrl, apiToken, `/print-jobs/summary?${params}`);
 }
 
 export type PrintJobsByPcRow = {

@@ -97,14 +97,30 @@ def get_print_jobs(
 @router.get("/summary")
 def print_jobs_summary(
     hours: int = 24,
+    from_ts: float | None = None,
+    to_ts: float | None = None,
+    bucket: str = "hour",
     user: CurrentUser = None,
 ) -> dict:
-    """Per-hour print-job counts over the last `hours` hours (oldest first)."""
-    counts = db.print_jobs_hourly_counts(
-        min(max(hours, 1), 720),
-        group_ids=_user_group_ids(user),
-    )
-    return {"hours": hours, "buckets": counts}
+    """Print-job counts bucketed over a range (oldest first).
+
+    Defaults to per-hour counts over the last `hours` hours (max 720). Pass
+    `from_ts`/`to_ts` (unix seconds) plus `bucket` ("hour" | "day" | "month")
+    for longer / custom ranges (e.g. weekly, monthly, yearly).
+    """
+    if from_ts is not None or to_ts is not None:
+        counts = db.print_jobs_bucket_counts(
+            from_ts=from_ts,
+            to_ts=to_ts,
+            bucket=bucket,
+            group_ids=_user_group_ids(user),
+        )
+    else:
+        counts = db.print_jobs_hourly_counts(
+            min(max(hours, 1), 720),
+            group_ids=_user_group_ids(user),
+        )
+    return {"hours": hours, "from_ts": from_ts, "to_ts": to_ts, "bucket": bucket, "buckets": counts}
 
 
 @router.get("/by-pc")

@@ -38,6 +38,72 @@ const MAX_BAR = "#059669";
 const MIN_BAR = "#d97706";
 const OTHER_BAR = "#2563eb";
 
+type SummaryRange =
+  | "last24h"
+  | "daily"
+  | "weekly"
+  | "monthly"
+  | "yearly"
+  | "custom";
+
+const SUMMARY_RANGES: { key: SummaryRange; label: string }[] = [
+  { key: "last24h", label: "Last 24 hours" },
+  { key: "daily", label: "Daily" },
+  { key: "weekly", label: "Weekly" },
+  { key: "monthly", label: "Monthly" },
+  { key: "yearly", label: "Yearly" },
+  { key: "custom", label: "Custom range" },
+];
+
+function startOfUtcDay(ts: number): number {
+  const d = new Date(ts * 1000);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) / 1000;
+}
+
+function startOfUtcMonth(ts: number): number {
+  const d = new Date(ts * 1000);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000;
+}
+
+function summaryRangeFor(
+  key: SummaryRange,
+  customFrom?: string,
+  customTo?: string,
+): { fromTs?: number; toTs?: number; bucket: string } {
+  const now = Math.floor(Date.now() / 1000);
+  const day = 86400;
+  switch (key) {
+    case "daily":
+      return { fromTs: startOfUtcDay(now), toTs: now, bucket: "hour" };
+    case "weekly":
+      return { fromTs: now - 7 * day, toTs: now, bucket: "day" };
+    case "monthly":
+      return { fromTs: startOfUtcMonth(now), toTs: now, bucket: "day" };
+    case "yearly":
+      return { fromTs: now - 365 * day, toTs: now, bucket: "month" };
+    case "custom": {
+      const from = customFrom ? new Date(customFrom + "T00:00:00").getTime() / 1000 : undefined;
+      const to = customTo ? new Date(customTo + "T23:59:59").getTime() / 1000 : undefined;
+      const spanDays = (to ?? now) - (from ?? 0);
+      const bucket =
+        spanDays <= 3 * day
+          ? "hour"
+          : spanDays <= 60 * day
+            ? "day"
+            : "month";
+      return { fromTs: from, toTs: to, bucket };
+    }
+    case "last24h":
+    default:
+      return { fromTs: now - 24 * 3600, toTs: now, bucket: "hour" };
+  }
+}
+
+function summaryRangeLabel(range: SummaryRange): string {
+  const hit = SUMMARY_RANGES.find((r) => r.key === range);
+  return hit ? hit.label : "Last 24 hours";
+}
+
 type PcPrintGroup = {
   key: string;
   name: string;
@@ -101,6 +167,9 @@ export function PrintActivity() {
   const [groupFilter, setGroupFilter] = useState("");
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [summaryRange, setSummaryRange] = useState<SummaryRange>("last24h");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
 
   const groupQuery = groupFilter || undefined;
 
@@ -128,8 +197,14 @@ export function PrintActivity() {
   });
 
   const { data: summary } = useQuery({
-    queryKey: ["print-summary"],
-    queryFn: () => fetchPrintSummary(API_URL, apiToken ?? "", 24),
+    queryKey: ["print-summary", summaryRange, customFrom, customTo],
+    queryFn: () => {
+      if (summaryRange === "last24h") {
+        return fetchPrintSummary(API_URL, apiToken ?? "", 24);
+      }
+      const range = summaryRangeFor(summaryRange, customFrom, customTo);
+      return fetchPrintSummary(API_URL, apiToken ?? "", 24, range);
+    },
     enabled: !!apiToken,
     refetchInterval: 60_000,
   });
@@ -353,7 +428,23 @@ export function PrintActivity() {
   );
 
   const chartData =
-    summary?.buckets.map((b) => ({ label: b.hour, prints: b.count })) ?? [];
+    summary?.buckets.map((b) => ({
+      label: b.hour,
+      prints: b.count,
+    })) ?? [];
+
+  const bucketTick = (v: string) => {
+    if (summaryRange === "yearly" || summaryRange === "custom") {
+      if (/^\d{4}-\d{2}$/.test(v)) return v;
+      return v.slice(0, 10);
+    }
+    return v.replace("T", "\n").replace(":00", "");
+  };
+
+  const chartEmptyMessage =
+    summary && summary.buckets.length === 0
+      ? `No prints in the ${summaryRangeLabel(summaryRange)} — the chart fills in as the agent reports jobs.`
+      : "No prints in the last 24 hours — the chart fills in as the agent reports jobs.";
 
   return (
     <DashboardShell
@@ -510,9 +601,56 @@ export function PrintActivity() {
         </div>
 
         <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
-          <h2 className="text-sm font-medium text-slate-700">
-            Print jobs per hour (last 24h)
-          </h2>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-medium text-slate-700">
+                Print jobs per hour (last 24h)
+              </h2>
+              <p className="mt-1 text-xs text-slate-500">
+                {summaryRange === "last24h"
+                  ? "Last 24 hours by default — switch to daily, weekly, monthly, yearly, or a custom date range."
+                  : `${summaryRangeLabel(summaryRange)} print-job counts.`}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="text-xs text-slate-500">
+                Range
+                <select
+                  value={summaryRange}
+                  onChange={(e) => setSummaryRange(e.target.value as SummaryRange)}
+                  className="mt-1 block min-w-36 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+                >
+                  {SUMMARY_RANGES.map((r) => (
+                    <option key={r.key} value={r.key}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {summaryRange === "custom" && (
+                <>
+                  <label className="text-xs text-slate-500">
+                    From
+                    <input
+                      type="date"
+                      value={customFrom}
+                      onChange={(e) => setCustomFrom(e.target.value)}
+                      className="mt-1 block rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+                    />
+                  </label>
+                  <label className="text-xs text-slate-500">
+                    To
+                    <input
+                      type="date"
+                      value={customTo}
+                      onChange={(e) => setCustomTo(e.target.value)}
+                      className="mt-1 block rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-blue-500/40 focus:border-blue-500 focus:ring-2"
+                    />
+                  </label>
+                </>
+              )}
+            </div>
+          </div>
           {chartData.length > 0 ? (
             <div className="mt-3 h-64">
               <ResponsiveContainer width="100%" height="100%">
@@ -522,10 +660,8 @@ export function PrintActivity() {
                     dataKey="label"
                     fontSize={10}
                     stroke="#94a3b8"
-                    tickFormatter={(v: string) =>
-                      v.replace("T", "\n").replace(":00", "")
-                    }
-                    interval="preserveStartEnd"
+                    tickFormatter={bucketTick}
+                    minTickGap={24}
                   />
                   <YAxis allowDecimals={false} fontSize={11} stroke="#94a3b8" />
                   <Tooltip
@@ -534,7 +670,9 @@ export function PrintActivity() {
                       "Jobs",
                     ]}
                     labelFormatter={(label) =>
-                      `${String(label).replace("T", " ").replace(":00", ":00")} UTC`
+                      `${String(label)
+                        .replace("T", " ")
+                        .replace(/:00$/, ":00")} UTC`
                     }
                   />
                   <Bar dataKey="prints" fill="#2563eb" radius={[4, 4, 0, 0]} />
@@ -542,10 +680,7 @@ export function PrintActivity() {
               </ResponsiveContainer>
             </div>
           ) : (
-            <p className="mt-3 text-sm text-slate-500">
-              No prints in the last 24 hours — the chart fills in as the agent
-              reports jobs.
-            </p>
+            <p className="mt-3 text-sm text-slate-500">{chartEmptyMessage}</p>
           )}
         </div>
 

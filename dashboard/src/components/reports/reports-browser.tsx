@@ -337,6 +337,7 @@ export function ReportsBrowser() {
               <option value="ram">Most RAM</option>
               <option value="disk">Most disk space used</option>
               <option value="network">Most network usage</option>
+              <option value="prints">Most prints</option>
               <option value="last_seen">Last seen</option>
             </select>
           </label>
