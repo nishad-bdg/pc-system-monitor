@@ -758,6 +758,7 @@ function PrintingChart({
               <Legend
                 wrapperStyle={{ fontSize: legendFontSize(series.length), lineHeight: `${legendFontSize(series.length) + 6}px` }}
                 iconSize={legendFontSize(series.length) - 2}
+                labelStyle={{ cursor: "pointer" }}
                 onClick={(entry) => {
                   const s = series.find((x) => x.name === (entry as { value?: string }).value);
                   if (s) onSelectKey(selectedKey === s.machineKey ? "" : s.machineKey ?? "");
@@ -840,6 +841,7 @@ function UsageChart({
               <Legend
                 wrapperStyle={{ fontSize: legendFontSize(series.length), lineHeight: `${legendFontSize(series.length) + 6}px` }}
                 iconSize={legendFontSize(series.length) - 2}
+                labelStyle={{ cursor: "pointer" }}
                 onClick={(entry) => {
                   const s = series.find((x) => x.name === (entry as { value?: string }).value);
                   if (s) onSelectKey(selectedKey === s.machineKey ? "" : s.machineKey ?? "");
