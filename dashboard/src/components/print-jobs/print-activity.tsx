@@ -104,6 +104,24 @@ function summaryRangeLabel(range: SummaryRange): string {
   return hit ? hit.label : "Last 24 hours";
 }
 
+function summaryRangeTitle(range: SummaryRange): string {
+  switch (range) {
+    case "daily":
+      return "Print jobs per hour (today)";
+    case "weekly":
+      return "Print jobs per day (last 7 days)";
+    case "monthly":
+      return "Print jobs per day (this month)";
+    case "yearly":
+      return "Print jobs per month (last 365 days)";
+    case "custom":
+      return "Print jobs for the custom range";
+    case "last24h":
+    default:
+      return "Print jobs per hour (last 24h)";
+  }
+}
+
 type PcPrintGroup = {
   key: string;
   name: string;
@@ -604,7 +622,7 @@ export function PrintActivity() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-sm font-medium text-slate-700">
-                Print jobs per hour (last 24h)
+                {summaryRangeTitle(summaryRange)}
               </h2>
               <p className="mt-1 text-xs text-slate-500">
                 {summaryRange === "last24h"

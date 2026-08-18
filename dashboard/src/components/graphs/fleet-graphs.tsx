@@ -97,7 +97,7 @@ function legendFontSize(seriesCount: number): number {
   return 9;
 }
 
-type TooltipSeries = { key: string; name: string; color: string };
+type TooltipSeries = { key: string; name: string; color: string; machineKey?: string };
 
 /**
  * Shared chart hover tooltip. Rows are tinted with each PC's series color so
@@ -267,6 +267,7 @@ export function FleetGraphs() {
     () =>
       filtered.map((m, i) => ({
         key: seriesKey(m),
+        machineKey: m.key,
         name: m.name,
         color: PALETTE[i % PALETTE.length],
         deviceId: m.deviceId,
@@ -695,7 +696,7 @@ function PrintingChart({
   onSelectKey,
 }: {
   data: { time: string; [key: string]: string | number }[];
-  series: { key: string; name: string; color: string }[];
+  series: { key: string; name: string; color: string; machineKey?: string }[];
   empty: boolean;
   live: boolean;
   selectedKey: string;
@@ -759,7 +760,7 @@ function PrintingChart({
                 iconSize={legendFontSize(series.length) - 2}
                 onClick={(entry) => {
                   const s = series.find((x) => x.name === (entry as { value?: string }).value);
-                  if (s) onSelectKey(selectedKey === s.key ? "" : s.key);
+                  if (s) onSelectKey(selectedKey === s.machineKey ? "" : s.machineKey ?? "");
                 }}
               />
               {series.map((s) => (
@@ -769,7 +770,7 @@ function PrintingChart({
                   name={s.name}
                   stackId="prints"
                   fill={s.color}
-                  opacity={selectedKey && selectedKey !== s.key ? 0.25 : 1}
+                  opacity={selectedKey && selectedKey !== s.machineKey ? 0.25 : 1}
                   isAnimationActive={false}
                 />
               ))}
@@ -796,7 +797,7 @@ function UsageChart({
   unit: string;
   domain?: [number, number];
   data: Record<string, string | number>[];
-  series: { key: string; name: string; color: string }[];
+  series: { key: string; name: string; color: string; machineKey?: string }[];
   empty: boolean;
   hint?: string;
   selectedKey: string;
@@ -841,7 +842,7 @@ function UsageChart({
                 iconSize={legendFontSize(series.length) - 2}
                 onClick={(entry) => {
                   const s = series.find((x) => x.name === (entry as { value?: string }).value);
-                  if (s) onSelectKey(selectedKey === s.key ? "" : s.key);
+                  if (s) onSelectKey(selectedKey === s.machineKey ? "" : s.machineKey ?? "");
                 }}
               />
               {series.map((s) => (
@@ -851,8 +852,8 @@ function UsageChart({
                   dataKey={s.key}
                   name={s.name}
                   stroke={s.color}
-                  strokeWidth={selectedKey && selectedKey !== s.key ? 1 : 2}
-                  strokeOpacity={selectedKey && selectedKey !== s.key ? 0.25 : 1}
+                  strokeWidth={selectedKey && selectedKey !== s.machineKey ? 1 : 2}
+                  strokeOpacity={selectedKey && selectedKey !== s.machineKey ? 0.25 : 1}
                   dot={false}
                   isAnimationActive={false}
                   connectNulls
