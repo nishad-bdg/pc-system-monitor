@@ -614,13 +614,42 @@ export function PrintActivity() {
       prints: b.count,
     })) ?? [];
 
-  const bucketTick = (v: string) => {
-    if (summaryRange === "yearly" || summaryRange === "custom") {
-      if (/^\d{4}-\d{2}$/.test(v)) return v;
-      return v.slice(0, 10);
-    }
-    return v.replace("T", "\n").replace(":00", "");
+  const formatBucketLocal = (v: string, full = false) => {
+    const bucket = summary?.bucket ?? "hour";
+    const parse = (): Date | null => {
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}:00$/.test(v))
+        return new Date(`${v}:00Z`);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(v))
+        return new Date(`${v}T00:00:00Z`);
+      if (/^\d{4}-\d{2}$/.test(v)) return new Date(`${v}-01T00:00:00Z`);
+      return null;
+    };
+    const d = parse();
+    if (!d) return v;
+    if (bucket === "hour")
+      return full
+        ? d.toLocaleString([], {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : d.toLocaleString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+    if (bucket === "day")
+      return d.toLocaleDateString([], {
+        month: "short",
+        day: "numeric",
+      });
+    return d.toLocaleDateString([], {
+      month: "short",
+      year: "numeric",
+    });
   };
+
+  const bucketTick = (v: string) => formatBucketLocal(v);
 
   const chartEmptyMessage =
     summary && summary.buckets.length === 0
@@ -1078,9 +1107,7 @@ export function PrintActivity() {
                       "Jobs",
                     ]}
                     labelFormatter={(label) =>
-                      `${String(label)
-                        .replace("T", " ")
-                        .replace(/:00$/, ":00")} UTC`
+                      formatBucketLocal(String(label), true)
                     }
                   />
                   <Bar dataKey="prints" fill="#2563eb" radius={[4, 4, 0, 0]} />
