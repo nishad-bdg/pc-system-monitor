@@ -45,12 +45,34 @@ import { isHighLiveLoad } from "./load-warning-badge";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
+function useLegendHidden(keys: string[]) {
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const toggle = (key: string) => {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  const clear = () => setHidden(new Set());
+  const isHidden = (key: string) => hidden.has(key);
+  const anyHidden = hidden.size > 0;
+  return { isHidden, toggle, clear, anyHidden };
+}
+
+function legendValue(entry: unknown): string {
+  const e = entry as { dataKey?: string | number; value?: string | number };
+  return String(e?.dataKey ?? e?.value ?? "");
+}
+
 export function MachineDetail({ machine }: { machine: MachineSummary }) {
   const host = machine.latest;
   const { isOnline, lastSeenFor, metricsFor, metricsHistoryFor } = useRealtime();
   const liveOnline = isOnline(machine.deviceId) ?? host.online;
   const liveLastSeen = lastSeenFor(machine.deviceId, host.last_seen);
   const live = metricsFor(machine.deviceId);
+  const legendHidden = useLegendHidden(["cpu", "ram", "swap"]);
   const [tab, setTab] = useState<
     | "summary"
     | "overview"
@@ -362,14 +384,30 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
 
           {host.security && <SecuritySection security={host.security} />}
 
-          <ChartCard title="CPU / RAM / Swap over time">
+          <ChartCard
+            title="CPU / RAM / Swap over time"
+            actions={
+              legendHidden.anyHidden ? (
+                <button
+                  type="button"
+                  onClick={legendHidden.clear}
+                  className="rounded-md px-2 py-0.5 text-[11px] font-semibold text-blue-600 hover:bg-blue-50"
+                >
+                  Clear
+                </button>
+              ) : undefined
+            }
+          >
             <ResponsiveContainer width="100%" height={280}>
               <LineChart data={timeSeries}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="time" fontSize={11} stroke="#94a3b8" />
                 <YAxis domain={[0, 100]} fontSize={11} stroke="#94a3b8" />
                 <Tooltip />
-                <Legend />
+                <Legend
+                  wrapperStyle={{ cursor: "pointer" }}
+                  onClick={(entry) => legendHidden.toggle(legendValue(entry))}
+                />
                 <Line
                   type="monotone"
                   dataKey="cpu"
@@ -377,6 +415,7 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
                   name="CPU %"
                   strokeWidth={2}
                   dot={false}
+                  strokeOpacity={legendHidden.isHidden("cpu") ? 0.15 : 1}
                 />
                 <Line
                   type="monotone"
@@ -385,6 +424,7 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
                   name="RAM %"
                   strokeWidth={2}
                   dot={false}
+                  strokeOpacity={legendHidden.isHidden("ram") ? 0.15 : 1}
                 />
                 <Line
                   type="monotone"
@@ -393,6 +433,7 @@ export function MachineDetail({ machine }: { machine: MachineSummary }) {
                   name="Swap %"
                   strokeWidth={2}
                   dot={false}
+                  strokeOpacity={legendHidden.isHidden("swap") ? 0.15 : 1}
                 />
               </LineChart>
             </ResponsiveContainer>
@@ -1233,6 +1274,8 @@ function NetworkSection({
   live?: LiveMetricsSample | null;
   liveSeries?: LiveEthPoint[];
 }) {
+  const legendLive = useLegendHidden(["send", "recv"]);
+  const legendHourly = useLegendHidden(["upload", "download"]);
   const hasRates = series.some((p) => p.upload > 0 || p.download > 0);
   const bytesSent = live?.bytes_sent ?? network?.bytes_sent;
   const bytesRecv = live?.bytes_recv ?? network?.bytes_recv;
@@ -1325,9 +1368,20 @@ function NetworkSection({
 
       {liveChart.length > 1 && (
         <div className="mt-6">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-            Live send / receive
-          </h3>
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+              Live send / receive
+            </h3>
+            {legendLive.anyHidden ? (
+              <button
+                type="button"
+                onClick={legendLive.clear}
+                className="rounded-md px-2 py-0.5 text-[11px] font-semibold text-blue-600 hover:bg-blue-50"
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={liveChart}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -1345,15 +1399,19 @@ function NetworkSection({
                   name,
                 ]}
               />
-              <Legend />
+              <Legend
+                wrapperStyle={{ cursor: "pointer" }}
+                onClick={(entry) => legendLive.toggle(legendValue(entry))}
+              />
               <Area
                 type="monotone"
                 dataKey="recv"
                 stroke="#2563eb"
                 fill="#93c5fd"
-                fillOpacity={0.45}
+                fillOpacity={legendLive.isHidden("recv") ? 0.05 : 0.45}
                 name="Receive"
                 strokeWidth={2}
+                strokeOpacity={legendLive.isHidden("recv") ? 0.15 : 1}
                 isAnimationActive={false}
               />
               <Area
@@ -1361,9 +1419,10 @@ function NetworkSection({
                 dataKey="send"
                 stroke="#ea580c"
                 fill="#fdba74"
-                fillOpacity={0.4}
+                fillOpacity={legendLive.isHidden("send") ? 0.05 : 0.4}
                 name="Send"
                 strokeWidth={2}
+                strokeOpacity={legendLive.isHidden("send") ? 0.15 : 1}
                 isAnimationActive={false}
               />
             </AreaChart>
@@ -1373,16 +1432,30 @@ function NetworkSection({
 
       {hasRates && (
         <div className="mt-6">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-            Hourly snapshots
-          </h3>
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+              Hourly snapshots
+            </h3>
+            {legendHourly.anyHidden ? (
+              <button
+                type="button"
+                onClick={legendHourly.clear}
+                className="rounded-md px-2 py-0.5 text-[11px] font-semibold text-blue-600 hover:bg-blue-50"
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={series}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis dataKey="time" fontSize={11} stroke="#94a3b8" />
               <YAxis fontSize={11} stroke="#94a3b8" unit=" KiB/s" />
               <Tooltip />
-              <Legend />
+              <Legend
+                wrapperStyle={{ cursor: "pointer" }}
+                onClick={(entry) => legendHourly.toggle(legendValue(entry))}
+              />
               <Line
                 type="monotone"
                 dataKey="upload"
@@ -1390,6 +1463,7 @@ function NetworkSection({
                 name="Send KiB/s"
                 strokeWidth={2}
                 dot={false}
+                strokeOpacity={legendHourly.isHidden("upload") ? 0.15 : 1}
               />
               <Line
                 type="monotone"
@@ -1398,6 +1472,7 @@ function NetworkSection({
                 name="Receive KiB/s"
                 strokeWidth={2}
                 dot={false}
+                strokeOpacity={legendHourly.isHidden("download") ? 0.15 : 1}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -1857,6 +1932,7 @@ function ProcessesSection({
   cpuSeries: { time: string; cpu: number; ram: number; swap: number }[];
   bandwidthSeries: { time: string; upload: number; download: number }[];
 }) {
+  const legendUsage = useLegendHidden(["cpu", "ram", "recv", "send"]);
   const liveCount =
     (live?.cpu?.length ?? 0) +
     (live?.ram?.length ?? 0) +
@@ -1910,15 +1986,26 @@ function ProcessesSection({
           <h2 className="text-sm font-medium text-slate-700">
             Process &amp; network usage over time
           </h2>
-          <span
-            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-              hasLiveHistory || liveOnline
-                ? "bg-emerald-50 text-emerald-700"
-                : "bg-slate-100 text-slate-500"
-            }`}
-          >
-            {hasLiveHistory || liveOnline ? "Live" : "Last report"}
-          </span>
+          <div className="flex items-center gap-2">
+            {legendUsage.anyHidden ? (
+              <button
+                type="button"
+                onClick={legendUsage.clear}
+                className="rounded-md px-2 py-0.5 text-[11px] font-semibold text-blue-600 hover:bg-blue-50"
+              >
+                Clear
+              </button>
+            ) : null}
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                hasLiveHistory || liveOnline
+                  ? "bg-emerald-50 text-emerald-700"
+                  : "bg-slate-100 text-slate-500"
+              }`}
+            >
+              {hasLiveHistory || liveOnline ? "Live" : "Last report"}
+            </span>
+          </div>
         </div>
         <p className="mt-1 text-xs text-slate-500">
           {hasLiveHistory || liveOnline
@@ -1957,7 +2044,10 @@ function ProcessesSection({
                     return [`${Number(value ?? 0).toFixed(2)} Mbps`, name];
                   }}
                 />
-                <Legend />
+                <Legend
+                  wrapperStyle={{ cursor: "pointer" }}
+                  onClick={(entry) => legendUsage.toggle(legendValue(entry))}
+                />
                 {hasLiveHistory ? (
                   <>
                     <Line
@@ -1968,6 +2058,7 @@ function ProcessesSection({
                       name="CPU %"
                       strokeWidth={2}
                       dot={false}
+                      strokeOpacity={legendUsage.isHidden("cpu") ? 0.15 : 1}
                       isAnimationActive={false}
                     />
                     <Line
@@ -1978,6 +2069,7 @@ function ProcessesSection({
                       name="RAM %"
                       strokeWidth={2}
                       dot={false}
+                      strokeOpacity={legendUsage.isHidden("ram") ? 0.15 : 1}
                       isAnimationActive={false}
                     />
                     <Line
@@ -1988,6 +2080,7 @@ function ProcessesSection({
                       name="Receive Mbps"
                       strokeWidth={2}
                       dot={false}
+                      strokeOpacity={legendUsage.isHidden("recv") ? 0.15 : 1}
                       isAnimationActive={false}
                     />
                     <Line
@@ -1998,6 +2091,7 @@ function ProcessesSection({
                       name="Send Mbps"
                       strokeWidth={2}
                       dot={false}
+                      strokeOpacity={legendUsage.isHidden("send") ? 0.15 : 1}
                       isAnimationActive={false}
                     />
                   </>
@@ -2011,6 +2105,7 @@ function ProcessesSection({
                       name="CPU %"
                       strokeWidth={2}
                       dot={false}
+                      strokeOpacity={legendUsage.isHidden("cpu") ? 0.15 : 1}
                     />
                     <Line
                       yAxisId="percent"
@@ -2020,6 +2115,7 @@ function ProcessesSection({
                       name="RAM %"
                       strokeWidth={2}
                       dot={false}
+                      strokeOpacity={legendUsage.isHidden("ram") ? 0.15 : 1}
                     />
                   </>
                 )}
@@ -2275,14 +2371,19 @@ function StatCard({
 
 function ChartCard({
   title,
+  actions,
   children,
 }: {
   title: string;
+  actions?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50">
-      <h2 className="mb-4 text-sm font-medium text-slate-700">{title}</h2>
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-sm font-medium text-slate-700">{title}</h2>
+        {actions}
+      </div>
       {children}
     </div>
   );
