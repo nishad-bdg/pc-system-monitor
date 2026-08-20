@@ -40,6 +40,18 @@ const TABLE_PAGE_SIZE = 25;
 const MAX_BAR = "#059669";
 const MIN_BAR = "#d97706";
 const OTHER_BAR = "#2563eb";
+const PRINTER_PALETTE = [
+  "#2563eb",
+  "#7c3aed",
+  "#db2777",
+  "#ea580c",
+  "#ca8a04",
+  "#16a34a",
+  "#0d9488",
+  "#4f46e5",
+  "#dc2626",
+  "#0891b2",
+];
 
 type SummaryRange =
   | "last24h"
@@ -968,8 +980,14 @@ export function PrintActivity() {
                   <Bar
                     dataKey="jobs"
                     radius={[4, 4, 0, 0]}
-                    fill="#2563eb"
-                  />
+                  >
+                    {printerRows.map((row, i) => (
+                      <Cell
+                        key={`${row.printer}-${i}`}
+                        fill={PRINTER_PALETTE[i % PRINTER_PALETTE.length]}
+                      />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
